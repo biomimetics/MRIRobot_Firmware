@@ -1,0 +1,47 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+  #include <stdio.h>
+=}
+
+reactor Switches(sample_period: time = 100 ms) {
+  timer trigger(0, sample_period)
+  output[7] read: bool
+
+  preamble {=
+    static void Switch_GPIO_Init(void) {
+          GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+          __HAL_RCC_GPIOA_CLK_ENABLE();
+
+          GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12;
+          GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+          GPIO_InitStruct.Pull = GPIO_NOPULL;
+          HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+        }
+  =}
+
+  reaction(startup) {=
+    Switch_GPIO_Init();
+  =}
+
+  // Update switch values
+  reaction(trigger) -> read {=
+    lf_set(read[0], HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4));
+    lf_set(read[1], HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5));
+    lf_set(read[2], HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6));
+    lf_set(read[3], HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7));
+    lf_set(read[4], HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8));
+    lf_set(read[5], HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11));
+    lf_set(read[6], HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12));
+    // lf_set(read[5], HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_4));
+  =}
+}

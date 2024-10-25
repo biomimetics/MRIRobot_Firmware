@@ -1,0 +1,386 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include <stdio.h>
+=}
+
+reactor USM {
+  input set_speed_0: float
+  input set_speed_1: float
+  input set_speed_2: float
+  input set_speed_3: float
+  input set_speed_4: float
+  input set_speed_5: float
+
+  preamble {=
+    TIM_HandleTypeDef htim1;
+    TIM_HandleTypeDef htim2;
+    TIM_HandleTypeDef htim3;
+    TIM_HandleTypeDef htim4;
+
+    int MAX_SPEED[6]        =    {500, 500, 500, 500, 500, 500};
+    float SPEED_SCALE[6]    =    {1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+
+
+    static void MX_TIM1_Init(void) {
+      TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+      TIM_MasterConfigTypeDef sMasterConfig = {0};
+      TIM_OC_InitTypeDef sConfigOC = {0};
+      TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
+
+      htim1.Instance = TIM1;
+      htim1.Init.Prescaler = 0;
+      htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+      htim1.Init.Period = 1000;
+      htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+      htim1.Init.RepetitionCounter = 0;
+      htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+      if (HAL_TIM_Base_Init(&htim1) != HAL_OK) {
+        Error_Handler();
+      }
+      sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+      if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      if (HAL_TIM_PWM_Init(&htim1) != HAL_OK) {
+        Error_Handler();
+      }
+      sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+      sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+      if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      sConfigOC.OCMode = TIM_OCMODE_PWM1;
+      sConfigOC.Pulse = 0;
+      sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+      sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+      sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+      sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+      sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+      if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+      }
+      if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK) {
+        Error_Handler();
+      }
+      sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+      sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+      sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+      sBreakDeadTimeConfig.DeadTime = 0;
+      sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+      sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+      sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+      if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK) {
+        Error_Handler();
+      }
+
+      HAL_TIM_MspPostInit(&htim1);
+
+    }
+
+    static void MX_TIM2_Init(void) {
+      TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+      TIM_MasterConfigTypeDef sMasterConfig = {0};
+      TIM_OC_InitTypeDef sConfigOC = {0};
+
+      htim2.Instance = TIM2;
+      htim2.Init.Prescaler = 0;
+      htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+      htim2.Init.Period = 1000;
+      htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+      htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+      if (HAL_TIM_Base_Init(&htim2) != HAL_OK) {
+        Error_Handler();
+      }
+      sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+      if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      if (HAL_TIM_PWM_Init(&htim2) != HAL_OK) {
+        Error_Handler();
+      }
+      sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+      sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+      if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      sConfigOC.OCMode = TIM_OCMODE_PWM1;
+      sConfigOC.Pulse = 0;
+      sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+      sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+      if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK) {
+        Error_Handler();
+      }
+      HAL_TIM_MspPostInit(&htim2);
+    }
+
+
+    static void MX_TIM3_Init(void) {
+      TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+      TIM_MasterConfigTypeDef sMasterConfig = {0};
+      TIM_OC_InitTypeDef sConfigOC = {0};
+
+      htim3.Instance = TIM3;
+      htim3.Init.Prescaler = 0;
+      htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+      htim3.Init.Period = 1000;
+      htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+      htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+      if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
+        Error_Handler();
+      }
+      sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+      if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      if (HAL_TIM_PWM_Init(&htim3) != HAL_OK) {
+        Error_Handler();
+      }
+      sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+      sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+      if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      sConfigOC.OCMode = TIM_OCMODE_PWM1;
+      sConfigOC.Pulse = 0;
+      sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+      sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+      if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+      }
+      if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK) {
+        Error_Handler();
+      }
+      HAL_TIM_MspPostInit(&htim3);
+    }
+
+
+    static void MX_TIM4_Init(void) {
+      TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+      TIM_MasterConfigTypeDef sMasterConfig = {0};
+      TIM_OC_InitTypeDef sConfigOC = {0};
+
+      htim4.Instance = TIM4;
+      htim4.Init.Prescaler = 0;
+      htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+      htim4.Init.Period = 1000;
+      htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+      htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+      if (HAL_TIM_Base_Init(&htim4) != HAL_OK) {
+        Error_Handler();
+      }
+      sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+      if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      if (HAL_TIM_PWM_Init(&htim4) != HAL_OK) {
+        Error_Handler();
+      }
+      sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+      sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+      if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      sConfigOC.OCMode = TIM_OCMODE_PWM1;
+      sConfigOC.Pulse = 0;
+      sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+      sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+      if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+      }
+      if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK) {
+        Error_Handler();
+      }
+      HAL_TIM_MspPostInit(&htim4);
+
+    }
+
+    static void USM_GPIO_Init(void) {
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOA_CLK_ENABLE();
+      __HAL_RCC_GPIOB_CLK_ENABLE();
+      __HAL_RCC_GPIOC_CLK_ENABLE();
+
+      //+----------------------------------------------------------------+
+      //  Name,       Direction,    Enable
+      //  USM_0,      PA7,          PA6
+      //  USM_1,      PA12,         PA11
+      //  USM_2,      PC9,          PC8
+      //  USM_3,      PB2,          PB1
+      //  USM_4,      PA15,         PB0
+      //  USM_5,      PB14,         PB13
+      //+----------------------------------------------------------------+
+
+      // Write reset value pins
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_15, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_14, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
+
+      // Configure output pins (DIR/EN)
+      GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_15;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+      GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_13|GPIO_PIN_14;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+      GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+      // Configure input pins (ON/OFF Switch)
+      GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    }
+
+    static int min(int a, int b) {
+      return a<b? a: b;
+    }
+
+    static int max(int a, int b) {
+      return a>b? a: b;
+    }
+  =}
+
+  reaction(startup) {=
+    MX_TIM1_Init();
+    MX_TIM2_Init();
+    MX_TIM3_Init();
+    MX_TIM4_Init();
+
+    USM_GPIO_Init();
+
+    // Initially set all enable values to 0
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, 0);  // for USM0
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, 0); // for USM1
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, 0);  // for USM2
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, 0);  // for USM3
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, 0);  // for USM4
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, 0); // for USM5
+
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1); // USM_0, PA8
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1); // USM_1, PB6
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1); // USM_2, PB4
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2); // USM_3, PB5
+    HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2); // USM_4, PB3
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3); // USM_5, PA10
+  =}
+
+  reaction(set_speed_0, set_speed_1, set_speed_2, set_speed_3, set_speed_4, set_speed_5) {=
+    // Set USM direction values
+    // For some reason, setting the motor direction doesnt work unless we add a small delay in between
+    // Update: It seems like moving the direction set above the enable pins resolves this issue
+    //      Though I am still not sure why this is happening
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7,  set_speed_0->value >= 0);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, set_speed_1->value >= 0);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9,  set_speed_2->value >= 0);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,  set_speed_3->value >= 0);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, set_speed_4->value >= 0);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, set_speed_5->value >= 0);
+
+
+    int en_usm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0);
+    // printf("enable: %d \r\n", en_usm);
+
+    float USM_LIMIT = 0.01;
+    float USM_MIN_SPEED = 3;
+
+    // Set USM enable values
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,  (set_speed_0->value > USM_LIMIT || set_speed_0->value < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, (set_speed_1->value > USM_LIMIT || set_speed_1->value < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8,  (set_speed_2->value > USM_LIMIT || set_speed_2->value < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,  (set_speed_3->value > USM_LIMIT || set_speed_3->value < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,  (set_speed_4->value > USM_LIMIT || set_speed_4->value < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, (set_speed_5->value > USM_LIMIT || set_speed_5->value < -USM_LIMIT) && en_usm);
+
+
+    int p = 0;
+
+    // Set period for USM0
+    // +--------------------------------------------------------------------------+
+    if(set_speed_0->value < 0)
+      p = (int)((1000 * max(USM_MIN_SPEED, -set_speed_0->value) * SPEED_SCALE[0])/100);
+    else
+      p = (int)((1000 * max(USM_MIN_SPEED, set_speed_0->value) * SPEED_SCALE[0])/100);
+
+    p = (p > MAX_SPEED[0])? MAX_SPEED[0]: p;
+    TIM1->CCR1 = p;
+    // +--------------------------------------------------------------------------+
+
+
+    // Set period for USM1
+    // +--------------------------------------------------------------------------+
+    if(set_speed_1->value < 0)
+      p = (int)((1000 * max(USM_MIN_SPEED, -set_speed_1->value) * SPEED_SCALE[1])/100);
+    else
+      p = (int)((1000 * max(USM_MIN_SPEED, set_speed_1->value) * SPEED_SCALE[1])/100);
+
+    p = (p > MAX_SPEED[1])? MAX_SPEED[0]: p;
+    TIM4->CCR1 = p;
+    // +--------------------------------------------------------------------------+
+
+
+    // Set period for USM2
+    // +--------------------------------------------------------------------------+
+    if(set_speed_2->value < 0)
+      p = (int)((1000 * max(USM_MIN_SPEED, -set_speed_2->value) * SPEED_SCALE[2])/100);
+    else
+      p = (int)((1000 * max(USM_MIN_SPEED, set_speed_2->value) * SPEED_SCALE[2])/100);
+
+    p = (p > MAX_SPEED[2])? MAX_SPEED[2]: p;
+    TIM3->CCR1 = p;
+    // +--------------------------------------------------------------------------+
+
+
+    // Set period for USM3
+    // +--------------------------------------------------------------------------+
+    if(set_speed_3->value < 0)
+      p = (int)((1000 * max(USM_MIN_SPEED, -set_speed_3->value) * SPEED_SCALE[3])/100);
+    else
+      p = (int)((1000 * max(USM_MIN_SPEED, set_speed_3->value) * SPEED_SCALE[3])/100);
+
+    p = (p > MAX_SPEED[3])? MAX_SPEED[3]: p;
+    TIM3->CCR2 = p;
+    // +--------------------------------------------------------------------------+
+
+
+    // Set period for USM4
+    // +--------------------------------------------------------------------------+
+    if(set_speed_4->value < 0)
+      p = (int)((1000 * max(USM_MIN_SPEED, -set_speed_4->value) * SPEED_SCALE[4])/100);
+    else
+      p = (int)((1000 * max(USM_MIN_SPEED, set_speed_4->value) * SPEED_SCALE[4])/100);
+
+    p = (p > MAX_SPEED[4])? MAX_SPEED[4]: p;
+    TIM2->CCR2 = p;
+    // +--------------------------------------------------------------------------+
+
+
+    // Set period for USM5
+    // +--------------------------------------------------------------------------+
+    if(set_speed_5->value < 0)
+      p = (int)((1000 * max(USM_MIN_SPEED, -set_speed_5->value) * SPEED_SCALE[5])/100);
+    else
+      p = (int)((1000 * max(USM_MIN_SPEED, set_speed_5->value) * SPEED_SCALE[5])/100);
+
+    p = (p > MAX_SPEED[5])? MAX_SPEED[5]: p;
+    TIM1->CCR3 = p;
+    // +--------------------------------------------------------------------------+
+  =}
+}

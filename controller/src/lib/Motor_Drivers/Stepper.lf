@@ -1,0 +1,141 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include <stdio.h>
+=}
+
+reactor Stepper {
+  input set_speed_0: float
+  input set_speed_1: float
+
+  preamble {=
+    TIM_HandleTypeDef htim8;
+    extern TIM_HandleTypeDef htim4;
+
+    static int motor_en0 = 1;
+    static int motor_en1 = 1;
+
+    static int counter = 0;
+
+    static void MX_TIM8_Init(void) {
+      TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+      TIM_MasterConfigTypeDef sMasterConfig = {0};
+      TIM_OC_InitTypeDef sConfigOC = {0};
+      TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
+
+      htim8.Instance = TIM8;
+      htim8.Init.Prescaler = 0;
+      htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
+      htim8.Init.Period = 65535;
+      htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+      htim8.Init.RepetitionCounter = 0;
+      htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+      if (HAL_TIM_Base_Init(&htim8) != HAL_OK) {
+        Error_Handler();
+      }
+      sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+      if (HAL_TIM_ConfigClockSource(&htim8, &sClockSourceConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      if (HAL_TIM_PWM_Init(&htim8) != HAL_OK) {
+        Error_Handler();
+      }
+      sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+      sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+      if (HAL_TIMEx_MasterConfigSynchronization(&htim8, &sMasterConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      sConfigOC.OCMode = TIM_OCMODE_PWM1;
+      sConfigOC.Pulse = 0;
+      sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+      sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+      sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+      sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+      sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+      if (HAL_TIM_PWM_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+      }
+      sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+      sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+      sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+      sBreakDeadTimeConfig.DeadTime = 0;
+      sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+      sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+      sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+      if (HAL_TIMEx_ConfigBreakDeadTime(&htim8, &sBreakDeadTimeConfig) != HAL_OK) {
+        Error_Handler();
+      }
+      HAL_TIM_MspPostInit(&htim8);
+    }
+
+
+    static void Stepper_GPIO_Init(void) {
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOC_CLK_ENABLE();
+      // Name, Pulse, Direction
+      // Stepper 1, PC6       --> Mapped to timer 8.1
+      // Stepper 2, PB7       --> Mapped to timer 4.2
+
+      /*Configure GPIO pin Output Level */
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5|GPIO_PIN_13, GPIO_PIN_RESET);
+
+      /*Configure GPIO pins : PC5 PC13*/
+      GPIO_InitStruct.Pin = GPIO_PIN_5|GPIO_PIN_13;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    }
+  =}
+
+  reaction(startup) {=
+    MX_TIM8_Init();
+    Stepper_GPIO_Init();
+
+    HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
+  =}
+
+
+  // Stepper motors are current disabled
+  reaction(set_speed_0, set_speed_1) {=
+    // Set Stepper Pulse and Dir variables
+    int speed_1;
+    int speed_2;
+    if(set_speed_0->value < 0) { // Use TIM8
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, 0);
+      speed_1 = (int)((5000 * (101 + set_speed_0->value))/100) + 1700;
+    } else {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5, 1);
+      speed_1 = (int)((5000 * (101 - set_speed_0->value))/100) + 1700;
+    }
+    // TIM8->ARR = speed_1;
+    // TIM8->CCR1 = speed_1/2;
+
+    if(set_speed_1->value < 0) { // Use TIM14
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, 0);
+      speed_2 = (int)((5000 * (101 + set_speed_1->value))/100) + 1400;
+    } else {
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, 1);
+      speed_2 = (int)((5000 * (101 - set_speed_1->value))/100) + 1400;
+    }
+    // TIM14->ARR = speed_2;
+    // TIM14->CCR1 = speed_2/2;
+
+
+    // Set Stepper enable values
+    // if(set_speed_0->value < 1 && set_speed_0->value > -1) {
+    //   TIM8->CCR1 = 0;
+    // }
+    // if (set_speed_1->value < 1 && set_speed_1->value > -1) {
+    //   TIM14->CCR1 = 0;
+    // }
+  =}
+}

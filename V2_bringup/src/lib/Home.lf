@@ -1,0 +1,45 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+import Switches from "Switches.lf"
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+  #include <stdio.h>
+=}
+
+reactor Home(sample_period: time = 15 ms) {
+  timer trigger(0, sample_period)
+
+  input[7] current_pos: float
+  input[7] sea_pos: float
+
+  output[7] motor_speed: float
+
+  state is_home: int[7] = {0, 0, 0, 0, 0, 0, 0}
+  // state is_home: int[7] = {1, 1, 1, 1, 1, 1, 1}
+  state home_speed: float[7] = {-20, -10, 100, 0, 30, 30, 30}
+
+  state last_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state last_sea: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state pos_diff: float[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state diffzero_cnt: int[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state update_cnt: int = 0
+
+  // Optional switches for homing
+  homing_switches = new Switches()
+
+  reaction(current_pos, sea_pos, homing_switches.read) -> motor_speed {=
+    for(int i=0; i<7; i++) {
+      lf_set(motor_speed[i], 0);
+    }
+  =}
+}

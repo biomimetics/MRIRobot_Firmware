@@ -1,0 +1,137 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+import Switches from "Switches.lf"
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+  #include <stdio.h>
+=}
+
+reactor Home(sample_period: time = 15 ms) {
+  timer trigger(0, sample_period)
+
+  input[6] current_pos: float
+  input[6] sea_pos: float
+
+  output[6] motor_speed: float
+
+  // state is_home: int[6] = {0, 0, 0, 0, 1, 1}
+  state is_home: int[6] = {1, 1, 1, 1, 1, 1}
+  state home_speed: float[6] = {-20, -10, 100, 0, 30, 30}
+
+  state last_pos: float[6] = {0, 0, 0, 0, 0, 0}
+  state last_sea: float[6] = {0, 0, 0, 0, 0, 0}
+  state pos_diff: float[6] = {0, 0, 0, 0, 0, 0}
+
+  state diffzero_cnt: int[6] = {0, 0, 0, 0, 0, 0}
+
+  state update_cnt: int = 0
+
+  homing_switches = new Switches()            // Optional switches for homing
+
+  reaction(current_pos, sea_pos, homing_switches.read) -> motor_speed {=
+    float SEA_LIM_0 = 0.08;
+    float SEA_LIM_1 = 0.035;
+    float DIFF_LIM = 0.1;
+
+    if ( self->update_cnt > 4) {
+      for (int i=0; i<6; i++) {
+        self->pos_diff[i] = current_pos[i]->value - self->last_pos[i];
+        self->last_pos[i] = current_pos[i]->value;
+      }
+       self->update_cnt = 0;
+    } else {
+       self->update_cnt ++;
+    }
+
+
+    // Check home condidions
+    if(self->is_home[0] != 0) {
+      if (self->is_home[0] == 1){
+        self->diffzero_cnt[0] = (sea_pos[0]->value > SEA_LIM_0)?self->diffzero_cnt[0]+1:0;
+        self->is_home[0] = (self->diffzero_cnt[0] >= 30) ? 2:1;
+      } else if (self->is_home[0] == 2){
+        self->home_speed[0] = 5;
+        self->is_home[0] = (sea_pos[0]->value > 0) ? 2:3;
+      } else {
+        self->home_speed[0] = -5;
+        self->is_home[0] = (sea_pos[0]->value < 0) ? 3:0;
+      }
+    }
+
+    if(self->is_home[1] != 0) {
+      if (self->is_home[1] == 1){
+        self->diffzero_cnt[1] = (sea_pos[1]->value > SEA_LIM_1)?self->diffzero_cnt[1]+1:0;
+        self->is_home[1] = (self->diffzero_cnt[1] >= 10) ? 2:1;
+      } else if (self->is_home[1] == 2){
+        self->home_speed[1] = 7;
+        self->is_home[1] = (sea_pos[1]->value > 0) ? 2:3;
+      } else {
+        self->home_speed[1] = -7;
+        self->is_home[1] = (sea_pos[1]->value < 0) ? 3:0;
+      }
+    }
+
+    if(self->is_home[2] != 0) {
+      if(self->pos_diff[2] < DIFF_LIM) {
+        self->diffzero_cnt[2]++;
+        self->is_home[2] = self->diffzero_cnt[2] <=60;
+      } else {
+        self->diffzero_cnt[2] = 0;
+      }
+    }
+
+    if(self->is_home[3] != 0) {
+      if (current_pos[3]->value > 0) {
+        self->home_speed[3] = 20;
+        self->diffzero_cnt[3] = 0;
+      }else if (current_pos[3]->value < -1) {
+          self->home_speed[3] = -20;
+          self->diffzero_cnt[3] = 0;
+      } else {
+        self->home_speed[3] = 0;
+        self->diffzero_cnt[3]++;
+        self->is_home[3] = self->diffzero_cnt[3] <= 20;
+      }
+
+    }
+
+    if(self->is_home[4] != 0) {
+      if (self->is_home[4] == 1) {
+        self->is_home[4] = (homing_switches.read[0]->value)? 2:1;
+        self->home_speed[4] = -30;
+        self->home_speed[5] = -30;
+      } else if(self->is_home[4] == 2) {
+        self->is_home[4] = (homing_switches.read[1]->value)? 3:2;
+        self->home_speed[4] = -30;
+        self->home_speed[5] = 30;
+      } else if(self->is_home[4] == 3){
+        self->is_home[4] = (homing_switches.read[1]->value)? 3:0;
+        self->is_home[5] = (homing_switches.read[1]->value)? 3:0;
+        self->home_speed[4] = 30;
+        self->home_speed[5] = -30;
+      }
+    }
+
+    // printf("state: %d\n", (int) self->is_home[4]);
+
+    self->last_sea[0] = sea_pos[0]->value;
+    self->last_sea[1] = sea_pos[1]->value;
+
+    // Set motor speeds
+    for (int i=0; i<6; i++) {
+      if (self->is_home[i] != 0) {
+        lf_set(motor_speed[i], self->home_speed[i]); // If we want to home
+      }else {
+        lf_set(motor_speed[i], 0);                   // If we are already homed
+      }
+    }
+  =}
+}

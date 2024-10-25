@@ -1,0 +1,122 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+  #include <stdio.h>
+=}
+
+reactor ROS_Interface {
+  input[7] current_pos: float
+  input[7] sea_pos: float
+
+  output[7] target_pos: float
+
+  timer trigger_send(500 ms, 500 ms)
+  timer trigger_read(0, 20 ms)
+
+  // Data in format:      'p' + 6x[fp32] -> 25 bytes
+  // Data out format:     'e' + 6x[fp32] -> 25 bytes
+  preamble {=
+    UART_HandleTypeDef huart4;        // usb-c tied urart for computer communication
+    extern UART_HandleTypeDef huart2;
+
+    // Setup Rx and Tx buffers
+    static uint8_t rx_buffer[50];
+    static uint8_t tx_buffer[50];
+
+    int enc_data[7];
+    int16_t joint_data[7];
+    float scaled_joint_data[7];
+
+    // We have an inFlight indicator if the DMA is currently sending data
+    static volatile int inFlight = 0;
+
+    static float get_target(uint8_t* data) {
+      float count = data[0] + (data[1]<<8) + (data[2]<<16) + (data[3]<<24) + (data[4]<<32);
+      return count;
+    }
+
+    void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+      if (huart == &huart4) {
+        inFlight = 0;
+      }
+
+    }
+
+    static void MX_UART4_Init(void) {
+      huart4.Instance = UART4;
+      huart4.Init.BaudRate = 921600;
+      // huart4.Init.BaudRate = 230400;
+      huart4.Init.WordLength = UART_WORDLENGTH_8B;
+      huart4.Init.StopBits = UART_STOPBITS_1;
+      huart4.Init.Parity = UART_PARITY_NONE;
+      huart4.Init.Mode = UART_MODE_TX_RX;
+      huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+      huart4.Init.OverSampling = UART_OVERSAMPLING_16;
+      if (HAL_UART_Init(&huart4) != HAL_OK)
+      {
+        Error_Handler();
+      }
+    }
+  =}
+
+  reaction(startup) {=
+    // Prep the send indicator
+    tx_buffer[0] = 'e';
+
+    // Prep UART interfaces
+    MX_UART4_Init();
+  =}
+
+  reaction(current_pos) {=
+    if (!inFlight) {
+      enc_data[0] = (int)(current_pos[0]->value * 1000);
+      enc_data[1] = (int)(current_pos[1]->value * 1000);
+      enc_data[2] = (int)(current_pos[2]->value * 1000);
+      enc_data[3] = (int)(current_pos[3]->value * 1000);
+      enc_data[4] = (int)(current_pos[4]->value * 1000);
+      enc_data[5] = (int)(current_pos[5]->value * 1000);
+      enc_data[6] = (int)(current_pos[6]->value * 1000);
+    }
+  =}
+
+  reaction(trigger_send) {=
+    if (!inFlight) {
+      // inFlight = 1; // Indicate that we are currently sending data
+      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
+      HAL_UART_Transmit_IT(&huart4, tx_buffer, num);
+      printf("e%d,%d,%d,%d,%d,%d,%d\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
+    }
+  =}
+
+  reaction(trigger_read) -> target_pos {=
+    if (HAL_UART_Receive(&huart4, rx_buffer, 1, 0) == HAL_OK && (rx_buffer[0] == 'p')) {
+      if (HAL_UART_Receive(&huart4, rx_buffer, 12, 100) == HAL_OK) {
+        for (int i=0; i<6; i++) {
+          joint_data[i] = rx_buffer[(i*2)+1]  + (rx_buffer[(i*2)]<<8);
+        }
+
+        scaled_joint_data[0] = ((float) joint_data[0])/1000;
+        scaled_joint_data[1] = ((float) joint_data[1])/1000;
+        scaled_joint_data[2] = ((float) joint_data[2])/1000;
+        scaled_joint_data[3] = ((float) joint_data[3])/1000;
+        scaled_joint_data[4] = ((float) joint_data[4])/1000;
+        scaled_joint_data[5] = ((float) joint_data[5])/1000;
+        scaled_joint_data[6] = ((float) joint_data[6])/1000;
+
+        for (int i=0; i<7; i++) {
+          lf_set(target_pos[i], scaled_joint_data[i]);
+        }
+        printf("got: %d,%d,%d,%d,%d,%d,%d\n", (int)scaled_joint_data[0], (int)scaled_joint_data[1], (int)scaled_joint_data[2], (int)scaled_joint_data[3], (int)scaled_joint_data[4], (int)scaled_joint_data[5], (int)scaled_joint_data[6]);
+      }
+
+    }
+  =}
+}

@@ -1,0 +1,141 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include <stdio.h>
+=}
+
+reactor QDEC(sample_period: time = 5 ms) {
+  input reset_qdec: bool
+
+  output[6] qdec_out: float
+  output[6] sea_out: float
+
+  timer trigger(0, sample_period)
+
+  preamble {=
+    UART_HandleTypeDef huart3;
+    static int printVals = true;
+    static int printcnt = 0;
+    static int printcnt_lim = 50;
+
+    uint8_t qdec_reset[1]= {0x01};
+
+    uint8_t req_qdec[6]=  {0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12};
+    uint8_t req_sea[6]=   {0x04, 0x05, 0x06, 0x07, 0x08, 0x09};
+
+    float cpr_qdec[6]=   {52000, 52000, 52000, 52000, 52000, 52000};
+    float cpr_sea[6]=     {40000, 40000, 40000, 40000, 40000, 40000};
+
+    // float cpr_qdec[6]=   {1, 1, 1, 1, 1, 1};
+    // float cpr_sea[6]=     {1, 1, 1, 1, 1, 1};
+    float pi = 3.14159;
+
+    uint8_t data0[8];
+    uint8_t data1[8];
+    uint8_t data2[8];
+    uint8_t data3[8];
+    uint8_t data4[8];
+    uint8_t data5[8];
+
+    uint8_t data6[8];
+    uint8_t data7[8];
+    uint8_t data8[8];
+    uint8_t data9[8];
+    uint8_t data10[8];
+    uint8_t data11[8];
+
+    static void MX_UART3_Init(void) {
+      huart3.Instance = USART3;
+      huart3.Init.BaudRate = 921600;
+      huart3.Init.WordLength = UART_WORDLENGTH_8B;
+      huart3.Init.StopBits = UART_STOPBITS_1;
+      huart3.Init.Parity = UART_PARITY_NONE;
+      huart3.Init.Mode = UART_MODE_TX_RX;
+      huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+      huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+      if (HAL_UART_Init(&huart3) != HAL_OK)
+      {
+        Error_Handler();
+      }
+    }
+
+
+    static long get_ticks(char msg, uint8_t* data) {
+      HAL_UART_Transmit(&huart3, &(msg), 1, HAL_MAX_DELAY);
+      HAL_UART_Receive(&huart3, data, 7, HAL_MAX_DELAY);
+
+      long count = data[0] + (data[1]<<8) + (data[2]<<16) + (data[3]<<24) + (data[4]<<32) + (data[5]<<40) + (data[6]<<48) + (data[7]<<56);
+
+      if (printVals && printcnt>printcnt_lim) {
+        printf("[%x]:%ld  ", msg, count);
+      }
+      return count;
+
+    }
+    const int LEN = 20;
+    static int hist[20] ={0, 0, 0, 0, 0, 0, 0};
+    static int med_ind = 0;
+
+    static int get_avg_r(uint16_t value) {
+      hist[med_ind] = (int)value;
+      med_ind = (med_ind >= LEN)? 0 : med_ind+1;
+
+      int sum = 0;
+      for (int i=0; i<LEN; i++) {
+        sum += hist[i];
+      }
+      return sum/LEN;
+    }
+  =}
+
+  reaction(startup) {=
+    MX_UART3_Init();
+
+    HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
+  =}
+
+  reaction(reset_qdec) {=
+    HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
+  =}
+
+  // Update Encoder values
+  // This function should take approximately 1ms to operate
+  reaction(trigger) -> qdec_out, sea_out {=
+    // Set all the positional QDEC values
+    lf_set(qdec_out[0],  2*pi* ((float) (get_ticks(req_qdec[0], &data0)) / cpr_qdec[0]));  // Get u0 position
+    lf_set(qdec_out[1],  2*pi* ((float) (get_ticks(req_qdec[1], &data1)) / cpr_qdec[1]));  // Get u1 position
+    lf_set(qdec_out[2],  2*pi* ((float) (get_ticks(req_qdec[2], &data2)) / cpr_qdec[2]));  // Get u2 position
+    lf_set(qdec_out[3],  2*pi* ((float) (get_ticks(req_qdec[3], &data3)) / cpr_qdec[4]));  // Get u3 position
+    lf_set(qdec_out[4],  2*pi* ((float) (get_ticks(req_qdec[4], &data4)) / cpr_qdec[4]));  // Get u4 position
+    lf_set(qdec_out[5],  2*pi* ((float) (get_ticks(req_qdec[5], &data5)) / cpr_qdec[5]));  // Get u5 position
+
+
+    // Set all the SEA QDEC values
+    lf_set(sea_out[0], 2*pi* ((float) (get_ticks(req_sea[0], &data6)) / cpr_sea[0]));      // Get sea0 position
+    lf_set(sea_out[1], 2*pi* ((float) (get_ticks(req_sea[1], &data7)) / cpr_sea[1]));      // Get sea1 position
+    lf_set(sea_out[2], 2*pi* ((float) (get_ticks(req_sea[2], &data8)) / cpr_sea[2]));      // Get sea2 position
+    lf_set(sea_out[3], 2*pi* ((float) (get_ticks(req_sea[3], &data9)) / cpr_sea[2]));      // Get sea3 position
+    lf_set(sea_out[4], 2*pi* ((float) (get_ticks(req_sea[4], &data10)) / cpr_sea[4]));     // Get sea4 position
+    lf_set(sea_out[5], 2*pi* ((float) (get_ticks(req_sea[5], &data11)) / cpr_sea[5]));     // Get sea5 position
+
+    long end = HAL_GetTick();
+    // printf("start: %ld, end: %ld, diff: %ld\r\n", start, end, (end-start));
+
+    if (printVals && printcnt>printcnt_lim) {
+      printf("| \r\n");
+    }
+
+    if (printcnt > printcnt_lim) {
+      printcnt = 0;
+    } else {
+      printcnt ++;
+    }
+  =}
+}
