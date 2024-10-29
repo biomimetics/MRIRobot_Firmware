@@ -1,0 +1,186 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+  #include <stdio.h>
+=}
+
+reactor Home(sample_period: time = 15 ms) {
+  timer trigger(0, sample_period)
+
+  input[7] current_pos: float
+  input[7] sea_pos: float
+
+  output[7] motor_speed: float
+  output is_home: int
+
+  // state is_home: int = 0
+  state home_speed: float[7] = {-20, -10, 100, 0, 30, 30, 30}
+
+  state last_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state last_sea: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state pos_diff: float[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state diffzero_cnt: int[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state update_cnt: int = 0
+
+  
+
+  timer switch_update(0 ms, 40 ms)
+
+  preamble {=
+
+    int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
+    static int printVals = false;
+    static int printcnt = 0;
+    static int printcnt_lim = 20;
+
+    static int home_state = 0;
+    static int _is_home = 0;
+
+
+    static float ref_1 = 0;
+    static float ref_3 = 0;
+
+    static void MX_GPIO_Init(void) {
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOB_CLK_ENABLE();
+      __HAL_RCC_GPIOH_CLK_ENABLE();
+
+      //+----------------------------------------------------------------+
+      //  Name,     
+      //  home0,    PA4
+      //  home1,    PA5
+      //  home2,    PA6
+      //  home3,    PA7
+      //  home4,    PA8
+      //  home5,    PA11
+      //  home6,    PA12
+      //+----------------------------------------------------------------+
+
+      /* Configure Switch pins : PC1, PC2, PC3 */
+      GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    }
+
+    static float get_speed(float curr, float target) {
+      if (curr - target > 0.005) {
+        return -5;
+      } else if(curr - target < -0.005) {
+        return 5;
+      } else {
+        return 0;
+      }
+    }
+  
+  =}
+
+  reaction(switch_update) {=
+    // switch_val[0] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4);
+    // switch_val[1] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5);
+    switch_val[2] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6);
+    switch_val[3] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7);
+    switch_val[4] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
+    switch_val[5] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11);
+    switch_val[6] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12);
+
+    if (printVals && printcnt>=printcnt_lim) {
+      printf("switch vals: %d, %d, %d, %d, %d, %d, %d\r\n", switch_val[0], switch_val[1], switch_val[2], switch_val[3], switch_val[4], switch_val[5], switch_val[6]);
+    }
+
+    if (printcnt >= printcnt_lim) {
+      printcnt = 0;
+    } else {
+      printcnt ++;
+    }
+
+  =}
+
+  reaction(current_pos, sea_pos) -> motor_speed, is_home {=
+
+    int spd = 8;
+
+    float target_1 = 0.67;
+    float target_3 = 0.145;
+
+    
+
+    if (_is_home == 0) {
+      switch (home_state) {
+        case 0:           // Go one direction until we hit the first switch
+          self->home_speed[1] = -spd;
+          self->home_speed[3] = spd*0.8;
+
+          if (switch_val[3] == 1) {
+            ref_1 = current_pos[1]->value;
+            printf("[HOME] going to state 1 - ref[%d]\r\n", (int)(ref_1*100));
+            home_state = 1;
+          }
+          break;
+        
+        
+        case 1:           // Go the second direction until we hit the switch
+          self->home_speed[1] = spd*0.8;
+          self->home_speed[3] = -spd;
+
+          if (switch_val[4] == 1) {
+            ref_3 = current_pos[3]->value;
+            printf("[HOME] going to state 2 - ref[%d]\r\n", (int)(ref_3*100));
+            home_state = 2;
+          }
+          break;
+        
+        
+        case 2:           // go to the middle
+          self->home_speed[1] = get_speed((current_pos[1]->value - ref_1), target_1);
+          self->home_speed[3] = get_speed((current_pos[3]->value - ref_3), target_3);
+
+          
+          
+          if (self->home_speed[1] == 0 && self->home_speed[3] == 0) {
+            printf("[HOME] going to state 3\r\n");
+            home_state = 3;
+          }
+          break;
+        
+        
+        case 3:           // Return statement
+          _is_home = 1;
+          break;
+        default:
+          self->home_speed[1] = 0;
+          self->home_speed[3] = 0;
+          _is_home = 1;
+          
+      }
+
+
+
+
+    } else {
+      home_state = 0;
+      for(int i=0; i<7; i++) {
+        self->home_speed[i] = 0;
+      }
+    }
+
+    for(int i=0; i<7; i++) {
+      lf_set(motor_speed[i], self->home_speed[i]);
+    }
+
+    
+
+
+    lf_set(is_home, _is_home);
+  =}
+}

@@ -24,7 +24,7 @@ reactor ROS_Interface {
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
   preamble {=
-    UART_HandleTypeDef huart4;        // usb-c tied urart for computer communication
+    UART_HandleTypeDef huart1;        // usb-c tied urart for computer communication
     extern UART_HandleTypeDef huart2;
 
     // Setup Rx and Tx buffers
@@ -44,27 +44,28 @@ reactor ROS_Interface {
     }
 
     void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
-      if (huart == &huart4) {
+      if (huart == &huart1) {
         inFlight = 0;
       }
 
     }
 
-    static void MX_UART4_Init(void) {
-      huart4.Instance = UART4;
-      huart4.Init.BaudRate = 921600;
-      // huart4.Init.BaudRate = 230400;
-      huart4.Init.WordLength = UART_WORDLENGTH_8B;
-      huart4.Init.StopBits = UART_STOPBITS_1;
-      huart4.Init.Parity = UART_PARITY_NONE;
-      huart4.Init.Mode = UART_MODE_TX_RX;
-      huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-      huart4.Init.OverSampling = UART_OVERSAMPLING_16;
-      if (HAL_UART_Init(&huart4) != HAL_OK)
-      {
+    static void MX_UART1_Init(void) {
+      huart1.Instance = USART1;
+      huart1.Init.BaudRate = 921600;
+      // huart1.Init.BaudRate = 230400;
+      huart1.Init.WordLength = UART_WORDLENGTH_8B;
+      huart1.Init.StopBits = UART_STOPBITS_1;
+      huart1.Init.Parity = UART_PARITY_NONE;
+      huart1.Init.Mode = UART_MODE_TX_RX;
+      huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+      huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+      if (HAL_UART_Init(&huart1) != HAL_OK) {
         Error_Handler();
       }
     }
+
+    
   =}
 
   reaction(startup) {=
@@ -72,7 +73,7 @@ reactor ROS_Interface {
     tx_buffer[0] = 'e';
 
     // Prep UART interfaces
-    MX_UART4_Init();
+    MX_UART1_Init();
   =}
 
   reaction(current_pos) {=
@@ -91,14 +92,14 @@ reactor ROS_Interface {
     if (!inFlight) {
       // inFlight = 1; // Indicate that we are currently sending data
       int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
-      HAL_UART_Transmit_IT(&huart4, tx_buffer, num);
-      printf("e%d,%d,%d,%d,%d,%d,%d\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
+      HAL_UART_Transmit(&huart1, tx_buffer, num, HAL_MAX_DELAY);
+      // printf("e%d,%d,%d,%d,%d,%d,%d\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
     }
   =}
 
   reaction(trigger_read) -> target_pos {=
-    if (HAL_UART_Receive(&huart4, rx_buffer, 1, 0) == HAL_OK && (rx_buffer[0] == 'p')) {
-      if (HAL_UART_Receive(&huart4, rx_buffer, 12, 100) == HAL_OK) {
+    if (HAL_UART_Receive(&huart1, rx_buffer, 1, 0) == HAL_OK && (rx_buffer[0] == 'p')) {
+      if (HAL_UART_Receive(&huart1, rx_buffer, 12, 100) == HAL_OK) {
         for (int i=0; i<6; i++) {
           joint_data[i] = rx_buffer[(i*2)+1]  + (rx_buffer[(i*2)]<<8);
         }
@@ -118,5 +119,10 @@ reactor ROS_Interface {
       }
 
     }
+
+
+    // if (HAL_UART_Receive(&huart1, rx_buffer, 1, 0) == HAL_OK) {
+    //   printf("got: AAAAAAAAAA\n");
+    // }
   =}
 }

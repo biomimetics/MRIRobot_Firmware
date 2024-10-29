@@ -1,0 +1,231 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "STM32",
+    board: "F446RE"
+  }
+}
+
+import QDEC from "lib/Encoder.lf"
+import Home from "lib/Home.lf"
+import MotorDriver from "lib/Motor_Driver.lf"
+import ROS_Interface from "lib/ROS_Interface.lf"
+
+preamble {=
+  #include <stdio.h>
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+=}
+
+// Import and/or declare reactor classes.
+main reactor {
+  preamble {=
+    extern UART_HandleTypeDef huart2;
+    UART_HandleTypeDef huart4;
+    UART_HandleTypeDef huart5;
+    UART_HandleTypeDef huart6;
+
+
+    // Target positions
+    float target_pos[7] =   {0, 0, 0, 0, 0, 0, 0};
+    float target_speed[7] = {0, 0, 0, 0, 0, 0, 0};
+    bool target_sel[7] =    {0, 0, 0, 0, 0, 0, 0};
+
+    static int at_home = 0;
+
+    static void MX_GPIO_Init(void) {
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOB_CLK_ENABLE();
+      __HAL_RCC_GPIOH_CLK_ENABLE();
+
+      /* Configure output LED pins: PH0, PH1, PB*/
+      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_15;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+      /* Configure Switch pins : PC1, PC2, PC3 */
+      GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    }
+
+    
+    static void MX_UART4_Init(void) {
+      huart4.Instance = UART4;
+      huart4.Init.BaudRate = 115200;
+      huart4.Init.WordLength = UART_WORDLENGTH_8B;
+      huart4.Init.StopBits = UART_STOPBITS_1;
+      huart4.Init.Parity = UART_PARITY_NONE;
+      huart4.Init.Mode = UART_MODE_TX_RX;
+      huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+      huart4.Init.OverSampling = UART_OVERSAMPLING_16;
+      if (HAL_UART_Init(&huart4) != HAL_OK)
+      {
+        Error_Handler();
+      }
+    }
+
+    static void MX_UART5_Init(void) {
+      huart5.Instance = UART5;
+      huart5.Init.BaudRate = 115200;
+      huart5.Init.WordLength = UART_WORDLENGTH_8B;
+      huart5.Init.StopBits = UART_STOPBITS_1;
+      huart5.Init.Parity = UART_PARITY_NONE;
+      huart5.Init.Mode = UART_MODE_TX_RX;
+      huart5.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+      huart5.Init.OverSampling = UART_OVERSAMPLING_16;
+      if (HAL_UART_Init(&huart5) != HAL_OK) {
+        Error_Handler();
+      }
+    }
+
+    static void MX_UART6_Init(void) {
+      huart6.Instance = USART6;
+      huart6.Init.BaudRate = 115200;
+      huart6.Init.WordLength = UART_WORDLENGTH_8B;
+      huart6.Init.StopBits = UART_STOPBITS_1;
+      huart6.Init.Parity = UART_PARITY_NONE;
+      huart6.Init.Mode = UART_MODE_TX_RX;
+      huart6.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+      huart6.Init.OverSampling = UART_OVERSAMPLING_16;
+      if (HAL_UART_Init(&huart6) != HAL_OK) {
+        Error_Handler();
+      }
+    }
+  =}
+
+  timer motor_update(5 ms, 10 ms)
+  timer switch_motor(5 ms, 5000 ms)
+  state count: int = 1
+
+  qdec = new QDEC()           // FPGA-based QDEC Encoders
+  motors = new MotorDriver()  // Main Motor driver + controller
+  home = new Home()           // Used to home the motors
+
+  ros_controller = new ROS_Interface()
+  qdec.qdec_out -> motors.qdec_current
+  qdec.sea_out -> motors.qdec_sea
+
+  qdec.qdec_out -> ros_controller.current_pos
+  qdec.sea_out -> ros_controller.sea_pos
+
+  reaction(startup) {=
+    // Prep all GPIO values
+    MX_GPIO_Init();
+
+    // Prep UART interfaces
+    MX_UART4_Init();
+    MX_UART5_Init();
+    MX_UART6_Init();
+  =}
+
+  // Used to update Motor target values
+  // Reactor for updating motor target positions from manual targets
+  ros_controller.target_pos -> motors.target_pos  // Reactor for updating motor target positions from manual targets
+  // Initial homing state for when we want home all of the joints
+  initial mode HOME {
+    timer home_pulse(50 ms, 100 ms)
+    qdec.qdec_out -> home.current_pos
+    qdec.sea_out -> home.sea_pos
+    reaction(home_pulse) -> qdec.reset_qdec, reset(RUN) {=
+      if (at_home) {
+        for(int i=0; i<7; i++) {
+          target_pos[i] = 0;
+        }
+        lf_set(qdec.reset_qdec, true);
+        lf_set_mode(RUN);
+        printf("--- Finished Homing ---\r\n");
+      }
+    =}
+
+    reaction(home.is_home) {=
+      at_home = home.is_home->value;
+    =}
+
+    reaction(home.motor_speed) {=
+      for(int i=0; i<7; i++) {
+        target_speed[i] = home.motor_speed[i]->value;
+      }
+    =}
+
+    reaction(motor_update) -> motors.target_sel, motors.target_speed {=
+      for (int i=0; i<7; i++) {
+        lf_set(motors.target_sel[i], 0);
+        lf_set(motors.target_speed[i], target_speed[i]);
+      }
+    =}
+  }
+
+  // Run state for when the robot is in operation
+  mode RUN {
+    reaction(motor_update) -> motors.target_sel, motors.target_speed {=
+      for (int i=0; i<7; i++) {
+        lf_set(motors.target_speed[i], target_speed[i]);
+      }
+      for (int i=0; i<7; i++) {
+        lf_set(motors.target_sel[i], 1);
+      }
+    =}
+
+
+  //   reaction(switch_motor) -> motors.target_sel, motors.target_speed {=
+  //     printf("switch state: %d\r\n", self->count);
+  //     HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_15);
+  //     if (self->count == 0) {
+  //       self->count = 1;
+  //       lf_set(motors.target_speed[0], -50);
+  //       lf_set(motors.target_speed[1], -50);
+  //       lf_set(motors.target_speed[2], -50);
+  //       lf_set(motors.target_speed[3], -50);
+  //       lf_set(motors.target_speed[4], -50);
+  //       lf_set(motors.target_speed[5], -50);
+  //       lf_set(motors.target_speed[6], -50);
+  //       target_pos[0] = 0;
+  //       target_pos[1] = 0;
+  //       target_pos[2] = 0;
+  //       target_pos[3] = 0;
+  //       target_pos[4] = 0;
+  //       target_pos[5] = 0;
+  //       target_pos[6] = 0;
+  //     } else {
+  //       self->count = 0;
+  //       lf_set(motors.target_speed[0], 50);
+  //       lf_set(motors.target_speed[1], 50);
+  //       lf_set(motors.target_speed[2], 50);
+  //       lf_set(motors.target_speed[3], 50);
+  //       lf_set(motors.target_speed[4], 50);
+  //       lf_set(motors.target_speed[5], 50);
+  //       lf_set(motors.target_speed[6], 50);
+  //       target_pos[0] = 6;
+  //       target_pos[1] = 6;
+  //       target_pos[2] = 6;
+  //       target_pos[3] = 6;
+  //       target_pos[4] = 6;
+  //       target_pos[5] = 6;
+  //       target_pos[6] = 6;
+  //     }
+
+  //     for (int i=0; i<7; i++) {
+  //       lf_set(motors.target_sel[i], 0);
+  //     }
+  //   =}
+  // }
+
+  // reaction(motor_update) -> motors.target_pos {=
+  //   for (int i=0; i<7; i++) {
+  //     lf_set(motors.target_pos[i], target_pos[i]);
+  //   }
+  // =}
+  }
+}

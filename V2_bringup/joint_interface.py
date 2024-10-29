@@ -4,7 +4,7 @@ from time import sleep
 BAUD_RATE = 921600
 
 COUNTER_TRIGGER = 10000000
-FP_COMPRESSION = (1000, 1000, 1000, 1000, 1000, 1000)
+FP_COMPRESSION = (1000, 1000, 1000, 1000, 1000, 1000, 1000)
 STATE = 0
 
 
@@ -13,10 +13,10 @@ def callback(message):
   global STATE
   if STATE == 0:
     STATE = 1
-    angles = (0, 0, 0, 0, 0, 0)
+    angles = (0, 0, 0, 0, 0, 0, 0)
   else:
     STATE = 0
-    angles = (3, 3, 3, 3, 3, 3)
+    angles = (3, 3, 3, 3, 3, 3, 3)
 
   # Send to microcontroller
   serial_list = ['p'.encode("utf-8")]
@@ -73,7 +73,7 @@ def listener():
 if __name__ == '__main__':
     # Test different ports until one sticks. If not, rais an error
     try:
-      STM32_serial = serial.Serial(port='/dev/tty.usbserial-D30GTC9S', baudrate=BAUD_RATE, timeout=1)
+      STM32_serial = serial.Serial(port='/dev/tty.usbserial-D30GTC9V', baudrate=BAUD_RATE, timeout=1)
     except:
        STM32_serial = None  
     
