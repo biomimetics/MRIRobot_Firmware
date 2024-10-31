@@ -183,7 +183,7 @@ reactor USM {
 
     static int conv_speed(float speed, int idx) {
       int pwm_val;
-      float USM_MIN_SPEED = 3;
+      float USM_MIN_SPEED = 2.1;
 
       if (speed < 0)
         pwm_val =  min((int)((1000 * max(USM_MIN_SPEED, -speed) * SPEED_SCALE[idx])/100), MAX_SPEED[idx]);
@@ -245,7 +245,7 @@ reactor USM {
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   set_speed_5->value >= 0);
 
     int en_usm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_3);
-    float USM_LIMIT = 0.02;
+    float USM_LIMIT = 0.06;
 
 
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, en_usm);

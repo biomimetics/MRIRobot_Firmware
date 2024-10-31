@@ -15,9 +15,9 @@ preamble {=
 =}
 
 reactor SEAController0(
-    Kp: float = 10,
-    Ki: float = 5,
-    Kd: float = -2,
+    Kp: float = 4,
+    Ki: float = 0.5,
+    Kd: float = -1,
     Ks: float = 1000,
     SLIM: float = 0.008,
     SEA_LIM: float = 0.1) {

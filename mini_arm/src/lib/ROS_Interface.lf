@@ -115,7 +115,7 @@ reactor ROS_Interface {
         for (int i=0; i<7; i++) {
           lf_set(target_pos[i], scaled_joint_data[i]);
         }
-        printf("got: %d,%d,%d,%d,%d,%d,%d\n", (int)scaled_joint_data[0], (int)scaled_joint_data[1], (int)scaled_joint_data[2], (int)scaled_joint_data[3], (int)scaled_joint_data[4], (int)scaled_joint_data[5], (int)scaled_joint_data[6]);
+        printf("got: %d,%d,%d,%d,%d,%d,%d\n", (int)joint_data[0], (int)joint_data[1], (int)joint_data[2], (int)joint_data[3], (int)joint_data[4], (int)joint_data[5], (int)joint_data[6]);
       }
 
     }

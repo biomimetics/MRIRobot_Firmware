@@ -47,6 +47,7 @@ reactor Home(sample_period: time = 15 ms) {
     static int _is_home = 0;
 
 
+    static float ref_0 = 0;
     static float ref_1 = 0;
     static float ref_3 = 0;
 
@@ -67,16 +68,16 @@ reactor Home(sample_period: time = 15 ms) {
       //+----------------------------------------------------------------+
 
       /* Configure Switch pins : PC1, PC2, PC3 */
-      GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12;
+      GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12;
       GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
       GPIO_InitStruct.Pull = GPIO_PULLDOWN;
       HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
     }
 
     static float get_speed(float curr, float target) {
-      if (curr - target > 0.005) {
+      if (curr - target > 0.01) {
         return -5;
-      } else if(curr - target < -0.005) {
+      } else if(curr - target < -0.01) {
         return 5;
       } else {
         return 0;
@@ -97,30 +98,22 @@ reactor Home(sample_period: time = 15 ms) {
     if (printVals && printcnt>=printcnt_lim) {
       printf("switch vals: %d, %d, %d, %d, %d, %d, %d\r\n", switch_val[0], switch_val[1], switch_val[2], switch_val[3], switch_val[4], switch_val[5], switch_val[6]);
     }
-
-    if (printcnt >= printcnt_lim) {
-      printcnt = 0;
-    } else {
-      printcnt ++;
-    }
+    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
 
   =}
 
   reaction(current_pos, sea_pos) -> motor_speed, is_home {=
-
-    int spd = 8;
-
-    float target_1 = 0.67;
-    float target_3 = 0.145;
-
-    
+    int spd = 5;
+    float target_0 = 2.0944;
+    float target_1 = 1.56;
+    float target_3 = 0.34;
 
     if (_is_home == 0) {
       switch (home_state) {
         case 0:           // Go one direction until we hit the first switch
+          self->home_speed[0] = 0;
           self->home_speed[1] = -spd;
           self->home_speed[3] = spd*0.8;
-
           if (switch_val[3] == 1) {
             ref_1 = current_pos[1]->value;
             printf("[HOME] going to state 1 - ref[%d]\r\n", (int)(ref_1*100));
@@ -130,9 +123,9 @@ reactor Home(sample_period: time = 15 ms) {
         
         
         case 1:           // Go the second direction until we hit the switch
+          self->home_speed[0] = 0;
           self->home_speed[1] = spd*0.8;
           self->home_speed[3] = -spd;
-
           if (switch_val[4] == 1) {
             ref_3 = current_pos[3]->value;
             printf("[HOME] going to state 2 - ref[%d]\r\n", (int)(ref_3*100));
@@ -141,12 +134,10 @@ reactor Home(sample_period: time = 15 ms) {
           break;
         
         
-        case 2:           // go to the middle
-          self->home_speed[1] = get_speed((current_pos[1]->value - ref_1), target_1);
-          self->home_speed[3] = get_speed((current_pos[3]->value - ref_3), target_3);
-
-          
-          
+        case 2:           // point forward to better home R axis
+          self->home_speed[0] = 0;
+          self->home_speed[1] = get_speed((current_pos[1]->value - ref_1), 1.5708);
+          self->home_speed[3] = get_speed((current_pos[3]->value - ref_3), 1.4);
           if (self->home_speed[1] == 0 && self->home_speed[3] == 0) {
             printf("[HOME] going to state 3\r\n");
             home_state = 3;
@@ -154,14 +145,51 @@ reactor Home(sample_period: time = 15 ms) {
           break;
         
         
-        case 3:           // Return statement
+        case 3:           // home the R axis
+          self->home_speed[0] = -spd;
+          self->home_speed[1] = 0;
+          self->home_speed[3] = 0;
+          if (switch_val[5] == 1) {
+            ref_0 = current_pos[0]->value;
+            printf("[HOME] going to state 4 - ref[%d]\r\n", (int)(ref_0*100));
+            home_state = 4;
+          }
+          break;
+        
+        
+        case 4:           // Home all three joints to their targets
+          self->home_speed[0] = get_speed((current_pos[0]->value - ref_0), target_0);
+          self->home_speed[1] = 0;
+          self->home_speed[3] = 0;
+          if ((self->home_speed[0] == 0) && (self->home_speed[1] == 0) && (self->home_speed[3] == 0)) {
+            printf("[HOME] going to state 5\r\n");
+            home_state = 5;
+          }
+          break;
+        
+        
+        case 5:           // homing is complete
+          self->home_speed[0] = 0;
+          self->home_speed[1] = get_speed((current_pos[1]->value - ref_1), target_1);
+          self->home_speed[3] = get_speed((current_pos[3]->value - ref_3), target_3);
+          if ((self->home_speed[0] == 0) && (self->home_speed[1] == 0) && (self->home_speed[3] == 0)) {
+            printf("[HOME] going to state 6\r\n");
+            home_state = 6;
+          }
+          break;
+
+
+        case 6:           // homing is complete
+          printf("[HOME] Homing complete\r\n");
           _is_home = 1;
           break;
+
+
         default:
+          self->home_speed[0] = 0;
           self->home_speed[1] = 0;
           self->home_speed[3] = 0;
           _is_home = 1;
-          
       }
 
 

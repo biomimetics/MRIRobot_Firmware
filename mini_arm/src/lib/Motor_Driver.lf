@@ -46,21 +46,24 @@ reactor MotorDriver(refresh_period: time = 5 ms) {
   // control_u3 = new FFBController()
   // control_u4 = new FFBController()
   // control_u5 = new FFBController()
-  control_u0 = new SEAController6()
-  control_u1 = new SEAController6()
-  control_u2 = new SEAController6()
-  control_u3 = new SEAController6()
-  control_u4 = new SEAController6()
-  control_u5 = new SEAController6()
-  control_u6 = new SEAController6()
 
-  // control_u0 = new PIDController()
-  // control_u1 = new PIDController()
-  // control_u2 = new PIDController()
-  // control_u3 = new PIDController()
-  // control_u4 = new PIDController()
-  // control_u5 = new PIDController()
+  // control_u0 = new SEAController0()
+  // control_u1 = new SEAController0()
+  // control_u2 = new SEAController0()
+  // control_u3 = new SEAController0()
+  // control_u4 = new SEAController0()
+  // control_u5 = new SEAController0()
+  // control_u6 = new SEAController0()
+
+  control_u0 = new PIDController()
+  control_u1 = new PIDController()
+  control_u2 = new PIDController()
+  control_u3 = new PIDController()
+  control_u4 = new PIDController()
+  control_u5 = new PIDController()
+  control_u6 = new PIDController()
   // Feed in the target positions
+
   target_pos ->
     control_u0.target_pos,
     control_u1.target_pos,

@@ -32,7 +32,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     uint8_t req_qdec[2]=  {0x04, 0x05};
 
 
-    float cpr_qdec[7]=   {52000, 52000, 52000, 52000, 52000, 52000, 52000};
+    float cpr_qdec[7]=   {23450, 23450, 23450, 23450, 23450, 23450, 23450};
     float cpr_sea[7]=     {40000, 40000, 40000, 40000, 40000, 40000, 40000};
     float pi = 3.14159;
 
@@ -61,9 +61,6 @@ reactor QDEC(sample_period: time = 5 ms) {
 
       for(int i=0; i<7; i++) {
         count[i] = data[0 + (i*7)] + (data[1 + (i*7)]<<8) + (data[2 + (i*7)]<<16) + (data[3 + (i*7)]<<24) + (data[4 + (i*7)]<<32) + (data[5 + (i*7)]<<40) + (data[6 + (i*7)]<<48);
-        if (printVals && printcnt>=printcnt_lim) {
-          printf("%ld  ", count[i]);
-        }
       }
     }
     const int LEN = 20;
@@ -102,12 +99,18 @@ reactor QDEC(sample_period: time = 5 ms) {
     get_ticks(req_qdec[0]);
     for (int i=0; i<7; i++) {
       lf_set(sea_out[i],  2*pi* ((float) (count[i]) / cpr_sea[i]));
+      if (printVals && printcnt>=printcnt_lim) {
+        printf("%d  ", (int) (sea_out[i]->value*100));
+      }
     }
 
     // Get values for USM encoders
     get_ticks(req_qdec[1]);
     for (int i=0; i<7; i++) {
       lf_set(qdec_out[i],  2*pi* ((float) (count[i]) / cpr_qdec[i]));
+      if (printVals && printcnt>=printcnt_lim) {
+        printf("%d  ", (int) (qdec_out[i]->value*100));
+      }
     }
 
     long end = HAL_GetTick();
@@ -116,10 +119,6 @@ reactor QDEC(sample_period: time = 5 ms) {
       printf("| \r\n");
     }
 
-    if (printcnt >= printcnt_lim) {
-      printcnt = 0;
-    } else {
-      printcnt ++;
-    }
+    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
   =}
 }
