@@ -18,6 +18,7 @@ reactor QDEC(sample_period: time = 5 ms) {
   output[7] sea_out: float
 
   timer trigger(0, sample_period)
+  timer enable(0, 20 ms)
 
   preamble {=
     UART_HandleTypeDef huart3;
@@ -54,6 +55,24 @@ reactor QDEC(sample_period: time = 5 ms) {
       }
     }
 
+    static void MX_GPIO_Init(void) {
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOB_CLK_ENABLE();
+
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_15;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+      /* Configure Switch pins : PC1, PC2, PC3 */
+      GPIO_InitStruct.Pin = GPIO_PIN_2;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    }
+
 
     static void get_ticks(char msg) {
       HAL_UART_Transmit(&huart3, &(msg), 1, HAL_MAX_DELAY);
@@ -66,6 +85,8 @@ reactor QDEC(sample_period: time = 5 ms) {
     const int LEN = 20;
     static int hist[20] ={0, 0, 0, 0, 0, 0, 0};
     static int med_ind = 0;
+
+    static int last_switch = 0;
 
     static int get_avg_r(uint16_t value) {
       hist[med_ind] = (int)value;
@@ -81,6 +102,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
   reaction(startup) {=
     MX_UART3_Init();
+    MX_GPIO_Init();
 
     HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
@@ -120,5 +142,21 @@ reactor QDEC(sample_period: time = 5 ms) {
     }
 
     printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
+  =}
+
+
+  reaction(enable) {=
+    int read_switch = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, read_switch);
+
+    if (read_switch && !last_switch) {
+      HAL_UART_Transmit(&huart3, qdec_disable, 1, HAL_MAX_DELAY);
+      printf("Disabling Encoders\r\n");
+    } else if(!read_switch && last_switch) {
+      HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
+      printf("Enabling Encoders\r\n");
+    }
+    last_switch = read_switch;
+
   =}
 }
