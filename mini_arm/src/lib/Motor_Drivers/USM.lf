@@ -244,7 +244,7 @@ reactor USM {
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   set_speed_5->value >= 0);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   set_speed_5->value >= 0);
 
-    int en_usm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_3);
+    int en_usm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_3) && !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);;
     float USM_LIMIT = 0.06;
 
 

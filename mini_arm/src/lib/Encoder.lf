@@ -22,7 +22,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
   preamble {=
     UART_HandleTypeDef huart3;
-    static int printVals = true;
+    static int printVals = false;
     static int printcnt = 0;
     static int printcnt_lim = 100;
 

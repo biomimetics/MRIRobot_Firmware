@@ -87,8 +87,6 @@ reactor Home(sample_period: time = 15 ms) {
   =}
 
   reaction(switch_update) {=
-    // switch_val[0] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_4);
-    // switch_val[1] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5);
     switch_val[2] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6);
     switch_val[3] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7);
     switch_val[4] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
@@ -112,10 +110,10 @@ reactor Home(sample_period: time = 15 ms) {
       switch (home_state) {
         case 0:           // Go one direction until we hit the first switch
           self->home_speed[0] = 0;
-          self->home_speed[1] = -spd;
-          self->home_speed[3] = spd*0.8;
+          self->home_speed[5] = -spd;
+          self->home_speed[4] = spd*0.8;
           if (switch_val[3] == 1) {
-            ref_1 = current_pos[1]->value;
+            ref_1 = current_pos[5]->value;
             printf("[HOME] going to state 1 - ref[%d]\r\n", (int)(ref_1*100));
             home_state = 1;
           }
@@ -124,10 +122,10 @@ reactor Home(sample_period: time = 15 ms) {
         
         case 1:           // Go the second direction until we hit the switch
           self->home_speed[0] = 0;
-          self->home_speed[1] = spd*0.8;
-          self->home_speed[3] = -spd;
+          self->home_speed[5] = spd*0.8;
+          self->home_speed[4] = -spd;
           if (switch_val[4] == 1) {
-            ref_3 = current_pos[3]->value;
+            ref_3 = current_pos[4]->value;
             printf("[HOME] going to state 2 - ref[%d]\r\n", (int)(ref_3*100));
             home_state = 2;
           }
@@ -136,9 +134,9 @@ reactor Home(sample_period: time = 15 ms) {
         
         case 2:           // point forward to better home R axis
           self->home_speed[0] = 0;
-          self->home_speed[1] = get_speed((current_pos[1]->value - ref_1), 1.5708);
-          self->home_speed[3] = get_speed((current_pos[3]->value - ref_3), 1.4);
-          if (self->home_speed[1] == 0 && self->home_speed[3] == 0) {
+          self->home_speed[5] = get_speed((current_pos[5]->value - ref_1), 1.5708);
+          self->home_speed[4] = get_speed((current_pos[4]->value - ref_3), 1.4);
+          if (self->home_speed[5] == 0 && self->home_speed[4] == 0) {
             printf("[HOME] going to state 3\r\n");
             home_state = 3;
           }
@@ -147,8 +145,8 @@ reactor Home(sample_period: time = 15 ms) {
         
         case 3:           // home the R axis
           self->home_speed[0] = -spd;
-          self->home_speed[1] = 0;
-          self->home_speed[3] = 0;
+          self->home_speed[5] = 0;
+          self->home_speed[4] = 0;
           if (switch_val[5] == 1) {
             ref_0 = current_pos[0]->value;
             printf("[HOME] going to state 4 - ref[%d]\r\n", (int)(ref_0*100));
@@ -159,9 +157,9 @@ reactor Home(sample_period: time = 15 ms) {
         
         case 4:           // Home all three joints to their targets
           self->home_speed[0] = get_speed((current_pos[0]->value - ref_0), target_0);
-          self->home_speed[1] = 0;
-          self->home_speed[3] = 0;
-          if ((self->home_speed[0] == 0) && (self->home_speed[1] == 0) && (self->home_speed[3] == 0)) {
+          self->home_speed[5] = 0;
+          self->home_speed[4] = 0;
+          if ((self->home_speed[0] == 0) && (self->home_speed[5] == 0) && (self->home_speed[4] == 0)) {
             printf("[HOME] going to state 5\r\n");
             home_state = 5;
           }
@@ -170,9 +168,9 @@ reactor Home(sample_period: time = 15 ms) {
         
         case 5:           // homing is complete
           self->home_speed[0] = 0;
-          self->home_speed[1] = get_speed((current_pos[1]->value - ref_1), target_1);
-          self->home_speed[3] = get_speed((current_pos[3]->value - ref_3), target_3);
-          if ((self->home_speed[0] == 0) && (self->home_speed[1] == 0) && (self->home_speed[3] == 0)) {
+          self->home_speed[5] = get_speed((current_pos[5]->value - ref_1), target_1);
+          self->home_speed[4] = get_speed((current_pos[4]->value - ref_3), target_3);
+          if ((self->home_speed[0] == 0) && (self->home_speed[5] == 0) && (self->home_speed[4] == 0)) {
             printf("[HOME] going to state 6\r\n");
             home_state = 6;
           }
@@ -187,8 +185,8 @@ reactor Home(sample_period: time = 15 ms) {
 
         default:
           self->home_speed[0] = 0;
-          self->home_speed[1] = 0;
-          self->home_speed[3] = 0;
+          self->home_speed[5] = 0;
+          self->home_speed[4] = 0;
           _is_home = 1;
       }
 

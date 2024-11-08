@@ -178,5 +178,54 @@ main reactor {
         lf_set(motors.target_sel[i], 1);
       }
     =}
+
+  //   reaction(switch_motor) -> motors.target_sel, motors.target_speed {=
+  //     printf("switch state: %d\r\n", self->count);
+  //     HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_15);
+  //     if (self->count == 0) {
+  //       self->count = 1;
+  //       lf_set(motors.target_speed[0], -50);
+  //       lf_set(motors.target_speed[1], -50);
+  //       lf_set(motors.target_speed[2], -50);
+  //       lf_set(motors.target_speed[3], -50);
+  //       lf_set(motors.target_speed[4], -50);
+  //       lf_set(motors.target_speed[5], -50);
+  //       lf_set(motors.target_speed[6], -50);
+  //       target_pos[0] = 0;
+  //       target_pos[1] = 0;
+  //       target_pos[2] = 0;
+  //       target_pos[3] = 0;
+  //       target_pos[4] = 0;
+  //       target_pos[5] = 0;
+  //       target_pos[6] = 0;
+  //     } else {
+  //       self->count = 0;
+  //       lf_set(motors.target_speed[0], 50);
+  //       lf_set(motors.target_speed[1], 50);
+  //       lf_set(motors.target_speed[2], 50);
+  //       lf_set(motors.target_speed[3], 50);
+  //       lf_set(motors.target_speed[4], 50);
+  //       lf_set(motors.target_speed[5], 50);
+  //       lf_set(motors.target_speed[6], 50);
+  //       target_pos[0] = 6;
+  //       target_pos[1] = 6;
+  //       target_pos[2] = 6;
+  //       target_pos[3] = 6;
+  //       target_pos[4] = 6;
+  //       target_pos[5] = 6;
+  //       target_pos[6] = 6;
+  //     }
+
+  //     for (int i=0; i<7; i++) {
+  //       lf_set(motors.target_sel[i], 0);
+  //     }
+  //   =}
+  // }
+
+  // reaction(motor_update) -> motors.target_pos {=
+  //   for (int i=0; i<7; i++) {
+  //     lf_set(motors.target_pos[i], target_pos[i]);
+  //   }
+  // =}
   }
 }
