@@ -12,10 +12,6 @@ import PIDController from "Joint_Controllers/PID.lf"
 import SEAController0 from "Joint_Controllers/SEA0.lf"
 import SEAController1 from "Joint_Controllers/SEA1.lf"
 import SEAController2 from "Joint_Controllers/SEA2.lf"
-import SEAController3 from "Joint_Controllers/SEA3.lf"
-import SEAController4 from "Joint_Controllers/SEA4.lf"
-import SEAController5 from "Joint_Controllers/SEA5.lf"
-import SEAController6 from "Joint_Controllers/SEA6.lf"
 
 preamble {=
   #include <stdio.h>
@@ -47,21 +43,13 @@ reactor MotorDriver(refresh_period: time = 5 ms) {
   // control_u4 = new FFBController()
   // control_u5 = new FFBController()
 
-  // control_u0 = new SEAController0()
-  // control_u1 = new SEAController0()
-  // control_u2 = new SEAController0()
-  // control_u3 = new SEAController0()
-  // control_u4 = new SEAController0()
-  // control_u5 = new SEAController0()
-  // control_u6 = new SEAController0()
-
-  control_u0 = new PIDController()
-  control_u1 = new PIDController()
-  control_u2 = new PIDController()
-  control_u3 = new PIDController()
-  control_u4 = new PIDController()
-  control_u5 = new PIDController()
-  control_u6 = new PIDController()
+  control_u0 = new SEAController0()
+  control_u1 = new SEAController0()
+  control_u2 = new SEAController0()
+  control_u3 = new SEAController0()
+  control_u4 = new SEAController0()
+  control_u5 = new SEAController0()
+  control_u6 = new SEAController0()
   // Feed in the target positions
 
   target_pos ->
