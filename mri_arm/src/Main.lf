@@ -54,7 +54,7 @@ main reactor {
       GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
       HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-      /* Configure Switch pins : PC1, PC2, PC3 */
+      /* Configure Switch pins : PC0, PC1 */
       GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
       GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
       GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -71,10 +71,7 @@ main reactor {
       huart4.Init.Mode = UART_MODE_TX_RX;
       huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
       huart4.Init.OverSampling = UART_OVERSAMPLING_16;
-      if (HAL_UART_Init(&huart4) != HAL_OK)
-      {
-        Error_Handler();
-      }
+      HAL_UART_Init(&huart4);
     }
 
     static void MX_UART5_Init(void) {
@@ -86,9 +83,7 @@ main reactor {
       huart5.Init.Mode = UART_MODE_TX_RX;
       huart5.Init.HwFlowCtl = UART_HWCONTROL_NONE;
       huart5.Init.OverSampling = UART_OVERSAMPLING_16;
-      if (HAL_UART_Init(&huart5) != HAL_OK) {
-        Error_Handler();
-      }
+      HAL_UART_Init(&huart5);
     }
 
     static void MX_UART6_Init(void) {
@@ -100,14 +95,14 @@ main reactor {
       huart6.Init.Mode = UART_MODE_TX_RX;
       huart6.Init.HwFlowCtl = UART_HWCONTROL_NONE;
       huart6.Init.OverSampling = UART_OVERSAMPLING_16;
-      if (HAL_UART_Init(&huart6) != HAL_OK) {
-        Error_Handler();
-      }
+      HAL_UART_Init(&huart6);
     }
   =}
+  // Main system clock we will use inside main
+  timer sys_tick(0 ms, 10 ms) 
 
-  timer motor_update(5 ms, 10 ms)
-  timer switch_motor(5 ms, 2000 ms)
+  // Switch moto position state
+  timer switch_motor(0 ms, 5000 ms)
   state count: int = 1
 
   qdec = new QDEC()           // FPGA-based QDEC Encoders
@@ -131,11 +126,35 @@ main reactor {
     MX_UART6_Init();
   =}
 
+
+
+
+  initial mode STARTUP {
+    reaction(sys_tick) -> qdec.reset_qdec, reset(RUN), reset(HOME) {=
+      lf_set(qdec.reset_qdec, true);
+      if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0)) {
+        printf("\r\n");
+        printf("==============================\r\n");
+        printf("==== [Startup: Warm Boot] ====\r\n");
+        printf("==============================\r\n\r\n");
+        lf_set_mode(RUN);
+      } else {
+        printf("\r\n");
+        printf("==============================\r\n");
+        printf("==== [Startup: Cold Boot] ====\r\n");
+        printf("==============================\r\n\r\n");
+        lf_set_mode(HOME);
+
+      }
+    =}
+
+  }
+
   // Used to update Motor target values
   // Reactor for updating motor target positions from manual targets
   // ros_controller.target_pos -> motors.target_pos  // Reactor for updating motor target positions from manual targets
   // Initial homing state for when we want home all of the joints
-  initial mode HOME {
+  mode HOME {
     timer home_pulse(50 ms, 100 ms)
     qdec.qdec_out -> home.current_pos
     qdec.sea_out -> home.sea_pos
@@ -160,7 +179,7 @@ main reactor {
       }
     =}
 
-    reaction(motor_update) -> motors.target_sel, motors.target_speed {=
+    reaction(sys_tick) -> motors.target_sel, motors.target_speed {=
       for (int i=0; i<7; i++) {
         lf_set(motors.target_sel[i], 0);
         lf_set(motors.target_speed[i], target_speed[i]);
@@ -170,7 +189,7 @@ main reactor {
 
   // Run state for when the robot is in operation
   mode RUN {
-    // reaction(motor_update) -> motors.target_sel, motors.target_speed {=
+    // reaction(sys_tick) -> motors.target_sel, motors.target_speed {=
     //   for (int i=0; i<7; i++) {
     //     lf_set(motors.target_speed[i], target_speed[i]);
     //   }
@@ -179,53 +198,32 @@ main reactor {
     //   }
     // =}
 
-    reaction(switch_motor) -> motors.target_sel, motors.target_speed {=
+    reaction(switch_motor) {=
       printf("switch state: %d\r\n", self->count);
       HAL_GPIO_TogglePin(GPIOH, GPIO_PIN_1);
       if (self->count == 0) {
         self->count = 1;
-        lf_set(motors.target_speed[0], 100);
-        lf_set(motors.target_speed[1], 100);
-        lf_set(motors.target_speed[2], 100);
-        lf_set(motors.target_speed[3], 100);
-        lf_set(motors.target_speed[4], 100);
-        lf_set(motors.target_speed[5], 100);
-        lf_set(motors.target_speed[6], 100);
-        target_pos[0] = 0;
-        target_pos[1] = 0;
-        target_pos[2] = 0;
-        target_pos[3] = 0;
-        target_pos[4] = 0;
-        target_pos[5] = 0;
-        target_pos[6] = 0;
       } else {
         self->count = 0;
-        lf_set(motors.target_speed[0], 100);
-        lf_set(motors.target_speed[1], 100);
-        lf_set(motors.target_speed[2], 100);
-        lf_set(motors.target_speed[3], 100);
-        lf_set(motors.target_speed[4], 100);
-        lf_set(motors.target_speed[5], 100);
-        lf_set(motors.target_speed[6], 100);
-        target_pos[0] = 6;
-        target_pos[1] = 6;
-        target_pos[2] = 6;
-        target_pos[3] = 6;
-        target_pos[4] = 6;
-        target_pos[5] = 6;
-        target_pos[6] = 6;
+      }
+    =}
+
+    reaction(sys_tick) -> motors.target_sel, motors.target_pos, motors.target_speed {=
+      if (self->count == 0) {
+        for (int i=0; i<7; i++) {
+          lf_set(motors.target_speed[i], 100);
+          lf_set(motors.target_pos[i], 0);
+        }
+      } else {
+        for (int i=0; i<7; i++) {
+          lf_set(motors.target_speed[i], -100);
+          lf_set(motors.target_pos[i], 15.707);
+        }
       }
 
       for (int i=0; i<7; i++) {
-        lf_set(motors.target_sel[i], 0);
+        lf_set(motors.target_sel[i], 1);
       }
     =}
   }
-
-  reaction(motor_update) -> motors.target_pos {=
-    for (int i=0; i<7; i++) {
-      lf_set(motors.target_pos[i], target_pos[i]);
-    }
-  =}
-  // }
 }

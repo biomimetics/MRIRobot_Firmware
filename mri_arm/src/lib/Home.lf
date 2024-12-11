@@ -38,13 +38,13 @@ reactor Home(sample_period: time = 15 ms) {
 
   preamble {=
 
-    int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
+    volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
     static int printVals = false;
     static int printcnt = 0;
     static int printcnt_lim = 20;
 
     static int home_state = 0;
-    static int _is_home = 1;
+    static int _is_home = 0;
 
 
     static float ref_0 = 0;

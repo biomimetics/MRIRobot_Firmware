@@ -72,8 +72,9 @@ int stm32_startup(void)
 {
   MX_USART2_UART_Init();
   SystemClock_Config();
-  printf("--------- STM32 START------------ \r\n");
-  HAL_Delay(1000);
+  printf("\r\n");
+  printf("~~~ STM32 START ~~~ \r\n");
+  printf("\r\n");
 
   main();
 }

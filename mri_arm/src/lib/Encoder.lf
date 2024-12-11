@@ -33,7 +33,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     uint8_t req_qdec[2]=  {0x04, 0x05};
 
 
-    float cpr_qdec[7]=   {23450, 23450, 23450, 23450, 23450, 23450, 23450};
+    float cpr_qdec[7]=   {23040, 23040, 23040, 23040, 23040, 23040, 23040};
     float cpr_sea[7]=     {40000, 40000, 40000, 40000, 40000, 40000, 40000};
     float pi = 3.14159;
 
@@ -49,10 +49,7 @@ reactor QDEC(sample_period: time = 5 ms) {
       huart3.Init.Mode = UART_MODE_TX_RX;
       huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
       huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-      if (HAL_UART_Init(&huart3) != HAL_OK)
-      {
-        Error_Handler();
-      }
+      HAL_UART_Init(&huart3);
     }
 
     static void MX_GPIO_Init(void) {
@@ -146,7 +143,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
 
   reaction(enable) {=
-    int read_switch = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
+    volatile int read_switch = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, read_switch);
 
     if (read_switch && !last_switch) {

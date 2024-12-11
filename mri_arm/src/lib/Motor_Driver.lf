@@ -13,6 +13,7 @@ import SEAController0 from "Joint_Controllers/SEA0.lf"
 import SEAController1 from "Joint_Controllers/SEA1.lf"
 import SEAController2 from "Joint_Controllers/SEA2.lf"
 
+
 preamble {=
   #include <stdio.h>
   #include "stm32f4xx_hal.h"
@@ -50,8 +51,9 @@ reactor MotorDriver(refresh_period: time = 5 ms) {
   control_u4 = new SEAController0()
   control_u5 = new SEAController0()
   control_u6 = new SEAController0()
-  // Feed in the target positions
 
+
+  // Feed in the target positions
   target_pos ->
     control_u0.target_pos,
     control_u1.target_pos,
