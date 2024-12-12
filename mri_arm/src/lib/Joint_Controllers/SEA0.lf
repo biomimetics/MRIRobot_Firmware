@@ -15,12 +15,22 @@ preamble {=
 =}
 
 reactor SEAController0(
-    Kp: float = 4,
-    Ki: float = 0.5,
-    Kd: float = -1,
-    Ks: float = 1000,
-    SLIM: float = 0.008,
-    SEA_LIM: float = 0.1) {
+    // Control constants
+    Kp: float = 4,      // Proportional control constant
+    Ki: float = 0.5,    // Integral control constant
+    Kd: float = -1,     // Differential control constant
+    Ks: float = 10,   // SEA control constant
+
+    // SEA transition values
+    SEA_LIM_P: float = 0.55,
+    SEA_LIM_D: float = 10,
+
+    // SEA passthrough values
+    LIM: float = 0.2,
+    CHANGE_P: float = 0.2,
+    CHANGE_D: float = 0.1
+
+    ) {
   input current_pos: float
   input sea_pos: float
   input target_pos: float
@@ -37,10 +47,9 @@ reactor SEAController0(
   state last_out: float = 0  // to help with state variables
 
   state cycle_count: int = 0
-
   state print_data: bool = true
 
-  force_control = new FFBController(Ks=Ks, SLIM=SLIM)
+  force_control = new FFBController(Kp=Ks, LIM=LIM, CHANGE_P=CHANGE_P, CHANGE_D=CHANGE_D)
   pos_control = new PIDController(Kp=Kp, Kd=Kd, Ki=Ki)
 
   current_pos -> force_control.current_pos
@@ -52,68 +61,72 @@ reactor SEAController0(
   target_pos -> pos_control.target_pos
 
   reaction(sea_pos, target_pos) {=
-    float D_LIM = 0.014;      // Force difference limit
-    float TRANS_CYCLES = 100;  // Number of cycles we stay in thetransient state
+    float TRANS_CYCLES = 0;  // Number of cycles we stay in transient state
 
-
+    // Any necessary operations we have here
     float sea_diff = (sea_pos->value - self->last_sea);
     float sea_error = sea_pos->value;
     self->last_sea = sea_pos->value;
 
-    bool pos_flag = (sea_error > self->SEA_LIM || sea_error < -self->SEA_LIM);
-    bool change_flag = (sea_diff > D_LIM || sea_diff < -D_LIM);
-
-    // printf("s %d\n\r", self->fsm_state);
+    bool flag_p = (sea_error > self->SEA_LIM_P || sea_error < -self->SEA_LIM_P);
+    bool flag_d = (sea_diff > self->SEA_LIM_D || sea_diff < -self->SEA_LIM_D);
 
     if (self->last_target != target_pos->value) {
-      self->fsm_state = 2;
+      self->fsm_state = 0;
       self->cycle_count = 0;
-    } else if(self->fsm_state == 1) {       // For normal PID movement
-      if (change_flag) {
-        if(self -> print_data) {
-          printf("X_ch_f %d\n\r", (int)(sea_diff * 10000));
-        }
-        self->fsm_state = 0; // We got to FFB state
-      } else if(pos_flag) {
-        if(self -> print_data) {
-          printf("X_pos_f %d\n\r", (int)(sea_error * 10000));
-        }
-        self->fsm_state = 0; // We got to FFB state
-      }
-    } else if(self->fsm_state == 2) {       // For initial movement transience
-      self->cycle_count++;
-      if (pos_flag) {
-        if(self -> print_data) {
-          printf("X_tr_pos: %d\n\r", (int)(sea_error * 1000));
-        }
-        self->fsm_state = 0; // We go to FFB state
-      } else if(self->cycle_count >= TRANS_CYCLES) {
-        self->fsm_state = 1; // We got to standard PID state
-      }
     }
+
+    /* SEA finite state machine:
+        0: PID movement state
+        1: Movement transient state (initial movement from new command)
+        2: Force feedback state for when we encounter an obstacle */
+    switch(self->fsm_state){
+      case 0: // For PID state
+        if (flag_p || flag_d) {
+          self->fsm_state = 2; // We got to FFB state
+          printf("triggered [%d, %d]\r\n", flag_p, (int)(sea_error*10000));
+        }
+        break;
+      
+      case 1: // For initial movement transient state  
+        self->cycle_count++;
+        if (flag_p){
+          self->fsm_state = 2; // We go to FFB state
+        } else if(self->cycle_count >= TRANS_CYCLES)
+          self->fsm_state = 0; // We got to standard PID state
+        break;
+      
+      case 2: // For Force Feedback state 
+        // We stay in this state until we get a new command
+        break;      
+      }
     self->last_target = target_pos->value;
   =}
 
   reaction(force_control.out, pos_control.out) -> out {=
-    float RISE_CAP = 1;
+    // Caps to decrease the rate of rise and fall
+    float RISE_CAP = 20;
     float FALL_CAP = 20;
-    if (self->fsm_state) {
 
-      float out_diff = pos_control.out->value - self->last_out;
-      float out_val = pos_control.out->value;
+    switch(self->fsm_state){
+      case 0: // For PID state
+        float out_diff = pos_control.out->value - self->last_out;
+        float out_val = pos_control.out->value;
 
-      if (out_diff > RISE_CAP) {
-        out_val = self->last_out + RISE_CAP;
-      }
-      if (out_diff < -FALL_CAP) {
-        out_val = self->last_out - FALL_CAP;
-      }
-      lf_set(out, out_val);
-      self->last_out = out_val;
+        // Apply the rise/fall caps
+        if (out_diff > RISE_CAP)
+          out_val = self->last_out + RISE_CAP;
+        if (out_diff < -FALL_CAP)
+          out_val = self->last_out - FALL_CAP;
 
-    } else {
-      lf_set(out, force_control.out->value);
-      self->last_out = 0;
+        lf_set(out, out_val);
+        self->last_out = out_val;
+        break;
+
+      case 2: // For Force Feedback state 
+        lf_set(out, force_control.out->value);
+        self->last_out = 0;
+        break;
     }
   =}
 }

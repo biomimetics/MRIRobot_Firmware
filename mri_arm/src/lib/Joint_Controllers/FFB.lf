@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
 =}
 
-reactor FFBController(Ks: float = 1200, SLIM: float = 0.003, D_LIM: float = 0.002) {
+reactor FFBController(Kp: float = 12, LIM: float = 0.003, CHANGE_P: float = 0.02, CHANGE_D: float = 0.002) {
   input current_pos: float
   input sea_pos: float
   input target_pos: float
@@ -25,24 +25,27 @@ reactor FFBController(Ks: float = 1200, SLIM: float = 0.003, D_LIM: float = 0.00
   // a certian threshold, we will move in a direction
   // TODO: Test this code
   reaction(target_pos, current_pos, sea_pos) -> out {=
-    float UPPER_LIM = 0.02;
     float pid_out;
 
     float error_p = sea_pos->value;
     float sea_diff = (sea_pos->value - self->last_sea);
     self->last_sea = sea_pos->value;
 
-    bool pos_flag = (error_p > UPPER_LIM || error_p < -UPPER_LIM);
-    bool change_flag = (sea_diff > self->D_LIM || sea_diff < -self->D_LIM);
+    bool flag_p = (error_p > self->CHANGE_P || error_p < -self->CHANGE_P);
+    bool flag_d = (sea_diff > self->CHANGE_D || sea_diff < -self->CHANGE_D);
     // FSM for control state.
     // 0: We are in the idle state
     // 1: We are moving
-    if(self->fsm_state) {
-      pid_out = self->Ks * error_p;
-      self->fsm_state = (error_p > self->SLIM || error_p < -self->SLIM);
-    } else {
-      pid_out = 0;
-      self->fsm_state = pos_flag || change_flag;
+    switch(self->fsm_state){
+      case 0: // For idle state
+        pid_out = 0;
+        self->fsm_state = flag_p || flag_d;
+        break;
+      case 1: // For movement state
+        pid_out = self->Kp * error_p;
+        self->fsm_state = (error_p > self->LIM || error_p < -self->LIM);
+        break;
+
     }
 
     pid_out = pid_out < -100? -100: pid_out;

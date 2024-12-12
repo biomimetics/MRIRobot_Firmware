@@ -47,10 +47,18 @@ reactor MotorDriver(refresh_period: time = 5 ms) {
   control_u0 = new SEAController0()
   control_u1 = new SEAController0()
   control_u2 = new SEAController0()
-  control_u3 = new SEAController0()
-  control_u4 = new SEAController0()
-  control_u5 = new SEAController0()
-  control_u6 = new SEAController0()
+  control_u3 = new SEAController1()
+  control_u4 = new SEAController1()
+  control_u5 = new SEAController2()
+  control_u6 = new SEAController2()
+
+  // control_u0 = new PIDController()
+  // control_u1 = new PIDController()
+  // control_u2 = new PIDController()
+  // control_u3 = new PIDController()
+  // control_u4 = new PIDController()
+  // control_u5 = new PIDController()
+  // control_u6 = new PIDController()
 
 
   // Feed in the target positions
@@ -109,16 +117,15 @@ reactor MotorDriver(refresh_period: time = 5 ms) {
     }
   =}
 
-  reaction(trigger) ->
-  usm.set_speed_0, usm.set_speed_1, usm.set_speed_2, usm.set_speed_3, usm.set_speed_4, usm.set_speed_5, usm.set_speed_6 {=
+  reaction(trigger) -> usm.speed{=
     // We use this to set either the speed or position of the motors
     // sel is used to determine which --> 0: speed control, 1: position control
-    lf_set(usm.set_speed_0, self->sel[0]? self->speed_posc[0]: self->speed_spc[0]);
-    lf_set(usm.set_speed_1, self->sel[1]? self->speed_posc[1]: self->speed_spc[1]);
-    lf_set(usm.set_speed_2, self->sel[2]? self->speed_posc[2]: self->speed_spc[2]);
-    lf_set(usm.set_speed_3, self->sel[3]? self->speed_posc[3]: self->speed_spc[3]);
-    lf_set(usm.set_speed_4, self->sel[4]? self->speed_posc[4]: self->speed_spc[4]);
-    lf_set(usm.set_speed_5, self->sel[5]? self->speed_posc[5]: self->speed_spc[5]);
-    lf_set(usm.set_speed_6, self->sel[6]? self->speed_posc[6]: self->speed_spc[6]);
+    lf_set(usm.speed[0], self->sel[0]? self->speed_posc[0]: self->speed_spc[0]);
+    lf_set(usm.speed[1], self->sel[1]? self->speed_posc[1]: self->speed_spc[1]);
+    lf_set(usm.speed[2], self->sel[2]? self->speed_posc[2]: self->speed_spc[2]);
+    lf_set(usm.speed[3], self->sel[3]? self->speed_posc[3]: self->speed_spc[3]);
+    lf_set(usm.speed[4], self->sel[4]? self->speed_posc[4]: self->speed_spc[4]);
+    lf_set(usm.speed[5], self->sel[5]? self->speed_posc[5]: self->speed_spc[5]);
+    lf_set(usm.speed[6], self->sel[6]? self->speed_posc[6]: self->speed_spc[6]);
   =}
 }

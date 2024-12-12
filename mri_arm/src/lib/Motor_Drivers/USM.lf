@@ -12,13 +12,10 @@ preamble {=
 =}
 
 reactor USM {
-  input set_speed_0: float
-  input set_speed_1: float
-  input set_speed_2: float
-  input set_speed_3: float
-  input set_speed_4: float
-  input set_speed_5: float
-  input set_speed_6: float
+  input[7] speed: float
+
+  // Main system clock we will use inside main
+  timer motor_tick(0 ms, 8 ms) 
 
   preamble {=
     TIM_HandleTypeDef htim1;
@@ -28,6 +25,7 @@ reactor USM {
 
     int MAX_SPEED[7]        =    {500, 500, 500, 500, 500, 500, 500};
     float SPEED_SCALE[7]    =    {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+    float _speed[7]         =    {0, 0, 0, 0, 0, 0, 0};
 
 
     static void MX_TIM3_Init(void) {
@@ -172,6 +170,12 @@ reactor USM {
     }
   =}
 
+  reaction(speed) {=
+    for (int i=0; i<7; i++) {
+      _speed[i] = speed[i]->value;
+    }
+  =}
+
   reaction(startup) {=
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
@@ -200,28 +204,18 @@ reactor USM {
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);   // USM_5, PB8
   =}
 
-  reaction(
-      set_speed_0,
-      set_speed_1,
-      set_speed_2,
-      set_speed_3,
-      set_speed_4,
-      set_speed_5,
-      set_speed_6) {=
+  reaction(motor_tick) {=
     // Set USM direction values
     // For some reason, setting the motor direction doesnt work unless we add a small delay in between
     // Update: It seems like moving the direction set above the enable pins resolves this issue
     //      Though I am still not sure why this is happening
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   set_speed_0->value >= 0);
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14,   set_speed_1->value >= 0);
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_15,   set_speed_2->value >= 0);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,   set_speed_1->value >= 0);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4,   set_speed_2->value >= 0);
-
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    set_speed_3->value >= 0);
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    set_speed_4->value >= 0);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   set_speed_5->value >= 0);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   set_speed_5->value >= 0);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   _speed[0] >= 0);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    _speed[1] >= 0);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4,    _speed[2] >= 0);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    _speed[3] >= 0);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    _speed[4] >= 0);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   _speed[5] >= 0);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   _speed[6] >= 0);
     
 
     float USM_LIMIT = 0.06;
@@ -229,27 +223,25 @@ reactor USM {
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, en_usm);
 
     // Set USM enable values
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    (set_speed_0->value > USM_LIMIT || set_speed_0->value < -USM_LIMIT) && en_usm);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    (set_speed_1->value > USM_LIMIT || set_speed_1->value < -USM_LIMIT) && en_usm);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    (set_speed_2->value > USM_LIMIT || set_speed_2->value < -USM_LIMIT) && en_usm);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    (set_speed_3->value > USM_LIMIT || set_speed_3->value < -USM_LIMIT) && en_usm);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   (set_speed_4->value > USM_LIMIT || set_speed_4->value < -USM_LIMIT) && en_usm);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   (set_speed_5->value > USM_LIMIT || set_speed_5->value < -USM_LIMIT) && en_usm);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   (set_speed_6->value > USM_LIMIT || set_speed_6->value < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    (_speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    (_speed[1] > USM_LIMIT || _speed[1] < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    (_speed[2] > USM_LIMIT || _speed[2] < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    (_speed[3] > USM_LIMIT || _speed[3] < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   (_speed[4] > USM_LIMIT || _speed[4] < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   (_speed[5] > USM_LIMIT || _speed[5] < -USM_LIMIT) && en_usm);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   (_speed[6] > USM_LIMIT || _speed[6] < -USM_LIMIT) && en_usm);
 
     // Sometimes it doesnt properly register if we dont add a delay here. 
     //    I think its an issue with the motor controller getting too many commands at the same time
-    HAL_Delay(1); 
 
     if (en_usm) {
-      TIM3->CCR1 = conv_speed(set_speed_0->value, 0);  // Set period for USM0
-      TIM3->CCR2 = conv_speed(set_speed_1->value, 1);  // Set period for USM1
-      TIM3->CCR3 = conv_speed(set_speed_2->value, 2);  // Set period for USM2
-      TIM3->CCR4 = conv_speed(set_speed_3->value, 3);  // Set period for USM3
-      TIM4->CCR1 = conv_speed(set_speed_4->value, 4);  // Set period for USM4
-      TIM4->CCR2 = conv_speed(set_speed_5->value, 5);  // Set period for USM5
-      TIM4->CCR3 = conv_speed(set_speed_6->value, 6);  // Set period for USM6
-
+      TIM3->CCR1 = conv_speed(_speed[0], 0);  // Set period for USM0
+      TIM3->CCR2 = conv_speed(_speed[1], 1);  // Set period for USM1
+      TIM3->CCR3 = conv_speed(_speed[2], 2);  // Set period for USM2
+      TIM3->CCR4 = conv_speed(_speed[3], 3);  // Set period for USM3
+      TIM4->CCR1 = conv_speed(_speed[4], 4);  // Set period for USM4
+      TIM4->CCR2 = conv_speed(_speed[5], 5);  // Set period for USM5
+      TIM4->CCR3 = conv_speed(_speed[6], 6);  // Set period for USM6
     } else {  // We disable the input
       TIM3->CCR1 = conv_speed(0, 0);  // Set period for USM0
       TIM3->CCR2 = conv_speed(0, 1);  // Set period for USM1
@@ -259,6 +251,5 @@ reactor USM {
       TIM4->CCR2 = conv_speed(0, 5);  // Set period for USM5
       TIM4->CCR3 = conv_speed(0, 6);  // Set period for USM6
     }
-    
   =}
 }
