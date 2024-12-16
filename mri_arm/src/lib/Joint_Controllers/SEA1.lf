@@ -19,16 +19,16 @@ reactor SEAController1(
     Kp: float = 4,      // Proportional control constant
     Ki: float = 0.5,    // Integral control constant
     Kd: float = -1,     // Differential control constant
-    Ks: float = 1000,   // SEA control constant
+    Ks: float = 10,   // SEA control constant
 
     // SEA transition values
-    SEA_LIM_P: float = 0.05,
-    SEA_LIM_D: float = 0.014,
+    SEA_LIM_P: float = 0.3,
+    SEA_LIM_D: float = 10,
 
     // SEA passthrough values
-    LIM: float = 0.05,
-    CHANGE_P: float = 0.02,
-    CHANGE_D: float = 0.002
+    LIM: float = 0.23,
+    CHANGE_P: float = 0.33,
+    CHANGE_D: float = 2
 
     ) {
   input current_pos: float
@@ -72,7 +72,7 @@ reactor SEAController1(
     bool flag_d = (sea_diff > self->SEA_LIM_D || sea_diff < -self->SEA_LIM_D);
 
     if (self->last_target != target_pos->value) {
-      self->fsm_state = 1;
+      self->fsm_state = 0;
       self->cycle_count = 0;
     }
 
@@ -83,15 +83,16 @@ reactor SEAController1(
     switch(self->fsm_state){
       case 0: // For PID state
         if (flag_p || flag_d) {
-          self->fsm_state = 0; // We got to FFB state
+          self->fsm_state = 2; // We got to FFB state
+          printf("triggered [%d, %d]\r\n", flag_p, (int)(sea_error*10000));
         }
         break;
       
       case 1: // For initial movement transient state  
         self->cycle_count++;
-        if (flag_p)
+        if (flag_p){
           self->fsm_state = 2; // We go to FFB state
-        else if(self->cycle_count >= TRANS_CYCLES)
+        } else if(self->cycle_count >= TRANS_CYCLES)
           self->fsm_state = 0; // We got to standard PID state
         break;
       

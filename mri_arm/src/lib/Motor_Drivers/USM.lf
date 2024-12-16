@@ -27,6 +27,7 @@ reactor USM {
     float SPEED_SCALE[7]    =    {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
     float _speed[7]         =    {0, 0, 0, 0, 0, 0, 0};
 
+    float motor_dir[7]=   {1, 1, 1, -1, -1, -1, -1};
 
     static void MX_TIM3_Init(void) {
       TIM_ClockConfigTypeDef sClockSourceConfig = {0};
@@ -172,7 +173,7 @@ reactor USM {
 
   reaction(speed) {=
     for (int i=0; i<7; i++) {
-      _speed[i] = speed[i]->value;
+      _speed[i] = speed[i]->value * motor_dir[i];
     }
   =}
 

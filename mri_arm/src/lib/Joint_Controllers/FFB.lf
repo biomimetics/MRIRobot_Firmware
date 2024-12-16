@@ -23,7 +23,6 @@ reactor FFBController(Kp: float = 12, LIM: float = 0.003, CHANGE_P: float = 0.02
   // The Force Feedback controller (FFB) works to set the force experienced by the SEA to zero
   // This is done by sensing the SEA displacement and if it is greater than
   // a certian threshold, we will move in a direction
-  // TODO: Test this code
   reaction(target_pos, current_pos, sea_pos) -> out {=
     float pid_out;
 
