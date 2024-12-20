@@ -1,0 +1,156 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+  #include <stdio.h>
+=}
+
+reactor ROS_Interface {
+  input[7] current_pos: float
+  input[7] sea_pos: float
+
+  output[7] target_pos: float
+
+  timer trigger_send(1000 ms, 500 ms)
+  timer trigger_read(0, 20 ms)
+
+  // Data in format:      'p' + 6x[fp32] -> 25 bytes
+  // Data out format:     'e' + 6x[fp32] -> 25 bytes
+  preamble {=
+    UART_HandleTypeDef huart1;        // usb-c tied urart for computer communication
+    extern UART_HandleTypeDef huart2;
+
+    DMA_HandleTypeDef hdma_usart1_rx;
+    DMA_HandleTypeDef hdma_usart1_tx;
+
+    // Setup Rx and Tx buffers
+    static uint8_t rx_buffer[50];
+    static uint8_t tx_buffer[50];
+
+    int enc_data[7];
+    int sea_data[7];
+    int16_t joint_data[7];
+    float scaled_joint_data[7];
+
+    uint8_t UART1_rxBuffer2[20] = "THEREHELLO\r\n";
+
+    // We have an inFlight indicator if the DMA is currently sending data
+    static int inFlight = 0;
+
+    static float get_target(uint8_t* data) {
+      float count = data[0] + (data[1]<<8) + (data[2]<<16) + (data[3]<<24) + (data[4]<<32);
+      return count;
+    }
+
+    void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+    {
+      inFlight = 0;
+    }
+
+    static void MX_UART1_Init(void) {
+      huart1.Instance = USART1;
+      // huart1.Init.BaudRate = 921600;
+      huart1.Init.BaudRate = 230400;
+      huart1.Init.WordLength = UART_WORDLENGTH_8B;
+      huart1.Init.StopBits = UART_STOPBITS_1;
+      huart1.Init.Parity = UART_PARITY_NONE;\
+      huart1.Init.Mode = UART_MODE_TX_RX;
+      huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+      huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+      HAL_UART_Init(&huart1);
+    }
+
+    static void MX_DMA_Init(void) {
+      __HAL_RCC_DMA2_CLK_ENABLE();
+
+      /* DMA interrupt init */
+      /* DMA2_Stream2_IRQn interrupt configuration */
+      HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
+      HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
+      /* DMA2_Stream7_IRQn interrupt configuration */
+      HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 0, 0);
+      HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
+
+    }
+
+    
+  =}
+
+  reaction(startup) {=
+    // Prep the send indicator
+    tx_buffer[0] = 'e';
+
+    // Prep UART interfaces
+    MX_DMA_Init();
+    MX_UART1_Init();
+    
+  =}
+
+  reaction(trigger_send) {=
+    printf("TRYSEND\r\n");
+    if (! inFlight) {
+      printf("SENDED\r\n");
+      // HAL_UART_Transmit_DMA(&huart1, UART1_rxBuffer2, 12);
+      HAL_StatusTypeDef status = HAL_UART_Transmit_DMA(&huart1, UART1_rxBuffer2, 12);
+      if (status == HAL_OK) {
+        printf("OK\r\n");
+      } else if (status == HAL_BUSY) {
+        printf("BUSY\r\n");
+      } else {
+        printf("FUCK\r\n");
+      }
+    }
+  =}
+
+  reaction(trigger_read) -> target_pos {=
+    if (HAL_UART_Receive(&huart1, rx_buffer, 1, 0) == HAL_OK && (rx_buffer[0] == 'p')) {
+      if (HAL_UART_Receive(&huart1, rx_buffer, 14, 100) == HAL_OK) {
+        for (int i=0; i<7; i++) {
+          joint_data[i] = rx_buffer[(i*2)+1]  + (rx_buffer[(i*2)]<<8);
+        }
+
+        scaled_joint_data[0] = ((float) joint_data[0])/1000;
+        scaled_joint_data[1] = ((float) joint_data[1])/1000;
+        scaled_joint_data[2] = ((float) joint_data[2])/1000;
+        scaled_joint_data[3] = ((float) joint_data[3])/1000;
+        scaled_joint_data[4] = ((float) joint_data[3])/1000;
+        scaled_joint_data[5] = ((float) joint_data[1])/1000;
+        scaled_joint_data[6] = ((float) joint_data[6])/1000;
+
+        for (int i=0; i<7; i++) {
+          lf_set(target_pos[i], scaled_joint_data[i]);
+        }
+        printf("got: %d,%d,%d,%d,%d,%d,%d\n", (int)joint_data[0], (int)joint_data[1], (int)joint_data[2], (int)joint_data[3], (int)joint_data[4], (int)joint_data[5], (int)joint_data[6]);
+      }
+
+    }
+
+  =}
+
+  reaction(current_pos) {=
+    enc_data[0] = (int)(current_pos[0]->value * 1000);
+    enc_data[1] = (int)(current_pos[1]->value * 1000);
+    enc_data[2] = (int)(current_pos[2]->value * 1000);
+    enc_data[3] = (int)(current_pos[3]->value * 1000);
+    enc_data[4] = (int)(current_pos[4]->value * 1000);
+    enc_data[5] = (int)(current_pos[5]->value * 1000);
+    enc_data[6] = (int)(current_pos[6]->value * 1000);
+  =}
+
+  reaction(sea_pos) {=
+    sea_data[0] = (int)(sea_pos[0]->value * 1000);
+    sea_data[1] = (int)(sea_pos[1]->value * 1000);
+    sea_data[2] = (int)(sea_pos[2]->value * 1000);
+    sea_data[3] = (int)(sea_pos[3]->value * 1000);
+    sea_data[4] = (int)(sea_pos[4]->value * 1000);
+    sea_data[5] = (int)(sea_pos[5]->value * 1000);
+    sea_data[6] = (int)(sea_pos[6]->value * 1000);
+  =}
+}
