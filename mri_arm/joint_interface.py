@@ -1,5 +1,7 @@
 import serial 
 from time import sleep
+import datetime
+import time
 
 # BAUD_RATE = 230400
 BAUD_RATE = 921600
@@ -7,6 +9,8 @@ BAUD_RATE = 921600
 COUNTER_TRIGGER = 10000000
 FP_COMPRESSION = (1000, 1000, 1000, 1000, 1000, 1000, 1000)
 STATE = 0
+
+FILE_NAME = "output.log"
 
 
 # For out callback, we send a value between 0 and 10,000 
@@ -46,6 +50,7 @@ def conv_val(value):
 
 # Define the method which contains the node's main functionality
 def listener():
+  start_time = time.time()
   counter = 0
   while True:
       if STM32_serial.in_waiting >= 40:
@@ -58,6 +63,11 @@ def listener():
             data_str = read_val[1:-2].split(',')
             data_float = [conv_val(i) for i in data_str]
             print(data_float)
+
+            curr_time = time.time() - start_time
+
+            f = open(FILE_NAME,'a')
+            f.write(str(curr_time) + ", " + str(data_float)[1:-1] + "\n")
           else:
             print("   [Invalid]:", read_val, end="")
       else:
@@ -65,7 +75,7 @@ def listener():
         if (counter == COUNTER_TRIGGER-500000):
           print("AAAAAAAAAAAAAA")
         if counter >= COUNTER_TRIGGER:
-          callback(None)
+          # callback(None)
           counter = 0
         else:
           counter += 1
@@ -75,13 +85,18 @@ def listener():
 if __name__ == '__main__':
     # Test different ports until one sticks. If not, rais an error
     try:
-      STM32_serial = serial.Serial(port='/dev/tty.usbserial-DU0D4EM2', baudrate=BAUD_RATE, timeout=1)
+      STM32_serial = serial.Serial(port='/dev/tty.usbserial-D30JKY57', baudrate=BAUD_RATE, timeout=1)
       # STM32_serial = serial.Serial(port='/dev/tty.usbmodem103', baudrate=BAUD_RATE, timeout=1)
     except:
        STM32_serial = None  
     
     if STM32_serial == None:
         raise Exception("Unable to detect STM32 controller")
+    
+
+    f = open(FILE_NAME,'w')
+    f.write("")
+    
     
     listener()
     

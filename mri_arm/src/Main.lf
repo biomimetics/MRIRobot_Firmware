@@ -102,7 +102,7 @@ main reactor {
   timer sys_tick(0 ms, 10 ms) 
 
   // Switch moto position state
-  timer switch_motor(0 ms, 5000 ms)
+  timer switch_motor(0 ms, 6000 ms)
   state count: int = 1
 
   qdec = new QDEC()           // FPGA-based QDEC Encoders
@@ -210,10 +210,10 @@ main reactor {
 
     reaction(sys_tick) -> motors.target_sel, motors.target_pos, motors.target_speed {=
       if (self->count == 0) {
-        // for (int i=0; i<7; i++) {
-        //   lf_set(motors.target_speed[i], 100);
-        //   lf_set(motors.target_pos[i], 0);
-        // }
+        for (int i=0; i<7; i++) {
+          lf_set(motors.target_speed[i], 100);
+          lf_set(motors.target_pos[i], 0);
+        }
         lf_set(motors.target_pos[1], 0);
       } else {
         // for (int i=0; i<7; i++) {

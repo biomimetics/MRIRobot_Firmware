@@ -18,7 +18,7 @@ reactor ROS_Interface {
 
   output[7] target_pos: float
 
-  timer trigger_send(500 ms, 500 ms)
+  timer trigger_send(0 ms, 200 ms)
   timer trigger_read(0, 20 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
@@ -32,6 +32,7 @@ reactor ROS_Interface {
     static uint8_t tx_buffer[50];
 
     int enc_data[7];
+    int sea_data[7];
     int16_t joint_data[7];
     float scaled_joint_data[7];
 
@@ -86,12 +87,26 @@ reactor ROS_Interface {
     }
   =}
 
+  reaction(sea_pos) {=
+    if (!inFlight) {
+      sea_data[0] = (int)(sea_pos[0]->value * 1000);
+      sea_data[1] = (int)(sea_pos[1]->value * 1000);
+      sea_data[2] = (int)(sea_pos[2]->value * 1000);
+      sea_data[3] = (int)(sea_pos[3]->value * 1000);
+      sea_data[4] = (int)(sea_pos[4]->value * 1000);
+      sea_data[5] = (int)(sea_pos[5]->value * 1000);
+      sea_data[6] = (int)(sea_pos[6]->value * 1000);
+    }
+  =}
+
   reaction(trigger_send) {=
     if (!inFlight) {
       // inFlight = 1; // Indicate that we are currently sending data
-      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
+      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+            enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
+            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
+      // HAL_UART_Transmit_IT(&huart1, tx_buffer, num);
       HAL_UART_Transmit(&huart1, tx_buffer, num, HAL_MAX_DELAY);
-      // printf("e%d,%d,%d,%d,%d,%d,%d\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
     }
   =}
 

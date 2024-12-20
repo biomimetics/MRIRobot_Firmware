@@ -32,10 +32,10 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     uint8_t req_qdec[2]=  {0x04, 0x05};
 
-    float qdec_dir[7]=   {1, 1, 1, 1, 1, 1, 1};
     float cpr_qdec[7]=   {23040, 23040, 23040, 23040, 23040, 23040, 23040};
     float cpr_sea[7]=     {400, 400, 400, 400, 400, 400, 400};
-    float SEA_offset[7]=     {0, 0, 0, -120, 200, 0, 0};
+    float SEA_offset[7]=     {0, -270, 0, -120, 200, 0, 0};
+    // float SEA_offset[7]=     {0, 0, 0, -120, 200, 0, 0};
     float pi = 3.14159;
 
     uint8_t data[100];
@@ -127,7 +127,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     // Get values for USM encoders
     get_ticks(req_qdec[1]);
     for (int i=0; i<7; i++) {
-      lf_set(qdec_out[i],  qdec_dir[i] * 2*pi* ((float) (count[i]) / cpr_qdec[i]));
+      lf_set(qdec_out[i],  2*pi* ((float) (count[i]) / cpr_qdec[i]));
       if (printVals && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (qdec_out[i]->value*100));
       }
