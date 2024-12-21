@@ -83,8 +83,8 @@ def listener():
 if __name__ == '__main__':
     # Test different ports until one sticks. If not, rais an error
     try:
-      # STM32_serial = serial.Serial(port='/dev/tty.usbserial-D30JKY57', baudrate=BAUD_RATE, timeout=1)
-      STM32_serial = serial.Serial(port='/dev/tty.usbserial-DU0D4EM2', baudrate=BAUD_RATE, timeout=1)
+      STM32_serial = serial.Serial(port='/dev/tty.usbserial-D30JKY57', baudrate=BAUD_RATE, timeout=1)
+      # STM32_serial = serial.Serial(port='/dev/tty.usbserial-DU0D4EM2', baudrate=BAUD_RATE, timeout=1)
     except:
        STM32_serial = None  
     

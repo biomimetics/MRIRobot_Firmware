@@ -91,20 +91,10 @@ reactor QDEC(sample_period: time = 5 ms) {
     }
 
 
-    static void get_ticks() {
-      // stall = 1;
-      // HAL_UART_Receive_DMA(&huart3, data, 98);
-      // HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
-      // while (stall);
-
-      for(int i=0; i<14; i++) {
-        count[i] = data[0 + (i*7)] + (data[1 + (i*7)]<<8) + (data[2 + (i*7)]<<16) + (data[3 + (i*7)]<<24) + (data[4 + (i*7)]<<32) + (data[5 + (i*7)]<<40) + (data[6 + (i*7)]<<48);
-      }
-    }
-
     void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
       HAL_UART_Receive_DMA(&huart3, data, 98);
-      HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
+      // printf("RCV \r\n");
+      // HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
     }
 
     static int last_switch = 0;
@@ -126,7 +116,6 @@ reactor QDEC(sample_period: time = 5 ms) {
     HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
 
     HAL_UART_Receive_DMA(&huart3, data, 98);
-    HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
   =}
 
   // Update Encoder values
@@ -135,8 +124,14 @@ reactor QDEC(sample_period: time = 5 ms) {
     long start = HAL_GetTick();
 
 
+    // Prep the next request
+    HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
+
     // Shift over relevant data
-    get_ticks();
+    for(int i=0; i<14; i++) {
+      count[i] = data[0+(i*7)] + (data[1+(i*7)]<<8) + (data[2+(i*7)]<<16) + (data[3+(i*7)]<<24) 
+                               + (data[4+(i*7)]<<32) + (data[5+(i*7)]<<40) + (data[6+(i*7)]<<48);
+    }
 
     // Get values for SEA encoders
     for (int i=0; i<7; i++) {
@@ -148,7 +143,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
-      lf_set(qdec_out[i-7],  2*pi* ((float) (count[i]) / cpr_qdec[i]));
+      lf_set(qdec_out[i-7],  2*pi* ((float) (count[i]) / cpr_qdec[i-7]));
       if (printVals && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (qdec_out[i-7]->value*100));
       }

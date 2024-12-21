@@ -18,7 +18,7 @@ reactor ROS_Interface {
 
   output[7] target_pos: float
 
-  timer trigger_send(1000 ms, 500 ms)
+  timer trigger_send(1000 ms, 50 ms)
   timer trigger_read(0, 20 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
@@ -55,8 +55,8 @@ reactor ROS_Interface {
 
     static void MX_UART1_Init(void) {
       huart1.Instance = USART1;
-      // huart1.Init.BaudRate = 921600;
-      huart1.Init.BaudRate = 230400;
+      huart1.Init.BaudRate = 921600;
+      // huart1.Init.BaudRate = 230400;
       huart1.Init.WordLength = UART_WORDLENGTH_8B;
       huart1.Init.StopBits = UART_STOPBITS_1;
       huart1.Init.Parity = UART_PARITY_NONE;\
@@ -98,7 +98,6 @@ reactor ROS_Interface {
       int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
             enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
             sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
-      // HAL_UART_Transmit(&huart1, tx_buffer, num, HAL_MAX_DELAY);
       HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
     }
   =}
