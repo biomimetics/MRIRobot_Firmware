@@ -1,0 +1,167 @@
+/*
+ * Copyright (c) 2021 Eug Krashtan
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Application overlay for creating temperature sensor device instance
+ from framework-zephyr/samples/sensor/stm32_temp_sensor/boards/nucleo_f401re.overlay
+ changed adc1 16 to adc1 18 per f446re tech manual
+
+ * Application overlay for creating quadrature decoder device instance
+ * added DAC overlay (also need to enable in proj.conf)
+
+ */
+
+
+/ {
+	zephyr,user {
+		dac = <&dac1>;
+		dac-channel-id = <1>;
+		dac-resolution = <12>;
+		/* adjust adc channel number according to pinmux in board.dts */
+		/* watch out for conflict with uarta pa2+pa3, led pa5, d/a pa4, qdec pa6+7 */
+		io-channels = <&adc1 6>; 
+	};
+};
+
+&timers3 {
+    status = "okay";
+
+    qdec: qdec {
+        status = "okay";
+        pinctrl-0 = <&tim3_ch1_pa6 &tim3_ch2_pa7>;
+        pinctrl-names = "default";
+        st,input-filter-level = <0x16>;
+        st,counts-per-revolution = <16>;
+
+		label = "QDEC_3";
+    };
+};
+
+
+/* stuff for adc setup */
+&adc1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+    status = "okay";
+	pinctrl-0 = < &adc1_in6_pa6 >;
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = "ADC_ACQ_TIME_DEFAULT"; 
+		zephyr,resolution = <12>;
+	};
+};
+
+
+/{
+	soc 
+	{
+		dac1: dac@40007400 
+		{   compatible = "st,stm32-dac"; 
+			reg = < 0x40007400 0x400 >; 
+			clocks = < &rcc 0x2 0x20000000 >;
+			status = "okay";
+			label = "DAC_1";
+			#io-channel-cells = < 0x1 >;
+			pinctrl-0 = < &dac_out1_pa4 >;
+			phandle = < 0x14 >;
+		};
+
+		usart2: serial@40004400 {
+			compatible = "st,stm32-usart", "st,stm32-uart";
+			reg = < 0x40004400 0x400 >;
+			clocks = < &rcc 0x2 0x20000 >;
+			interrupts = < 0x26 0x0 >;
+			status = "okay";
+			label = "UART_2";
+			pinctrl-0 = < &usart2_tx_pa2 &usart2_rx_pa3 >;
+			current-speed = < 230400 >;
+		};
+	};
+};
+
+
+/ {
+	leds {
+		compatible = "gpio-leds";
+		digital_13: led_13 {
+			gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>;
+			label = "User LD13";
+		};
+		digital_12: led_12 {
+			gpios = <&gpioa 6 GPIO_ACTIVE_HIGH>;
+			label = "User LD12";
+		};
+		digital_11: led_11 {
+			gpios = <&gpioa 7 GPIO_ACTIVE_HIGH>;
+			label = "User LD11";
+		};
+		digital_10: led_10 {
+			gpios = <&gpiob 6 GPIO_ACTIVE_HIGH>;
+			label = "User LD10";
+		};
+		digital_9: led_09 {
+			gpios = <&gpioc 7 GPIO_ACTIVE_HIGH>;
+			label = "User LD09";
+		};
+		digital_8: led_08 {
+			gpios = <&gpioa 9 GPIO_ACTIVE_HIGH>;
+			label = "User LD08";
+		};
+
+		digital_m: led_m {
+			gpios = <&gpiob 7 GPIO_ACTIVE_HIGH>;
+			label = "User LDA0";
+		};
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+		digitalin_0: digitalin-a3 {
+			gpios = <&gpioa 3 (GPIO_PULL_DOWN | GPIO_ACTIVE_LOW)>;
+			label = "Button on A3";
+		};
+		digitalin_1: digitalin-a2 {
+			gpios = <&gpioa 2 (GPIO_PULL_DOWN | GPIO_ACTIVE_LOW)>;
+			label = "Button on A2";
+		};
+		digitalin_2: digitalin-a10 {
+			gpios = <&gpioa 10 (GPIO_PULL_DOWN | GPIO_ACTIVE_LOW)>;
+			label = "Button on A10";
+		};
+		digitalin_3: digitalin-b3 {
+			gpios = <&gpiob 3 (GPIO_PULL_DOWN | GPIO_ACTIVE_LOW)>;
+			label = "Button on B3";
+		};
+		start0: start_sw {
+			gpios = <&gpioa 1 (GPIO_PULL_DOWN | GPIO_ACTIVE_LOW)>;
+			label = "Button on EN0";
+		};
+
+	};
+
+	aliases {
+		d13 = &digital_13;
+		d12 = &digital_12;
+		d11 = &digital_11;
+		d10 = &digital_10;
+		d9 = &digital_9;
+		d8 = &digital_8;
+
+		d3 = &digitalin_3;
+		d2 = &digitalin_2;
+		d1 = &digitalin_1;
+		d0 = &digitalin_0;
+
+		en0 = &start0;
+		mdir0 = &digital_m;
+
+	};
+};
+
+
+
+
+

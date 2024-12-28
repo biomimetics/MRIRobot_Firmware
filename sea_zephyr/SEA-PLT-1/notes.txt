@@ -1,0 +1,1122 @@
+Notes on using STM32F446 Nucleo-64 with Zephyr
+
+April 25, 2023
+
+#define ADC_CHANNEL DT_IO_CHANNELS_INPUT_BY_IDX(DT_PATH(zephyr_user),0)
+zephyr,user: io-channels = <&adc1 6>;
+now ADC_CHANNEL = 6 as desired.
+need to set sequence 
+
+
+What IOs are already in use???
+PA2, PA3, PA5, PC13
+
+choose:
+pinctrl-0 = < &adc1_in6_pa6 >;
+
+pinctrl-0 = < &usart2_tx_pa2 &usart2_rx_pa3 >; (console)
+pinctrl-0 = < &usart1_tx_pb6 &usart1_rx_pb7 >;
+
+green_led_2: led_2 {
+			gpios = < &gpioa 0x5 0x0 >;0x0 = output??
+			label = "User LD2";
+			
+user_button: button {
+			label = "User";
+			gpios = < &gpioc 0xd 0x1 >; 0x1 = input??
+			
+try PA6 may no have conflict			
+
+
+CONT bit (for single versus continuous conversion)
+ADC_CR2.CONT
+ADC_SQR3.SQ[4:0] is channel for first conversion, this is 0x1f which is an error
+ADC_SQR1.L[3:0] is 0, which indicates 1 channel to read
+
+
+
+in adc_stm32.c, line 620: 	error = start_read(dev, sequence);
+if sequence->channels =0, then index = -1? 
+in adc_stm32.c, ine 382, uint32_t channel = __LL_ADC_DECIMAL_NB_TO_CHANNEL(index);
+line 402	LL_ADC_REG_SetSequencerRanks(adc, table_rank[0], channel);
+preg: 0x40012034 (this is ADC_SQR3, with bits[4:0] specifying A/D channel
+channel: 770703615, rank: 512 (these values seem off)
+
+try a/d channel 2, PA3 to see if off by 1 is problem
+
+
+in adc_stm32.c, resolution =0?
+	line 428: 	LL_ADC_SetResolution(adc, resolution);
+	ADC_CR1.RES[1:0] = 0x00 for 12 bits, so this is fine.
+	
+	struct adc_channel_cfg channel_cfg={
+        .gain = ADC_GAIN,
+        .reference = ADC_REFERENCE,
+        .channel_id = 3,    // MUST BE >0 as AD0 = chan 1!!! 
+        .differential=0
+
+try changing overlay to 
+io-channels = <&adc1 2>;
+pinctrl-0 = < &adc1_in2_pa2 >;
+
+now channel_cfg : channel_id:2
+index is still 255, need to setup sequence with channel numbers???
+struct adc_sequence:
+added .channels = 0b10, for channel 2.
+
+
+struct adc_channel_cfg
+uint8_t channel_id;  .channel_id = 2,   
+
+    Channel identifier. This value primarily identifies the channel within the ADC API - 
+	when a read request is done, the corresponding bit in the “channels” field of the “adc_sequence” 
+	structure must be set to include this channel in the sampling. 
+	Now line 382: uint32_t channel = __LL_ADC_DECIMAL_NB_TO_CHANNEL(index);
+	index =1, channel = 36700161= '0x2300001'
+	now SQR3.SQ1[4:0]=0x01, so AD channel 1
+	
+	try chan 18 which is VBat/4
+	in sequence, need to set uint32_t channels .channels to 1 << 18, 
+	com3 stopped working?
+	Looks like is reading in18 now, get buffer 600-900, bt printing stopped.
+	Try restarting visual studio code
+	
+	
+	
+	
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+April 24, 2023
+what pin is LED? (LD2)
+User LD2: the green LED is a user LED connected to ARDUINO® signal D13 corresponding 
+to STM32 I/O PA5 (pin 21) or PB13 (pin 34) depending on the STM32 target.
+green_led_2: led_2 {gpios = < &gpioa 0x5 0x0 >;
+
+GPIOA: 
+MODER = 0xa800 00a3 
+PA3	PA2	PA1	PA0
+10	10	00	11   (analog)
+PUPDR0[1:0] 0b00 input/output
+IDR0[0:0]=0
+ODR0[0:0]=0
+AFRL0[3:0] =0x0 ? SYS mode?
+OTYPER[0:0]=0 output type 0: Output push-pull (reset state)
+
+pin = 0 (pa0)
+func = 48 = 0x30 = mode
+altf = 16 (should be analog)
+
+
+ret = stm32_pin_configure()
+	pinmux_stm32.c
+what does	STM32_PORT(pin) do? 
+#define STM32_PORT(__pin) ((__pin) >> 4)
+#define STM32_PIN(__pin)  ((__pin) & 0xf) 
+
+
+port_device = GPIO_DEVICE(gpioa)
+	-> api: 0x8005480 <gpio_stm32_driver>
+gpio_stm32_configure(port_device, STM32_PIN(pin), func, altf);
+
+Translate pin to pinval that the LL library needs
+	int pin_ll = stm32_pinval_get(pin);
+LL_GPIO_SetPinMode(gpio, pin_ll, mode >> STM32_MODER_SHIFT);
+	LL_GPIO_SetPinMode@0x0800437c 
+_pio\modules\hal\stm32\stm32cube\stm32f4xx\drivers\include\stm32f4xx_ll_gpio.h:276)
+gpio_stm32_configure@0x0800437c 
+ Configure gpio mode for a dedicated pin on dedicated port.
+  * @note   I/O mode can be Input mode, General purpose output, 
+  Alternate function mode or Analog.
+ Mode This parameter can be one of the following values:
+  *         @arg @ref LL_GPIO_MODE_INPUT
+  *         @arg @ref LL_GPIO_MODE_OUTPUT
+  *         @arg @ref LL_GPIO_MODE_ALTERNATE
+  *         @arg @ref LL_GPIO_MODE_ANALOG
+only needs to modify MODER
+only thing setup by drivers/adc/adc_stm32.c
+
+LL_ADC_Enable(adc); SET_BIT(ADCx->CR2, ADC_CR2_ADON); ADC1.CR2.ADON=1
+Bit 0 ADON: A/D Converter ON / OFF 1: Enable ADC
+ADC1.SQR3.SQ1=0x1f? (first conversion in reqular sequence)
+ADC1.DR.DATA=0x11 (read value, but from which channel?) 
+
+
+Check adc registers:
+
+
+	
+
+
+
+
+
+
+
+
+
+----------------------------
+April 23, 2023
+
+F446RE-ADC
+
+breakpoint at adc_stm32_init(). call stack:
+adc_stm32_init@0x08001658 (c:\Users\ronf\.platformio\packages\framework-zephyr\drivers\adc\adc_stm32.c:761)
+z_sys_init_run_level@0x080023c0 (c:\Users\ronf\.platformio\packages\framework-zephyr\kernel\device.c:72)
+bg_thread_main@0x080024d6 (c:\Users\ronf\.platformio\packages\framework-zephyr\kernel\init.c:186)
+config: 0x8005380 <adc_stm32_cfg_0>
+api: 0x8005398 <api_stm32_driver_api>
+config-> pinctrl: 0x8005378 <adc_pins_0>
+	pinmux: 16 (this is analog function)
+	
+	err = stm32_dt_pinctrl_configure(config->pinctrl,
+					 config->pinctrl_len,
+					 (uint32_t)config->base);
+		func = STM32_MODER_ANALOG_MODE;
+		func = 48 = 0x30, pin=0, 
+		stm32_pin_configure(uint32_t pin, uint32_t func, uint32_t altf)
+		altf=16 (analog)
+gpio_stm32.c:		gpio_stm32_configure(port_device, STM32_PIN(pin), func, altf);
+		MODER: 2818572448
+		after pin_configure, GPIOA MODER = 0xa80000a3
+		
+		
+		
+try changing overlay
+io-channels = <&adc1 1>;
+to 
+io-channels = <&adc1 0>; maybe this is channel 0? no difference?
+channel_cfg-> channel_id = 0
+
+
+need to get pinctrl and pinmux correct for adc.
+what does phandle do? Why is dac using phandle = < 0x14 >; ?
+
+st,stm32-pinctrl: pincontrol nodes in device tree
+see zephyr.dts entry for adc1: line 1294: 
+pinctrl-0 = < &adc1_in0_pa0 >;
+phandle = < 0x1d > (looks unique)
+is this pin set up correctly? Maybe check GPIO driver for pinmux?
+
+what does
+io-channels = <&adc1 1>; do? should this then be in1_pa1? rather than in0_pa0?
+
+
+adc1: adc@40012000 
+
+``port bit configuration register'' should be analog type. This works for D/A, is ADC set correctly? Where?
+
+
+Peripheral alternate function
+For the ADC and DAC, configure the desired I/O as analog in the GPIOx_MODER 
+register
+
+from driver/adc/adc_stm32.c:
+ /* Configure dt provided device signals when available */
+        err = stm32_dt_pinctrl_configure(config->pinctrl,
+                                         config->pinctrl_len,
+                                         (uint32_t)config->base);
+										 
+from 	https://docs.zephyrproject.org/3.2.0/build/dts/api/api.html									  
+io-channels = <&adc1 10>, <&adc2 20>;
+
+DAC did not use io-channels
+
+https://devzone.nordicsemi.com/f/nordic-q-a/85912/nrf52840-zephyr-adc-read-issue
+
+
+
+April 22, 2023
+
+F446RE-ADC
+
+name pinctrl-0 type phandles, property is required,
+check l073rz .dts to see if same... no nucle446re missing pinctrl-0!
+
+
+pinctrl-0 = < &adc_in0_pa0 >;
+			phandle = < 0x14 >;
+			
+			try adding pinctrl-0 to overlay...
+get compile error now:
+ERROR (phandle_references): /soc/adc@40012000: Reference to non-existent node or label "adc_in0_pa0"			
+			try instead "adc1_in0_pa0"
+see if list_size changes...
+now pinctrl_len =1 !
+and list_size =1
+
+pinmux=16 (set by adc1_in0_pa0: adc1_in0_pa0 {
+				pinmux = < 0x10 >;
+				phandle = < 0x13 >;
+pin=0
+stm32_pin_configure(pin, func, STM32_DT_PINMUX_FUNC(mux));
+
+st,stm32-pinctrl
+https://docs.zephyrproject.org/3.1.0/build/dts/api/bindings/pinctrl/st,stm32-pinctrl.html?highlight=stm32%20pin
+pinmux 16 = analog, 17 = GPIO
+gpio_stm32_configure(port_device, STM32_PIN(pin), func, altf);
+
+
+
+
+	
+
+Pin configuration/s for the second state. See pinctrl-0.
+
+
+0x8001669 <adc_stm32_init>
+
+pinctrl: 0x8005384 <adc_stm32_cfg_0>
+config->pinctrl_len = 0???
+= size_t list_size
+
+stm32_dt_pinctrl_configure@0x08003aa6 (c:\Users\ronf\.platformio\packages\framework-zephyr\drivers\pinmux\pinmux_stm32.c:94)
+adc_stm32_init@0x08001698 (c:\Users\ronf\.platformio\packages\framework-zephyr\drivers\adc\adc_stm32.c:790)
+z_sys_init_run_level@0x080023d0 (c:\Users\ronf\.platformio\packages\framework-zephyr\kernel\device.c:72)
+
+
+
+static int adc_stm32_init(const struct device *dev)
+calls stm32_dt_pinctrl_configure()
+(this seems to be called before main...)
+if (!list_size) {
+		/* Empty pinctrl. Exit */
+		return 0;
+	}
+list_size is 0, so doesn't set any pins...
+in zephyr.dts: adc1_in0_pa0: adc1_in0_pa0 {
+				pinmux = < 0x10 >;
+	io-channels = < &adc1 0x1 >;			
+	
+	soc/pin-controller@40020000/adc1_in0_pa0
+	/soc/pin-controller@40020000/adc1_in1_pa1
+	
+
+	return api->read(dev, sequence);
+where read() is adc_stm_32_read 
+drivers/adc/adc_stm32.c-e
+
+line 619 adc_context_lock(&data->ctx, false, NULL);
+	error = start_read(dev, sequence);
+	adc_context_release(&data->ctx, error);
+
+start_read()
+uses base address 0x40012000 : ok
+switch (sequence->resolution) , (sequence->resolution) = 0 `\000'  
+
+check adc_stm32.i? 
+sequence missing resolution?
+int adc_read(const struct device *dev, const struct adc_sequence *sequence)
+uint8_t resolution, set resolution =12. (supposed to be set by DTS system???
+adc chan 0 = pin #?
+check what happens in adc setup...
+pinmux setting???
+check zephyr.dts and adc_channel_setup()
+
+return api->channel_setup(dev, channel_cfg);
+channel_id: 1
+adc_stm32_channel_setup (no pin stuff)
+
+
+ 
+
+
+
+
+April 21, 2023
+
+F446RE-ADC
+
+1. CMakeLists.txt: set(CMAKE_C_FLAGS "-save-temps=obj")
+2. nucleo_f446re.overlay
+3. proj.conf: CONFIG_ADC=y and CONFIG_ADC_ASYNC=y
+4. copy main.c from example which compiles
+5. select kit gcc
+5. platformio.ini: monitor_speed = 115200
+
+compiles ok, in debugging, gives error in adc_stm32.c from
+	error = start_read(dev, sequence);
+dev is device_dts_ord_11
+
+may need to compile without optimization to trace code...
+
+April 20, 2023
+
+Problem is that: ADC_DT_SPEC_GET_BY_IDX is not defined in drivers/adc.h
+https://docs.zephyrproject.org/latest/hardware/peripherals/adc.html#c.ADC_DT_SPEC_GET_BY_IDX
+
+added devicetree.h, not fixed
+
+https://github.com/zephyrproject-rtos/zephyr/blob/main/tests/drivers/adc/adc_api/src/test_adc.c
+add CONFIG_ADC_ASYNC=y? no change
+
+added util.h? no effect
+
+added status = "okay"; to overlay file no change
+Zephyr 101-ADC + Thread controller:
+https://www.youtube.com/watch?v=Y8FaEcAp_kY
+
+
+This sample code compiled. 
+did not use: 1) DC_DT_SPEC_GET_BY_IDX(DT_NODELABEL(adc1), 0);
+2) adc_channel_setup_dt(&channel_dt);
+3) adc_sequence_init_dt(&channel_dt, &sequence);
+which gave compile errors.
+
+
+
+
+
+
+-------------------------
+
+April 18, 2023
+
+trying to figure out adc driver- can it be simplified for single channel read? 
+What is api trying to do?
+https://docs.zephyrproject.org/apidoc/latest/group__adc__interface.html#gae9867df7a034d45ed3d3c58c69c246ed
+version mismatch?
+./include/drivers/adc.h
+./include/dt-bindings/adc/adc.h
+#include <syscalls/adc.h>
+move prj.conf into zephyr directory ==> no difference
+
+lots of compile time error messages with samples/drivers/adc, switching to example from:
+https://community.jaredwolff.com/d/443-adc-api-what-is-a-sequence
+
+commpile error: adc_dev = DEVICE_DT_GET(DT_NODELABEL(adc));
+
+try adc1 to agree with device tree? ==> fewer compile errors
+main.i: adc_dev = (&__device_dts_ord_13);
+devicetree_unfixed.h: *   13  /soc/adc@40012400
+
+struct adc_dt_spec channel_dt = ADC_DT_SPEC_GET_BY_IDX(DT_N_S_soc_S_adc_40012400, 0);
+src\main.c:26:9: error: variable 'channel_dt' has initializer but incomplete type
+src\main.c:26:34: warning: implicit declaration of function 'ADC_DT_SPEC_GET_BY_IDX' [-Wimplicit-function-declaration]
+src\main.c:26:57: error: 'DT_N_S_soc_S_adc_40012400' undeclared (first use in this function)
+
+
+
+
+
+----------------------------------------------------------------
+
+April 17, 2023
+
+**** ADC example for nucleo_l073rz ****
+
+https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/drivers/adc
+
+what pins do A/D use? can use any pins, default uses pinctrl-0 = < &adc_in0_pa0 >;
+
+compile error:
+static const struct adc_dt_spec adc_channels[] = {
+ ADC_DT_SPEC_GET_BY_IDX(DT_N_S_zephyr_user, 0),
+
+};
+https://community.jaredwolff.com/d/443-adc-api-what-is-a-sequence
+
+
+**** VBAT EXAMPLE  not working ****
+
+
+https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/sensor/stm32_vbat_sensor
+
+gives error undefined reference to `__device_dts_ord_5' when using provided nucleo_g071rb.overlay
+
+and gives compile error if overlay includes
+&adc1 {
+    vref-mv = <3000>;
+    status = "okay";
+};
+devicetree error: 'vref-mv' appears in /soc/adc@40012400 in nucleo_g071rb.dts.pre.tmp,
+ but is not declared in 'properties:' 
+in C:/Users/ronf/.platformio/packages/framework-zephyr/dts/bindings\adc\st,stm32-adc.yaml
+
+will compile if comment out vref-mv, but still gives 
+undefined reference to `__device_dts_ord_5'
+
+maybe missing pinctrl?
+
+Try adc example instead
+
+
+
+
+
+
+
+
+
+
+
+
+-------------------------------------
+April 16, 2023
+
+*********** https://docs.zephyrproject.org/latest/build/dts/api/bindings/sensor/st,stm32-vbat.html ***********
+
+
+
+
+
+************** DAC **************
+
+
+1. copy dac node from nucleo_1073rz generated zephyr.dts to nucleo_f446re.overlay
+2. dac is device dts_ord_12 (working!)
+	name: DAC_1 
+	api is api_stm32_driver_api
+	
+compare generated dts files
+nucleo446re is missing 
+in soc:dac1:
+pinctrl-0 = < &dac_out1_pa4 >;
+
+*
+
+
+from l073rz, README.rst
+``The DAC output is defined in the board's devicetree and pinmux file.''
+
+Where is pinmux set???
+https://docs.zephyrproject.org/latest/build/dts/api/bindings/pinctrl/st,stm32-pinctrl.html
+Based on pincfg-node.yaml binding.
+
+https://docs.zephyrproject.org/latest/hardware/pinctrl/index.html
+
+
+
+
+
+./dts/bindings/pinctrl/st,stm32-pinctrl.yaml (skew, bias etc)
+./include/dt-bindings/pinctrl/stm32-pinctrl-common.h (pin to port assignments)
+./include/dt-bindings/pinctrl/stm32-pinctrl.h (pin to port assignments)
+./_pio/modules/hal/stm32/dts/st/f4/stm32f446r(c-e)tx-pinctrl.dtsi
+./_pio/modules/hal/stm32/dts/st/l0/stm32l073r(b-z)tx-pinctrl.dtsi
+
+pinctrl.dtsi the same, so why missing line? maybe check if can add in overlay to fix problem?
+
+
+==> take zephyr.dts for dac1 generated by compiling l073rz, and copy to nucleo_f446re.overlay
+Now compiles!
+
+
+What is phandle?
+phandle = < 0x14 >;
+use phandles to refer to nodes in devicetree 
+
+
+
+
+
+check bindings?
+from devicetree_unfixed.h: 
+$ZEPHYR_BASE\dts\bindings\dac\st,stm32-dac.yaml
+framework-zephyr\
+
+nucleof446re missing pin-controller: 
+#define DT_N_S_soc_S_dac_40007400_REQUIRES_ORDS \
+	11, /* /soc/pin-controller@50000000/dac_out1_pa4 */
+missing:
+#define DT_N_S_soc_S_dac_40007400_PINCTRL_IDX_0_EXISTS 1
+possibly missing pin controller, so not included???
+missing in nucleo_f446re
+*   10  /soc/pin-controller@50000000
+ *   11  /soc/pin-controller@50000000/dac_out1_pa4
+
+
+devicetree_unfixed.h
+l073rz has this:
+#define DT_N_S_soc_S_pin_controller_50000000_FOREACH_CHILD(fn)
+
+both have pin_controller 
+l1073 has 109 dac_40007400, f446re has 103
+difference l073rz has these but missing fro f446re:
+#define DT_N_S_soc_S_dac_40007400_PINCTRL_IDX_0_EXISTS 1
+#define DT_N_S_soc_FOREACH_CHILD_STATUS_OKAY
+#define DT_FOREACH_OKAY_st_stm32_dac(fn) fn(DT_N_S_soc_S_dac_40007400)
+#define DT_N_S_soc_FOREACH_CHILD_STATUS_OKAY_VARGS
+
+l073rz.dts file: https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/arm/nucleo_l073rz/nucleo_l073rz.dts
+&dac1 {
+	status = "okay";
+	pinctrl-0 = <&dac_out1_pa4>;
+	pinctrl-names = "default";
+};
+
+
+------------------------
+April 15, 2023
+
+1. Make separate copies for f446re and l073rz for framework-zephyr/samples/drivers/dac
+2. change zephyr/CMakeLists.txt to
+set(CMAKE_C_FLAGS "-save-temps=obj")
+./build/nucleo_l073rz/zephyr/include/generated
+devicetree_unfixed.h has : *   12  /soc/dac@40007400
+
+3. create zephyr project for nucleo f446re
+	copy files from L073RZ-DAC: sample.yaml (edit to add board), main.c, nucleo_f446re.overlay, prj.conf
+	
+4. compile f446re DAC example. Get undefined reference to `__device_dts_ord_10'
+devicetree_unfixed.h has : *   10  /soc/dac@40007400
+==>	Check to make sure your device driver is being compiled, usually by enabling the Kconfig options it requires.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+L073RZ compiles, but wont load to F446RE board.
+Since it compiles, see which files are different, e.g. generated code and why f446re doesnot include
+device drivers for DAC.
+
+get compile errors for DAC if platformio uses nucleo_f446re
+
+need to customize launcher in platformio
+launcher may not work if chip has differet RAM, ROM location.
+
+both nucleo f446re and nucleo l053z use same protocol
+CURRENT: upload_protocol = stlink
+Uploading .pio\build\nucleo_f446re\firmware.elf
+upload_protocol = stlink
+
+in nucleo_l073rz.json
+; change microcontroller
+board_build.mcu = stm32l073rz
+
+uploading
+xPack OpenOCD x86_64 Open On-Chip Debugger 0.11.0+dev (2021-10-16-21:19)
+using L073rz board selection, get
+
+Warn : UNEXPECTED idcode: 0x2ba01477
+Error: expected 1 of 1: 0x0bc11477
+in procedure 'program'
+** OpenOCD init failed **
+
+using nucleo f446re:
+target halted due to debug-request, current mode: Thread 
+xPSR: 0x01000000 pc: 0x08002498 msp: 0x20001980
+
+looks like idcodes are chip specific...
+Permanently modify C:\Users\Maxi\.platformio\packages\tool-openocd\scripts\target\stm32f1x.cfg 
+line 42 to have the “corrected” ID for the chinese clone.
+to change laucnh.json, edit:
+./penv/Lib/site-packages/platformio/assets/templates/ide-projects/vscode/.vscode
+
+---------------------
+
+April 14, 2023
+
+Goal today: try nucleo l073z project with samples, e.g. A/D and D/A
+1. does it compile?
+2. Are register settings correct in drivers? Possible difference
+in SoC (system on chip)?
+framework-zephyr/samples/drivers/dac (has overlay for l073z)
+
+copied files to zephyr directory in project:
+proj.conf
+sample.yaml
+nucleo_l073rz
+
+need to change loader setup, which is different than nucleof446re
+
+launch.json svdPath": "C:/Users/ronf/.platformio/platforms/ststm32/misc/svd/STM32L07x.svd",
+Warn : UNEXPECTED idcode: 0x2ba01477
+Error: expected 1 of 1: 0x0bc11477
+2
+ "svdPath": "C:/Users/ronf/.platformio/platforms/ststm32/misc/svd/STM32F446x.svd",
+ file STM32L07x.svd is not present, but STM32L0x0.svd is.
+ 
+ 
+.pioinit:13: Error in sourced command file:
+Remote communication error.  Target disconnected.: Success.
+
+CURRENT: upload_protocol = stlink
+Uploading .pio\build\nucleo_l073rz\firmware.elf
+
+ST Nucleo F446RE and ST Nucleo L073RZ On-board ST-LINK/V2-1 debugger/programmer with SWD connector
+
+
+------------------------------------
+April 13, 2023
+
+1. try new project l073rz (which should have drivers for dac, adc, pwm
+2. copy files from ZephyrSampleCode/
+3. change CONFIG_PWM=y
+4. compile. dev_handles.c has handle 11 = adc.
+
+
+
+Reading manual sections:
+SECTION DRIVERS
+https://docs.zephyrproject.org/latest/kernel/drivers/index.html#standard-drivers
+DEVICE_DT_DEFINE(node_id, init_fn, pm, data, config, level, prio, api, ...)¶
+    Create a device object from a devicetree node identifier and set it up for boot time initialization. 
+The device is declared with extern visibility, so a pointer to a global device object can be obtained 
+with DEVICE_DT_GET(node_id) from any source file that includes <zephyr/device.h>. 
+Before using the pointer, the referenced object should be checked using device_is_ready().
+DEVICE_DT_GET(node_id)¶
+
+    Get a device reference from a devicetree node identifier.
+
+    Returns a pointer to a device object created from a devicetree node, if any device was allocated by a driver.
+
+    If no such device was allocated, this will fail at linker time. If you get an error 
+	that looks like undefined reference to __device_dts_ord_<N>, that is what happened. 
+	Check to make sure your device driver is being compiled, usually by enabling the 
+	Kconfig options it requires.
+
+const struct device *device_get_binding(const char *name)¶
+    Get a device reference from its device::name field.
+    This function iterates through the devices on the system. If a device with the given name field is found, 
+	and that device initialized successfully at boot time, this function returns a pointer to the device.
+
+SECTION Developing with Zephyr
+https://docs.zephyrproject.org/latest/develop/index.html
+Creating an Application: https://github.com/zephyrproject-rtos/example-application
+Board Porting Guide
+https://docs.zephyrproject.org/latest/hardware/porting/board_porting.html#board-porting-guide
+Once you’ve found an existing board that uses your SoC, you can usually start by copy/pasting
+ its board directory and changing its contents for your hardware.
+
+ Note: https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/arm/nucleo_f446re/nucleo_f446re.dts
+ is missing adc, dac, pwm
+ https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/arm/nucleo_l073rz/nucleo_l073rz.dts
+ has &adc1, &dac1, pwm2 in &timers2
+
+also nucleo_l073rz.yaml file includes: 
+supported:
+  - adc
+  - dac
+  - pwm 
+ 
+https://docs.zephyrproject.org/latest/build/dts/bindings-intro.html#a-simple-example
+.dts: compatible = "st,stm32l073rz-nucleo";
+.yaml: name: ST Nucleo L073RZ
+Warning:
+The binding files must be located somewhere inside the dts/bindings subdirectory of the above places.
+
+ https://docs.zephyrproject.org/latest/build/dts/bindings.html#dt-bindings
+ 
+ https://docs.zephyrproject.org/latest/build/dts/howtos.html#set-devicetree-overlays
+ 
+ Writing a devicetree-aware driver begins by defining a devicetree binding for the devices supported by the driver.
+ Use existing bindings from similar drivers as a starting point. 
+ A skeletal binding to get started needs nothing more than this:
+
+description: <Human-readable description of your binding>
+compatible: "foo-company,bar-device"
+include: base.yaml
+    Each struct device‘s name should be set to its devicetree node’s label property. This allows the driver’s users to Get a struct device from a devicetree node in the usual way.
+    Each device’s initial configuration should use values from devicetree properties whenever practical. This allows users to configure the driver using devicetree overlays.
+#define DT_DRV_COMPAT vnd_my_device
+DT_INST_FOREACH_STATUS_OKAY expands to code which calls CREATE_MY_DEVICE once for each enabled node 
+with the compatible determined by DT_DRV_COMPAT
+
+https://docs.zephyrproject.org/latest/build/dts/howtos.html#
+...undefined reference to `__device_dts_ord_N'
+collect2: error: ld returned 1 exit status
+
+This likely means there’s a Kconfig issue preventing the device driver from being built, 
+resulting in a reference that does not exist.
+
+Kconfig.board: config BOARD_NUCLEO_L073RZ
+/framework-zephyr/boards/arm/nucleo_l073rz/Kconfig.board
+
+perhaps this needs to be changed for nucleof664re??
+
+added to sample.yaml:
+supported:
+  - arduino_gpio
+  - arduino_i2c
+  - arduino_spi
+  - gpio
+  - i2c
+  - spi
+  - watchdog
+  - adc
+  - dac
+  - pwm
+  - rng
+  - eeprom
+
+Compiling .pio\build\nucleo_f446re\drivers__adc\zephyr\drivers\adc\adc_common.c.o
+:\Users\ronf\.platformio\packages\framework-zephyr\drivers\adc\adc_stm32.c:977:36: warning: 'api_stm32_driver_api' defined but not used [-Wunused-const-variable=]
+ static const struct adc_driver_api api_stm32_driver_api = {
+ Generating .pio\build\nucleo_f446re\zephyr\dev_handles.c
+ dev_handles.c does not have adc handle or dac handle
+
+https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/drivers/adc
+
+April 12, 2023
+
+To debug, use Run -> debug
+
+single step, led_intit()->device_get_binding()-> device.c:z_impl_device_get_binding() ->
+
+read_vbat() -> device_get_binding("DIE_TEMP") -> device.c:z_impl_device_get_binding() 
+goes through list of devices for (dev = __device_start; dev != __device_end; dev++) {
+name = 0x8006dd8 "DIE_TEMP"
+returned null, so did not find device.
+Try quadrature decoder instead: 
+error: no QDEC_0 device (not defined in .dts, need overlay?)
+
+https://docs.zephyrproject.org/latest/build/dts/api/bindings/sensor/st,stm32-qdec.html
+https://docs.zephyrproject.org/latest/samples/sensor/qdec/README.html
+https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/sensor/qdec
+framework-zephyr/samples/sensor/qdec  [this does not have the example board overlays, e.g. for nucleo f401]
+copy overlay from github boards/nucleo_f401re.overlay
+got error: Error: nucleo_f446re.dts.pre.tmp:1665.28-29 syntax error
+commented out this line in overlay: 	st,input-filter-level = <FDIV32_N8>;
+try adding label = "QDEC_0"; to overlay
+zephyr.dts was not updated, need .yaml? try yaml from github. Now zephyr.dts has QDEC=0 update.
+
+
+
+
+
+
+dev-name is stored at 0x80068b8
+
+devicetree error: 'vbat-channel' appears in /soc/adc@40012000 in nucleo_f446re.dts.pre.tmp, 
+but is not declared in 'properties:' 
+in C:/Users/ronf/.platformio/packages/framework-zephyr/dts/bindings\adc\st,stm32-adc.yaml
+
+
+
+
+
+in zephyr.dts, there is label = "DIE_TEMP"; try this for 
+device_get_binding("DIE_TEMP")
+so probably need to add label to overlay.
+
+
+try single stepping to see where qdec device comes from
+const struct device __device_dts_ord_14; // temporary for compile error.
+got compile error .platformio\packages\framework-zephyr\scripts\gen_handles.py"
+AssertionError: mismatch devices and handles
+
+``The output is a C source file that provides alternative definitions
+for the array contents referenced from the immutable device objects.
+In the final link these definitions supersede the ones in the
+driver-specific object file.''
+from gen_handles.py, if sym.name.startswith("__device_"):
+
+.yaml is read by framework-zephyr/scripts/platformio/platformio-build.py
+ with open(manifest_path) as fp:
+        try:
+            return yaml.safe_load(fp).get("manifest", {})
+
+
+-----------------------
+April 11, 2023
+
+After pre-processing, 
+const struct device *const dev = DEVICE_DT_GET_ONE(st_stm32_vbat);
+goes to:
+const struct device *const dev = (&__device_dts_ord_14);
+
+const struct device *LEDdev;  // structure for LED device
+goes to:
+const struct device *LEDdev;
+
+LEDdev:
+        .space  4
+
+gnu assembler directives:
+.file fileno filename
+.loc fileno lineno [column] [options]
+is_stmt value
+    This option will set the is_stmt register in the .debug_line state machine to value, which must be either 0 or 1. 
+
+        .file 1 "src\\sensortest.c"
+
+   .loc 2 573 9 is_stmt 0 view .LVU18
+        .file 2 "C:\\Users\\ronf\\.platformio\\packages\\framework-zephyr\\include/device.h":
+static inline int z_device_usable_check(const struct device *dev)
+{
+	return z_device_ready(dev) ? 0 : -ENODEV; 
+}
+
+try device_get_binding(st_stm32_vbat); instead. Need string argument.
+
+readqdec.c:
+line 23    dev = device_get_binding("QDEC_0"); goes to:
+readqdec.s:
+	
+     .file 2 ".pio\\build\\nucleo_f446re\\zephyr\\include\\generated/syscalls/device.h"
+     .loc 2 41 9 is_stmt 0 view .LVU11 (pull in macro)
+	  macro is return z_impl_device_get_binding(name);:
+	   ldr     r0, .L6+4
+       bl      z_impl_device_get_binding
+.L6:
+        .word   .LC0
+        .word   .LC1
+        .word   .LC4
+        .word   .LC3
+        .word   .LC2
+        .cfi_endproc
+.LFE689:
+        .size   read_qdec, .-read_qdec
+        .section        .rodata.read_qdec.str1.1,"aMS",%progbits,1
+.LC0:
+        .ascii  "Quadrature Decoder sample application\012\012\000"
+.LC1:
+        .ascii  "QDEC_0\000"
+.LC2:
+        .ascii  "error: no QDEC_0 device\012\000"
+.LC3:
+        .ascii  "sensor_sample_fetch failed returns: %d\012\000"
+.LC4:
+        .ascii  "Position is %d\012\000"
+
+.L6+4=.LC1
+
+no QDEC in generated header files under .pio directory
+check under framework-zephyr, not under drivers, or include, or samples or soc or subsys 
+
+
+
+	
+
+
+
+
+------------------------------
+
+April 10, 2023
+
+compiler flags: edit CMakeLists.txt
+set(CMAKE_C_FLAGS "-save-temps=obj")
+now get files in build/nucleo_446re/src directory
+
+main.i:extern const struct device __device_dts_ord_14;
+sensortest.s:   .word   __device_dts_ord_14
+
+
+On STM32F446xx devices, the temperature sensor is internally connected to the same 
+input channel, ADC1_IN18, as VBAT: ADC1_IN18 is used to convert the sensor output 
+voltage or VBAT into a digital value. Only one conversion, temperature sensor or VBAT, 
+must be selected at a time. When the temperature sensor and the VBAT conversion 
+are set simultaneously, only the VBAT conversion is performed
+
+https://docs.zephyrproject.org/latest/hardware/pinctrl/index.html
+does pin need to be defined in pinmux??? probably
+
+sensortest.c:55: undefined reference to `__device_dts_ord_14'
+https://github.com/zephyrproject-rtos/zephyr/issues/50344
+related to GPIO definition?
+
+https://docs.zephyrproject.org/latest/boards/arm/nucleo_f446ze/doc/index.html
+includes ADC support, but nucleo f446re does not??!?
+https://www.st.com/en/evaluation-tools/nucleo-f446ze.html?rt=db&id=DB3171
+f446ze uses different package (144 pin LQFP instead of 64 pin QFP)
+
+Try creating new sample project for f446ze board and see if it compiles a to d example?
+framework-zephyr/samples/drivers/adc
+Gave ``Could not initialize project error''
+Missing boards/arm/nucleo_f446ze
+
+ST Nucleo F401RE has entry in boards/arm, and has ADC interface
+
+
+
+check on library files for undefined variable
+.pio/build/nucleo_f446re/zephyr/libzephyr.a
+nm command to list variables in library
+arm-none-eabi-gcc-nm.exe libzephyr.a > nmout.txt
+
+pinmux_stm32.c.o:
+         U __device_dts_ord_132
+         U __device_dts_ord_133
+         U __device_dts_ord_134
+         U __device_dts_ord_135
+         U __device_dts_ord_136
+         U __device_dts_ord_137
+         U __device_dts_ord_22
+         U __device_dts_ord_25
+
+missing dts_ord_14, does this IO line need to be set up to use A/D input?
+
+check in zephyr/drivers directory
+adc: no
+gpio: other pins which are used
+console: uart_console.c:  U __device_dts_ord_51ls
+serial: uart_stm32.c.o:
+         U __device_dts_ord_11
+00000000 R __device_dts_ord_51
+00000018 R __device_dts_ord_57
+00000000 V __devicehdl_DT_N_S_soc_S_serial_40004400
+0000000e V __devicehdl_DT_N_S_soc_S_serial_40011000
+00000000 d __devstate_dts_ord_51
+00000004 d __devstate_dts_ord_57
+
+can check .o file? Yes
+
+nucleo_f446re/src has compiled files
+ nm sensortest.o
+          U __device_dts_ord_14
+
+
+
+
+What is final built file? (To check for variables/modules)?
+
+
+April 9, 2023
+
+dac1 defined in framework-zephyr/dts/arm/st/f4/stm32f446.dtsi
+adc1 defined in framework-zephyr/dts/arm/st/f4/stm32f4.dtsi (which is included by stm32f446.dtsi)
+The C preprocessor is run on all devicetree files to expand macro references. 
+
+In project zephyr/CMakeCache.txt, choose CMAKE_BUILD_TYPE:STRING=debug
+Looks like .c files are now available?
+in build: zephyr/include/generated/syscalls, but no __device_dts_ord_14 in any of these files.
+Where is preprocessed sensortest?
+compiled sensortest.o is in build/nucleo446re/src directory
+this will create a preprocessor output file named foo.c.i in the build directory for each source file foo.c
+
+//Flags used by the C compiler during all build types.
+CMAKE_C_FLAGS:STRING="-E"
+
+can modify CMakeList.txt to set these compiler flags.
+
+April 8, 2023
+
+in /.pio/build/nucleo_f446re/zephyr/include/generated/syscalls
+are the generated .h and .c files for system calls, such as pwm.h 
+
+Is this where dts_ord_14 is accessed without being defined?
+See device_extern.h in/.pio/build/nucleo_f446re/zephyr/include/generated for device definitions
+.platformio/packages/framework-zephyr/include\dt-bindings\pwm\pwm.hardware
+
+see .pio/build/nucleo_f446re/CMakeCache.txt   for compiler commands
+
+	//CXX compiler
+	CMAKE_CXX_COMPILER:STRING=C:/Users/ronf/.platformio/packages/toolchain-gccarmnoneeabi@1.80201.181220
+	/bin/arm-none-eabi-gcc.exe
+
+	//Flags used by the C compiler during DEBUG builds.
+	CMAKE_C_FLAGS_DEBUG:STRING=-g
+	
+maybe can change debug options here to save .cpp output?
+
+check generated syscalls? 
+
+see zephyr/zephyr_prebuilt.map for _device_dts missing
+other device_dts_ord are there, but not number 14. Where is 14 from?q
+device_extern.h:extern const struct device DEVICE_DT_NAME_GET(DT_N_S_stm32vbat); /* dts_ord_14 */
+
+need to see c preprocessor output to find where variable is used but not defined
+	
+	
+	
+	
+//Program used to build from build.ninja files.
+CMAKE_MAKE_PROGRAM:FILEPATH=C:/Users/ronf/.platformio/packages/tool-ninja/ninja.exe
+	
+.pio/build/nucleo_f446re/build.ninja
+
+
+
+
+April 4, 2023
+Configuring device tree for temperature sensor?
+From tech manual,  
+``On STM32F446xx devices, the temperature sensor is internally connected to the same 
+input channel, ADC1_IN18, as VBAT: ADC1_IN18 is used to convert the sensor output 
+voltage or VBAT into a digital value.''
+
+Need to setup device tree. Added CONFIG_STM32_TEMP=y to prj.conf
+need to work with device tree/and overlay. These files are located:
+./ZephyrSampleCode/.pio/build/nucleo_f446re/zephyr/zephyr.dts
+and
+.platformio/packages/framework-zephyr/dts/arm/st/f4/stm32f446.dtsi
+and
+.platformio/packages/framework-zephyr/boards/arm/nucleo_f446re/nucleo_f446re.dts
+Use interactive Kconfig to set peripherals?
+How to run menuconfig on Windows?
+Could manually edit .pio/build/nucleo_f446re/zephyr/.config?
+https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/zephyr/build/dts/dt-vs-kconfig.html#dt-vs-kconfig
+==> hardware config should use devicetree
+In order to run this sample, make sure to enable stm32_temp node in your board DT file.
+samples/sensor/stm32_temp_sensor
+
+Use overlay file? Example in framework-zephyr/samples/sensor/stm32_temp_sensor/boards/nucleo_f401re.overlay 
+framework-zephyr\drivers\sensor\stm32_temp\stm32_temp.c
+
+Add overlay file to zephyr directory, and edit zephyr/CMakeLists.txt
+set(DTC_OVERLAY_FILE "nucleo_f446re.overlay")
+
+Try checking the node by adding this to the file and recompiling:
+
+#if !DT_NODE_EXISTS(DT_NODELABEL(my_serial))
+#error "whoops"
+#endif
+
+Need yaml?
+Binding (compatible = st,stm32-temp):
+ *   $ZEPHYR_BASE\dts\bindings\sensor\st,stm32-temp.yaml
+
+ stm-temp vs stm32-temp?
+ framework-zephyr/dts/bindings/sensor/st,stm32-temp.yaml
+
+framework-zephyr/drivers/sensor/stm32_temp/stm32_temp.c
+
+1. add platform.ini to stm32_temp_sensor
+
+where is devicetree definitions for temp sensor?
+in build directory, devicetree_unfixed.h
+/* Ordinals for what depends directly on this node: */
+#define DT_N_S_soc_S_adc_40012000_SUPPORTS_ORDS \
+	12, /* /stm-temp */
+
+    /* Existence and alternate IDs: */
+#define DT_N_S_stm_temp_EXISTS 1
+#define DT_N_INST_0_st_stm32_temp DT_N_S_stm_temp
+* Binding (compatible = st,stm32-temp):
+ *   $ZEPHYR_BASE\dts\bindings\sensor\st,stm32-temp.yaml
+
+
+ Try reading adc instead, simpler than temp sensor???
+
+https://github.com/zephyrproject-rtos/zephyr/tree/main/samples/sensor/stm32_vbat_sensor
+
+
+ add sample.yaml to directory, edit boards in .yaml file
+
+ devicetree error: 'vref-mv' appears in /soc/adc@40012000 in nucleo_f446re.dts.pre.tmp, 
+ but is not declared in 'properties:' in C:/Users/ronf/.platformio/packages/framework-zephyr/dts/bindings\adc\st,stm32-adc.yaml
+
+tried commenting out vref-mv line 
+In C/C++, devicetree names must be lowercased and special characters must be converted to underscores.
+get undefined reference to `__device_dts_ord_14'
+
+debugging- use intermediate files.
+
+
+in overlay and .dts file, make sure that status = "okay"; is provided for components needed such
+as adc.
+
+try moving sample.yaml to zephyr directory: no change, still have error
