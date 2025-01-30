@@ -28,7 +28,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     static int printVals = true;
     static int printcnt = 0;
-    static int printcnt_lim = 100;
+    static int printcnt_lim = 200;
 
     uint8_t qdec_reset[1]= {0x01};
     uint8_t qdec_disable[1]= {0x02};
@@ -38,8 +38,8 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     float cpr_qdec[7]=   {23040, 23040, 23040, 23040, 23040, 23040, 23040};
     float cpr_sea[7]=     {400, 400, 400, 400, 400, 400, 400};
-    float SEA_offset[7]=     {0, -270, 0, -120, 200, 0, 0};
-    // float SEA_offset[7]=     {0, 0, 0, -120, 200, 0, 0};
+    // float SEA_offset[7]=     {0, -270, 0, 80, 0, 0, 0};
+    float SEA_offset[7]=     {0, -270, 0, -60, 140, 0, 0};
     float pi = 3.14159;
 
     static int stall = 0;
@@ -105,7 +105,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     MX_UART3_Init();
     MX_GPIO_Init();
 
-    HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
+    // HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
 
     HAL_UART_Receive_DMA(&huart3, data, 98);
@@ -113,7 +113,7 @@ reactor QDEC(sample_period: time = 5 ms) {
   =}
 
   reaction(reset_qdec) {=
-    HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
+    // HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
 
     HAL_UART_Receive_DMA(&huart3, data, 98);
   =}

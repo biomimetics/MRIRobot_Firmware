@@ -209,19 +209,19 @@ main reactor {
     =}
 
     reaction(sys_tick) -> motors.target_sel, motors.target_pos, motors.target_speed {=
-      if (self->count == 0) {
-        for (int i=0; i<7; i++) {
-          lf_set(motors.target_speed[i], 100);
-          lf_set(motors.target_pos[i], 0);
-        }
-        lf_set(motors.target_pos[1], 0);
-      } else {
-        // for (int i=0; i<7; i++) {
-        //   lf_set(motors.target_speed[i], -100);
-        //   lf_set(motors.target_pos[i], 15.707);
-        // }
-        lf_set(motors.target_pos[1], 15.707);
-      }
+      // if (self->count == 0) {
+      //   for (int i=0; i<7; i++) {
+      //     lf_set(motors.target_speed[i], 100);
+      //     lf_set(motors.target_pos[i], 0);
+      //   }
+      //   lf_set(motors.target_pos[1], 0);
+      // } else {
+      //   // for (int i=0; i<7; i++) {
+      //   //   lf_set(motors.target_speed[i], -100);
+      //   //   lf_set(motors.target_pos[i], 15.707);
+      //   // }
+      //   // lf_set(motors.target_pos[1], 15.707);
+      // }
 
       for (int i=0; i<7; i++) {
         lf_set(motors.target_sel[i], 1);

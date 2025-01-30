@@ -166,8 +166,6 @@ void runImpedanceTest(double k, double a, double kp, double kd) {
     long long int dt;
     long long int time;
     long long int time_previous;
-    double error_p = 0.0;
-    double error_i = 0.0;
 
     double xs = 0.0;
 
@@ -247,8 +245,7 @@ void runImpedanceTest(double k, double a, double kp, double kd) {
         time_previous = time;
     }
 
-    while (time >= 30 * 1000 && time < 300 * 1000)
-    {
+    while (time >= 30 * 1000 && time < 300 * 1000) {
         // Get the current time
         time += k_uptime_delta(&dt); // get current time in milliseconds
 
@@ -350,57 +347,17 @@ void runImpedanceTest(double k, double a, double kp, double kd) {
         // u0 = - k * (xm - 10.0);
 
         // actual speed command
-        if (deg3_index == 1)
-        {      
-            // if (xs_error >= - 0.1 && xs_error <= 0.1)
-            // {
-            //     force_control = 0;
-            // }
-            // else
-            // {
-            //     force_control = 1;
-            // }
-
-            if (force_control == 1)
-            {               
+        if (deg3_index == 1) {      
+            if (force_control == 1) {               
                 speed = - u0 - (yq_speed - vs);
-
-                // speed = - u0;
-
-                // if (xs_error >= - 0.1 && xs_error <= 0.1)
-                // {
-                //     force_control = 0;
-                // }
-                // else
-                // {
-                //     force_control = 1;
-                // }
-            }
-            else
-            {
+            } else {
                 speed = 0.0;
-
-                // if (xs_error >= - 0.1 && xs_error <= 0.1)
-                // {
-                //     force_control = 0;
-                // }
-                // else
-                // {
-                //     force_control = 1;
-                // }
             }
-        }
-        else
-        {
+        } else {
             speed = 0.0;
         }
 
         double speed_frac = (speed / MAX_MOTOR_SPEED) * MAX_SPEED;
-
-        // if (speed_frac >= -5.0 && speed_frac <= 5.0)
-        // {
-        //     speed_frac = 0.0;
-        // }
 
         setMotorSpeed(speed_frac);
 

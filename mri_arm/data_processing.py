@@ -7,7 +7,7 @@ import sys
 
 
 def main():
-    df = pd.read_csv('output2.csv')
+    df = pd.read_csv('output3.csv')
     time, encoder, sea = get_motor(df, 1)
 
     print("max sea:", max(sea))

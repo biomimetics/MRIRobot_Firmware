@@ -1,0 +1,104 @@
+target C {
+    single-threaded: true,
+    platform: {
+      name: "stm32",
+      board: "F446RE"
+    }
+  }
+  
+  preamble {=
+    #include "stm32f4xx_hal.h"
+    #include <stdio.h>
+  =}
+  
+  reactor IMPController(Kp: float = 5, Ki: float = 0, Kd: float = 1) {
+    input current_pos: float
+    input sea_pos: float
+    input target_pos: float
+    output out: float
+  
+    state last_pos: float = 0  // to help with state variables
+    state prev_time: time = 0
+    state Kw: float = 0.9
+  
+    state error_i: float = 0   // Integral error
+
+
+    preamble {=
+
+        // Define all relebvant static variables
+        static long long int time;
+        static long long int time_previous;
+
+        static double xs = 0.0;
+
+        static double xq_vs = 0.0;
+        static double xq_vs_dot = 0.0;
+        static double xq_vs_ddot = 0.0;
+        static double uq_vs = 0.0;
+        static double vs = 0.0;
+
+        static double xq_vd = 0.0;
+        static double xq_vd_dot = 0.0;
+        static double xq_vd_ddot = 0.0;
+        static double uq_vd = 0.0;
+        static double yq_vd = 0.0;
+        static double a_vd = 5.;
+
+        static double xq_speed = 0.0;
+        static double xq_speed_dot = 0.0;
+        static double xq_speed_ddot = 0.0;
+        static double uq_speed = 0.0;
+        static double yq_speed = 0.0;
+
+        static double ve = 0.0;
+        static double u0 = 0.0;
+        static double speed = 0.0;
+        static double xd = 0.0;
+        static double vd = 0.0;
+        static double xr = 0.0;
+        static double xm = 0.0;
+        static double xe = 0.0;
+        static double xs_error = 0.0;
+    
+    =}
+  
+    reaction(target_pos, current_pos) -> out {=
+        instant_t time = lf_time_logical();
+        interval_t interval = now - self->prev_time;
+
+        // spring deflection and motor values
+        xs = sea_pos->value;
+        xm = current_pos->value;
+        xe = xm - xs;
+
+        // second order filer
+        uq_vs = xs;
+        xq_vs_ddot = - a * a * xq_vs - 2.0 * 0.707 * a * xq_vs_dot + uq_vs;
+        xq_vs_dot += xq_vs_ddot * ((time - time_previous) / 1000.0);
+        xq_vs     += xq_vs_dot  * ((time - time_previous) / 1000.0);
+        vs  =   a * a * xq_vs_dot;
+
+        uq_speed = - speed;
+        xq_speed_ddot = - a * a * xq_speed - 2.0 * 0.707 * a * xq_speed_dot + uq_speed;
+        xq_speed_dot += xq_speed_ddot * ((time - time_previous) / 1000.0);
+        xq_speed     += xq_speed_dot  * ((time - time_previous) / 1000.0);
+        yq_speed  =   a * a * xq_speed;
+
+        ve = yq_speed - vs;
+
+
+
+    
+        if(pid_out > 100) {
+            pid_out = 100;
+        } else if(pid_out < -100) {
+            pid_out = -100;
+        } 
+        lf_set(out, pid_out);
+    
+        self->last_pos = current_pos->value;
+        time_previous = time;
+    =}
+  }
+  
