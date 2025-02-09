@@ -1,0 +1,2 @@
+/opt/homebrew/bin/arm-none-eabi-ar qc liblf-platform-impl.a "CMakeFiles/lf-platform-impl.dir/__/platform/impl/platform.c.obj"
+/opt/homebrew/bin/arm-none-eabi-ranlib liblf-platform-impl.a

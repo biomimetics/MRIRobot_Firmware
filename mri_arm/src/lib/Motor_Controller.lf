@@ -1,0 +1,131 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "STM32",
+    board: "F446RE"
+  }
+}
+
+
+import FFBController from "Joint_Controllers/FFB.lf"
+import PIDController from "Joint_Controllers/PID.lf"
+import SEAController0 from "Joint_Controllers/SEA0.lf"
+import SEAController1 from "Joint_Controllers/SEA1.lf"
+import SEAController2 from "Joint_Controllers/SEA2.lf"
+
+
+preamble {=
+  #include <stdio.h>
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+=}
+
+// Import and/or declare reactor classes.
+reactor MotorController(refresh_period: time = 5 ms) {
+  input[7] target_sel: bool
+  input[7] target_speed: float
+  input[7] target_pos: float
+
+  input[7] qdec_current: float
+  input[7] qdec_sea: float
+
+  output[7] speed: float
+
+  state sel: bool[7] = {0, 0, 0, 0, 0, 0, 0}
+  state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  timer trigger(0, refresh_period)
+
+  // control_u0 = new FFBController()
+  // control_u1 = new FFBController()
+  // control_u2 = new FFBController()
+  // control_u3 = new FFBController()
+  // control_u4 = new FFBController()
+  // control_u5 = new FFBController()
+
+  control_u0 = new SEAController0()
+  control_u1 = new SEAController0()
+  control_u2 = new SEAController0()
+  control_u3 = new SEAController1()
+  control_u4 = new SEAController1()
+  control_u5 = new SEAController2()
+  control_u6 = new SEAController2()
+
+  // control_u0 = new PIDController()
+  // control_u1 = new PIDController()
+  // control_u2 = new PIDController()
+  // control_u3 = new PIDController()
+  // control_u4 = new PIDController()
+  // control_u5 = new PIDController()
+  // control_u6 = new PIDController()
+
+
+  // Feed in the target positions
+  target_pos ->
+    control_u0.target_pos,
+    control_u1.target_pos,
+    control_u2.target_pos,
+    control_u3.target_pos,
+    control_u4.target_pos,
+    control_u5.target_pos,
+    control_u6.target_pos
+
+  // Feed in the current positions
+  qdec_current ->
+    control_u0.current_pos,
+    control_u1.current_pos,
+    control_u2.current_pos,
+    control_u3.current_pos,
+    control_u4.current_pos,
+    control_u5.current_pos,
+    control_u6.current_pos
+
+  // feed in the SEA positions
+  qdec_sea ->
+    control_u0.sea_pos,
+    control_u1.sea_pos,
+    control_u2.sea_pos,
+    control_u3.sea_pos,
+    control_u4.sea_pos,
+    control_u5.sea_pos,
+    control_u6.sea_pos
+
+  // Read out the positional control speed values
+  reaction(
+      control_u0.out,
+      control_u1.out,
+      control_u2.out,
+      control_u3.out,
+      control_u4.out,
+      control_u5.out,
+      control_u6.out) {=
+    self -> speed_posc[0] = control_u0.out->value;
+    self -> speed_posc[1] = control_u1.out->value;
+    self -> speed_posc[2] = control_u2.out->value;
+    self -> speed_posc[3] = control_u3.out->value;
+    self -> speed_posc[4] = control_u4.out->value;
+    self -> speed_posc[5] = control_u5.out->value;
+    self -> speed_posc[6] = control_u6.out->value;
+  =}
+
+  // Update passthrough values
+  reaction(target_sel, target_speed) {=
+    for(int i=0; i<7; i++) {
+      self->sel[i] = target_sel[i]->value;
+      self->speed_spc[i] = target_speed[i]->value;
+    }
+  =}
+
+  reaction(trigger) -> speed{=
+    // We use this to set either the speed or position of the motors
+    // sel is used to determine which --> 0: speed control, 1: position control
+    lf_set(speed[0], self->sel[0]? self->speed_posc[0]: self->speed_spc[0]);
+    lf_set(speed[1], self->sel[1]? self->speed_posc[1]: self->speed_spc[1]);
+    lf_set(speed[2], self->sel[2]? self->speed_posc[2]: self->speed_spc[2]);
+    lf_set(speed[3], self->sel[3]? self->speed_posc[3]: self->speed_spc[3]);
+    lf_set(speed[4], self->sel[4]? self->speed_posc[4]: self->speed_spc[4]);
+    lf_set(speed[5], self->sel[5]? self->speed_posc[5]: self->speed_spc[5]);
+    lf_set(speed[6], self->sel[6]? self->speed_posc[6]: self->speed_spc[6]);
+  =}
+}

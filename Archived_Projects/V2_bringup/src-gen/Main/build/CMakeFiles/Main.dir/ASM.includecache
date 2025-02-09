@@ -1,0 +1,10 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/Users/naichenzhao/Desktop/MRIRobotProject/MRIRobot/Firmware/V2_bringup/STM_sdk/startup_stm32f446xx.s
+

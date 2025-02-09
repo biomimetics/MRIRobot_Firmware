@@ -1,0 +1,1 @@
+/Users/naichenzhao/Desktop/BML/MRIRobotProject/MRIRobot/Firmware/mini_arm/bin/Main.elf

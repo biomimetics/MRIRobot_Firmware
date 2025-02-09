@@ -6,9 +6,10 @@ target C {
   }
 }
 
-import QDEC from "lib/Encoder.lf"
+import QDEC from "lib/Drivers/Encoder.lf"
+import USM from "lib/Drivers/USM.lf"
 import Home from "lib/Home.lf"
-import MotorDriver from "lib/Motor_Driver.lf"
+import MotorController from "lib/Motor_Controller.lf"
 import ROS_Interface from "lib/ROS_Interface.lf"
 
 preamble {=
@@ -105,16 +106,19 @@ main reactor {
   timer switch_motor(0 ms, 6000 ms)
   state count: int = 1
 
-  qdec = new QDEC()           // FPGA-based QDEC Encoders
-  motors = new MotorDriver()  // Main Motor driver + controller
-  home = new Home()           // Used to home the motors
+  qdec = new QDEC()                           // FPGA-based QDEC Encoders
+  usm = new USM()                             // Ultrasonic motor controllers
+  ros_controller = new ROS_Interface()        // ROS UART Interface
 
-  ros_controller = new ROS_Interface()
-  qdec.qdec_out -> motors.qdec_current
-  qdec.sea_out -> motors.qdec_sea
+  motor_controller = new MotorController()    // Main Motor driver + controller
+  home = new Home()                           // Used to home the motors
 
+  
+  qdec.qdec_out -> motor_controller.qdec_current
+  qdec.sea_out -> motor_controller.qdec_sea
   qdec.qdec_out -> ros_controller.current_pos
   qdec.sea_out -> ros_controller.sea_pos
+  motor_controller.speed -> usm.speed
 
   reaction(startup) {=
     // Prep all GPIO values
@@ -125,8 +129,6 @@ main reactor {
     MX_UART5_Init();
     MX_UART6_Init();
   =}
-
-
 
 
   initial mode STARTUP {
@@ -152,7 +154,9 @@ main reactor {
 
   // Used to update Motor target values
   // Reactor for updating motor target positions from manual targets
-  // ros_controller.target_pos -> motors.target_pos  // Reactor for updating motor target positions from manual targets
+  // ros_controller.target_pos -> motor_controller.target_pos  // Reactor for updating motor target positions from manual targets
+  
+  
   // Initial homing state for when we want home all of the joints
   mode HOME {
     timer home_pulse(50 ms, 100 ms)
@@ -179,22 +183,22 @@ main reactor {
       }
     =}
 
-    reaction(sys_tick) -> motors.target_sel, motors.target_speed {=
+    reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_speed {=
       for (int i=0; i<7; i++) {
-        lf_set(motors.target_sel[i], 0);
-        lf_set(motors.target_speed[i], target_speed[i]);
+        lf_set(motor_controller.target_sel[i], 0);
+        lf_set(motor_controller.target_speed[i], target_speed[i]);
       }
     =}
   }
 
   // Run state for when the robot is in operation
   mode RUN {
-    // reaction(sys_tick) -> motors.target_sel, motors.target_speed {=
+    // reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_speed {=
     //   for (int i=0; i<7; i++) {
-    //     lf_set(motors.target_speed[i], target_speed[i]);
+    //     lf_set(motor_controller.target_speed[i], target_speed[i]);
     //   }
     //   for (int i=0; i<7; i++) {
-    //     lf_set(motors.target_sel[i], 1);
+    //     lf_set(motor_controller.target_sel[i], 1);
     //   }
     // =}
 
@@ -208,23 +212,23 @@ main reactor {
       }
     =}
 
-    reaction(sys_tick) -> motors.target_sel, motors.target_pos, motors.target_speed {=
+    reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_pos, motor_controller.target_speed {=
       // if (self->count == 0) {
       //   for (int i=0; i<7; i++) {
-      //     lf_set(motors.target_speed[i], 100);
-      //     lf_set(motors.target_pos[i], 0);
+      //     lf_set(motor_controller.target_speed[i], 100);
+      //     lf_set(motor_controller.target_pos[i], 0);
       //   }
-      //   lf_set(motors.target_pos[1], 0);
+      //   lf_set(motor_controller.target_pos[1], 0);
       // } else {
-      //   // for (int i=0; i<7; i++) {
-      //   //   lf_set(motors.target_speed[i], -100);
-      //   //   lf_set(motors.target_pos[i], 15.707);
-      //   // }
-      //   // lf_set(motors.target_pos[1], 15.707);
+        // for (int i=0; i<7; i++) {
+        //   lf_set(motor_controller.target_speed[i], -100);
+        //   lf_set(motor_controller.target_pos[i], 15.707);
+        // }
+        // lf_set(motor_controller.target_pos[1], 15.707);
       // }
 
       for (int i=0; i<7; i++) {
-        lf_set(motors.target_sel[i], 1);
+        lf_set(motor_controller.target_sel[i], 1);
       }
     =}
   }

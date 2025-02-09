@@ -1,0 +1,169 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include <stdio.h>
+  #include <../../../motor_config.h>
+=}
+
+reactor QDEC(sample_period: time = 5 ms) {
+  input reset_qdec: bool
+
+  output[7] qdec_out: float
+  output[7] sea_out: float
+
+  timer trigger(0, sample_period)
+  timer enable(0, 20 ms)
+
+  preamble {=
+    UART_HandleTypeDef huart3;
+
+    DMA_HandleTypeDef hdma_usart3_rx;
+    DMA_HandleTypeDef hdma_usart3_tx;
+
+    static int printVals = true;
+    static int printcnt = 0;
+    static int printcnt_lim = 50;
+
+
+    // QDEC Commands
+    uint8_t qdec_reset[1]= {0x01};            // Reset QDEC values
+    uint8_t qdec_disable[1]= {0x02};          // Disable encoders
+    uint8_t qdec_enable[1]= {0x03};           // Enable encoders
+    uint8_t req_qdec[2]=  {0x04, 0x05};       // Request data
+
+    float pi = 3.14159;
+    static uint8_t data[200];
+    static long count[14];
+
+    static void MX_DMA_Init(void) {
+      /* DMA controller clock enable */
+      __HAL_RCC_DMA1_CLK_ENABLE();
+
+      /* DMA interrupt init */
+      /* DMA1_Stream1_IRQn interrupt configuration */
+      HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 0, 0);
+      HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+      
+      /* DMA1_Stream3_IRQn interrupt configuration */
+      HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
+      HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+    }
+
+    static void MX_UART3_Init(void) {
+      huart3.Instance = USART3;
+      huart3.Init.BaudRate = 921600;
+      huart3.Init.WordLength = UART_WORDLENGTH_8B;
+      huart3.Init.StopBits = UART_STOPBITS_1;
+      huart3.Init.Parity = UART_PARITY_NONE;
+      huart3.Init.Mode = UART_MODE_TX_RX;
+      huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+      huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+      HAL_UART_Init(&huart3);
+    }
+
+    static void MX_GPIO_Init(void) {
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOB_CLK_ENABLE();
+
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_15;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+      /* Configure Switch pins : PC1, PC2, PC3 */
+      GPIO_InitStruct.Pin = GPIO_PIN_2;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    }
+
+
+    void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+      HAL_UART_Receive_DMA(&huart3, data, 98);
+    }
+
+    static int last_switch = 0;
+  =}
+
+  reaction(startup) {=
+    MX_DMA_Init();
+    MX_UART3_Init();
+    MX_GPIO_Init();
+
+    HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
+    HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
+
+    HAL_UART_Receive_DMA(&huart3, data, 98);
+    HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
+  =}
+
+  reaction(reset_qdec) {=
+    HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
+    HAL_UART_Receive_DMA(&huart3, data, 98);
+  =}
+
+  // Update Encoder values
+  // This function should take approximately 1ms to operate
+  reaction(trigger) -> qdec_out, sea_out {=
+    long start = HAL_GetTick();
+
+
+    // Prep the next request
+    HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
+
+    // Shift over relevant data
+    for(int i=0; i<14; i++) {
+      count[i] = data[0+(i*7)] + (data[1+(i*7)]<<8) + (data[2+(i*7)]<<16) + (data[3+(i*7)]<<24) 
+                               + (data[4+(i*7)]<<32) + (data[5+(i*7)]<<40) + (data[6+(i*7)]<<48);
+    }
+
+    // Get values for SEA encoders
+    for (int i=0; i<7; i++) {
+      lf_set(sea_out[i],  (2*pi* ((float) (count[i]) / motor_configs[i]->sea_cpr)) - (motor_configs[i]->sea_offset/100));
+      if (printVals && printcnt>=printcnt_lim) {
+        printf("%d  ", (int) (sea_out[i]->value*100));
+      }
+    }
+
+    // Get values for USM encoders
+    for (int i=7; i<14; i++) {
+      lf_set(qdec_out[i-7],  2*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr));
+      if (printVals && printcnt>=printcnt_lim) {
+        printf("%d  ", (int) (qdec_out[i-7]->value*100));
+      }
+    }
+
+    long end = HAL_GetTick();
+    if (printVals && printcnt>=printcnt_lim) {
+      printf("[%ld]", end-start);
+      printf("| \r\n");
+    }
+
+    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
+  =}
+
+
+  reaction(enable) {=
+    volatile int read_switch = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, read_switch);
+
+    if (read_switch && !last_switch) {
+      HAL_UART_Transmit(&huart3, qdec_disable, 1, HAL_MAX_DELAY);
+      printf("Disabling Encoders\r\n");
+    } else if(!read_switch && last_switch) {
+      HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
+      printf("Enabling Encoders\r\n");
+    }
+    last_switch = read_switch;
+
+  =}
+}

@@ -1,0 +1,2 @@
+/opt/homebrew/bin/arm-none-eabi-ar qc liblf-low-level-platform-impl.a "CMakeFiles/lf-low-level-platform-impl.dir/__/low_level_platform/impl/src/lf_STM32f4_support.c.obj" "CMakeFiles/lf-low-level-platform-impl.dir/__/low_level_platform/impl/src/lf_atomic_irq.c.obj" "CMakeFiles/lf-low-level-platform-impl.dir/__/low_level_platform/impl/src/lf_platform_util.c.obj"
+/opt/homebrew/bin/arm-none-eabi-ranlib liblf-low-level-platform-impl.a
