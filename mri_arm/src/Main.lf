@@ -33,6 +33,7 @@ main reactor {
     bool target_sel[7] =    {0, 0, 0, 0, 0, 0, 0};
 
     static int at_home = 0;
+    static float tmp[500];
 
     static void MX_GPIO_Init(void) {
       GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -98,12 +99,21 @@ main reactor {
       huart6.Init.OverSampling = UART_OVERSAMPLING_16;
       HAL_UART_Init(&huart6);
     }
+
+
+    static void run_test(float* data) {
+      for (int j=0; j<500; j++) {
+        for(int i=0; i<100; i++) {
+          data[i] = data[i] * data[i];
+        }
+      }
+    }
   =}
   // Main system clock we will use inside main
   timer sys_tick(0 ms, 10 ms) 
 
   // Switch moto position state
-  timer switch_motor(0 ms, 6000 ms)
+  timer switch_motor(0 ms, 1000 ms)
   state count: int = 1
 
   qdec = new QDEC()                           // FPGA-based QDEC Encoders
@@ -198,37 +208,70 @@ main reactor {
     //     lf_set(motor_controller.target_speed[i], target_speed[i]);
     //   }
     //   for (int i=0; i<7; i++) {
-    //     lf_set(motor_controller.target_sel[i], 1);
+    //     lf_set(motor_controller.target_sel[i], MODE_POS);
     //   }
     // =}
 
     reaction(switch_motor) {=
-      printf("switch state: %d\r\n", self->count);
-      HAL_GPIO_TogglePin(GPIOH, GPIO_PIN_1);
       if (self->count == 0) {
         self->count = 1;
+      } else if (self->count == 1) {
+        self->count = 2;
+      } else if (self->count == 2) {
+        self->count = 3;
+      } else if (self->count == 3) {
+        self->count = 4;
       } else {
         self->count = 0;
       }
+      printf("switch state: %d\r\n", self->count);
+      for (int i=0; i<500; i++) {
+        tmp[i] = 2;
+      }
+
+
+      long start = HAL_GetTick();
+      run_test(tmp);
+      long end = HAL_GetTick();
+
+
+      printf("time taken: %ld\r\n", end-start);
+
+
     =}
 
     reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_pos, motor_controller.target_speed {=
-      // if (self->count == 0) {
-      //   for (int i=0; i<7; i++) {
-      //     lf_set(motor_controller.target_speed[i], 100);
-      //     lf_set(motor_controller.target_pos[i], 0);
-      //   }
-      //   lf_set(motor_controller.target_pos[1], 0);
-      // } else {
-        // for (int i=0; i<7; i++) {
-        //   lf_set(motor_controller.target_speed[i], -100);
-        //   lf_set(motor_controller.target_pos[i], 15.707);
-        // }
-        // lf_set(motor_controller.target_pos[1], 15.707);
-      // }
+      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, self->count == 0);
+      if (self->count == 0) {
+        for (int i=0; i<7; i++) {
+          lf_set(motor_controller.target_speed[i], 0);
+        }
+      } else if (self->count == 1) {
+        for (int i=0; i<7; i++) {
+          lf_set(motor_controller.target_speed[i], 10);
+        }
+      } else if (self->count == 2) {
+        for (int i=0; i<7; i++) {
+          lf_set(motor_controller.target_speed[i], 20);
+        }
+      } else if (self->count == 3) {
+        for (int i=0; i<7; i++) {
+          lf_set(motor_controller.target_speed[i], 30);
+        }
+      } else if (self->count == 4) {
+        for (int i=0; i<7; i++) {
+          lf_set(motor_controller.target_speed[i], 40);
+        }
+      } else {
+        for (int i=0; i<7; i++) {
+          lf_set(motor_controller.target_speed[i], 50);
+        }
+      }
+
 
       for (int i=0; i<7; i++) {
-        lf_set(motor_controller.target_sel[i], 1);
+        // lf_set(motor_controller.target_sel[i], MODE_VEL);
+        lf_set(motor_controller.target_sel[i], MODE_POS);
       }
     =}
   }
