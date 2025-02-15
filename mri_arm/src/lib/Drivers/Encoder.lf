@@ -30,7 +30,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     // static int printVals = true;
     static int printVals = true;
     static int printcnt = 0;
-    static int printcnt_lim = 50;
+    static int printcnt_lim = 100;
 
 
     // QDEC Commands
@@ -129,7 +129,10 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // Get values for SEA encoders
     for (int i=0; i<7; i++) {
-      lf_set(sea_out[i],  (2*pi* ((float) (count[i]) / motor_configs[i]->sea_cpr)) - (motor_configs[i]->sea_offset/100));
+      // 0.5644 = 25.4/45
+      float sea_raw = ((float) (count[i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr );
+      lf_set(sea_out[i],  (motor_configs[i]->sea_gear_ratio * 10 * sea_raw) - (motor_configs[i]->sea_offset)/100 );
+
       if (printVals && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (sea_out[i]->value*100));
       }

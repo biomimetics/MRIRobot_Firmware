@@ -61,7 +61,7 @@ reactor ROS_Interface {
       // huart1.Init.BaudRate = 230400;
       huart1.Init.WordLength = UART_WORDLENGTH_8B;
       huart1.Init.StopBits = UART_STOPBITS_1;
-      huart1.Init.Parity = UART_PARITY_NONE;\
+      huart1.Init.Parity = UART_PARITY_NONE;
       huart1.Init.Mode = UART_MODE_TX_RX;
       huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
       huart1.Init.OverSampling = UART_OVERSAMPLING_16;
@@ -129,14 +129,14 @@ reactor ROS_Interface {
 
   =}
 
-  reaction(joint_pos) {=
-    enc_data[0] = (int)(joint_pos[0]->value * 1000);
-    enc_data[1] = (int)(joint_pos[1]->value * 1000);
-    enc_data[2] = (int)(joint_pos[2]->value * 1000);
-    enc_data[3] = (int)(joint_pos[3]->value * 1000);
-    enc_data[4] = (int)(joint_pos[4]->value * 1000);
-    enc_data[5] = (int)(joint_pos[5]->value * 1000);
-    enc_data[6] = (int)(joint_pos[6]->value * 1000);
+  reaction(current_joint) {=
+    enc_data[0] = (int)(current_joint[0]->value * 1000);
+    enc_data[1] = (int)(current_joint[1]->value * 1000);
+    enc_data[2] = (int)(current_joint[2]->value * 1000);
+    enc_data[3] = (int)(current_joint[3]->value * 1000);
+    enc_data[4] = (int)(current_joint[4]->value * 1000);
+    enc_data[5] = (int)(current_joint[5]->value * 1000);
+    enc_data[6] = (int)(current_joint[6]->value * 1000);
   =}
 
   reaction(sea_pos) {=

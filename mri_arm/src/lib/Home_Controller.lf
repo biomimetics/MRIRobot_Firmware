@@ -38,7 +38,7 @@ reactor HomeController(sample_period: time = 15 ms) {
 
     volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
 
-    static float SEA_limits[7] = {0, 0, 2, 2, 0, 0, 0};
+    static float SEA_limits[7] = {0, 0, 0, 2.1, 2.1, 2, 2};
     static int SEA_trig[7] = {0, 0, 0, 0, 0, 0, 0};
     static float ref[7] = {0, 0, 0, 0, 0, 0, 0};
     static float rpos[7] = {0, 0, 0, 0, 0, 0, 0};
@@ -117,17 +117,17 @@ reactor HomeController(sample_period: time = 15 ms) {
       //+----------------------------------------------------------------+
       //  Homing states:
       //
-      //  Home Stage (0) - Home base
+      //  Home Stage (0) - Home second joint
       //    - State(00) - Init state (Check if we want to home this stage)
       //    - State(01) - Home in same direction
       //    - State(02) - Home in opposite direction
       //
-      //  Home Stage (1) - Home first joinjt
+      //  Home Stage (1) - Home first joint
       //    - State(10) - Init state (Check if we want to home this stage)
       //    - State(11) - Home in same direction
       //    - State(12) - Home in opposite direction
       //
-      //  Home Stage (2) - Home second joint
+      //  Home Stage (2) - Home base
       //    - State(20) - Init state (Check if we want to home this stage)
       //    - State(21) - Home in same direction
       //    - State(22) - Home in opposite direction
@@ -153,18 +153,46 @@ reactor HomeController(sample_period: time = 15 ms) {
       switch (home_state) {
 
         // + ---------------------------------------------------- +
-        // | Home joint module 0 (motors 0, 1, 2)
+        // | Home joint module 0 (motors 5, 6)
         // + ---------------------------------------------------- +
         case 00:           // Check if we want to home this module
           printf("[HOME] Home module 0\r\n");
           home_state = home_stage[0]? 01:10;
           break;
         case 01:           //
-          home_state = 02;
+          self->home_speed[5] = -10;
+          self->home_speed[6] = 10;
+          if (SEA_trig[5] == 1 && SEA_trig[6] == -1 ) {
+            printf("    [H0] Home step 1 done\r\n");
+            self->home_speed[5] = 0;
+            self->home_speed[6] = 0;
+            ref[3] = current_pos[5]->value - 5;
+            ref[4] = current_pos[6]->value + 5;
+            home_state = 02;
+          }
           break;
-        case 02:           //
+        case 02:           //   Have the motors point up
+          self->home_speed[5] = get_speed(rpos[5], 0);
+          self->home_speed[6] = get_speed(rpos[6], 0);
+          if (absf(rpos[5]) < 0.01 && absf(rpos[6]) < 0.01) {
+            printf("    [H0] Home step 2 done\r\n");
+            home_state = 03;
+          }
+          break;
+        case 03:           //   Then, home with the rotary direction
+          self->home_speed[5] = -10 + -get_speed((rpos[6] - rpos[5]), 0);
+          self->home_speed[6] = -10 +  get_speed((rpos[6] - rpos[5]), 0);
+          if (SEA_trig[5] == 1 && SEA_trig[6] == 1) {
+            printf("    [H1] Home step 3 done\r\n");
+            home_state = 10;
+            self->home_speed[5] = 0;
+            self->home_speed[6] = 0;
+          }
           break;
         
+
+
+
         // + ---------------------------------------------------- +
         // | Home joint module 1 (motors 3, 4)
         // + ---------------------------------------------------- +
@@ -173,28 +201,28 @@ reactor HomeController(sample_period: time = 15 ms) {
           home_state = home_stage[1]? 11:20;
           break;
         case 11:           //   First home the movement direction
-          self->home_speed[3] = -10;
-          self->home_speed[4] = 10;
+          self->home_speed[3] = -25;
+          self->home_speed[4] = 25;
           if (SEA_trig[3] == 1 && SEA_trig[4] == -1 ) {
             printf("    [H1] Home step 1 done\r\n");
             self->home_speed[3] = 0;
             self->home_speed[4] = 0;
-            ref[3] = current_pos[3]->value - 5;
-            ref[4] = current_pos[4]->value + 5;
+            ref[3] = current_pos[3]->value + (1/10) * sea_pos[3]->value + 20.41;
+            ref[4] = current_pos[4]->value - (1/10) * sea_pos[4]->value - 20.41;
             home_state = 12;
           }
           break;
         case 12:           //   Have the motors point up
-          self->home_speed[3] = get_speed(rpos[3], 0);
-          self->home_speed[4] = get_speed(rpos[4], 0);
+          self->home_speed[3] = -get_speed(rpos[3], 0);
+          self->home_speed[4] = -get_speed(rpos[4], 0);
           if (absf(rpos[3]) < 0.01 && absf(rpos[4]) < 0.01) {
             printf("    [H1] Home step 2 done\r\n");
             home_state = 13;
           }
           break;
         case 13:           //   Then, home with the rotary direction
-          self->home_speed[3] = -10 + -get_speed((rpos[4] - rpos[3]), 0);
-          self->home_speed[4] = -10 +  get_speed((rpos[4] - rpos[3]), 0);
+          self->home_speed[3] = -25 +  1.2*get_speed((rpos[4] - rpos[3]), 0);
+          self->home_speed[4] = -25 + -1.2*get_speed((rpos[4] - rpos[3]), 0);
           if (SEA_trig[3] == 1 && SEA_trig[4] == 1) {
             printf("    [H1] Home step 3 done\r\n");
             home_state = 20;
@@ -203,8 +231,11 @@ reactor HomeController(sample_period: time = 15 ms) {
           }
           break;
         
+
+
+
         // + ---------------------------------------------------- +
-        // | Home joint module 2 (motors 5, 6)
+        // | Home joint module 2 (motors 0, 1, 2)
         // + ---------------------------------------------------- +
         case 20:           // Check if we want to home this module
           printf("[HOME] Home module 2\r\n");

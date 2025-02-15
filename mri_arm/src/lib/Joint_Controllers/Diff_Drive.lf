@@ -68,12 +68,12 @@ reactor Diff_Drive (
         [Joint Roll ]:   pos_joint[1]       */
     reaction(current_pos) -> pos_joint {=
         // Apply gear reduction in motor space
-        float curr_0_post = current_pos[0]->value * self->gear_ratios[0];
-        float curr_1_post = current_pos[1]->value * self->gear_ratios[1];
+        float curr_0_post = current_pos[0]->value / self->gear_ratios[0];
+        float curr_1_post = current_pos[1]->value / self->gear_ratios[1];
 
         // Transform from motor to joint space
-        lf_set(pos_joint[0], curr_0_post + curr_1_post);
-        lf_set(pos_joint[1], curr_0_post - curr_1_post);
+        lf_set(pos_joint[0], (curr_0_post + curr_1_post)/2);
+        lf_set(pos_joint[1], (curr_0_post - curr_1_post)/2);
     =}
 
 

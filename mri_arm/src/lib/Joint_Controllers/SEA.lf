@@ -19,15 +19,15 @@ reactor SEAController(
     Kp: float = 4,      // Proportional control constant
     Ki: float = 0.5,    // Integral control constant
     Kd: float = -1,     // Differential control constant
-    Ks: float = 10,   // SEA control constant
+    Ks: float = 110,   // SEA control constant
 
     // SEA transition values
-    SEA_LIM_P: float = 0.55,
+    SEA_LIM_P: float = 0.3,
     SEA_LIM_D: float = 10,
 
     // SEA passthrough values
-    LIM: float = 0.23,
-    CHANGE_P: float = 0.33,
+    LIM: float = 0.18,
+    CHANGE_P: float = 0.2,
     CHANGE_D: float = 0.1
 
     ) {

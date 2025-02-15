@@ -158,7 +158,8 @@ main reactor {
     // +-----------------------------------------------------------------------+
     qdec.qdec_out -> home_controller.current_pos
     qdec.sea_out -> home_controller.sea_pos
-    reaction(sys_tick) -> qdec.reset_qdec, reset(RUN) {=
+    timer home_pulse(50 ms, 100 ms)
+    reaction(home_pulse) -> qdec.reset_qdec, reset(RUN) {=
       if (at_home) {
         for(int i=0; i<7; i++) {
           target_pos[i] = 0;
@@ -179,9 +180,10 @@ main reactor {
       }
     =}
 
-    reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_speed {=
+    reaction(sys_tick) -> motor_controller.target_mode, motor_controller.target_sel, motor_controller.target_speed {=
       for (int i=0; i<7; i++) {
-        lf_set(motor_controller.target_sel[i], 0);
+        lf_set(motor_controller.target_sel[i], MODE_VEL);
+        lf_set(motor_controller.target_mode, MODE_INT);
         lf_set(motor_controller.target_speed[i], target_speed[i]);
       }
     =}

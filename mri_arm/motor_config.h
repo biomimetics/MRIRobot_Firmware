@@ -10,6 +10,7 @@ typedef struct { /* __MOTOR_CONFIG_H */
     // Encoder Into
     float qdec_cpr;         // motor encoder count per rotation
     float sea_cpr;          // motor encoder count per rotation
+    float sea_gear_ratio;   // sea motor gear ratio
     float sea_offset;       // sea reset offset
 
     // Movement info
@@ -21,79 +22,86 @@ typedef struct { /* __MOTOR_CONFIG_H */
 
 // Define config for motor 0
 static Motor_Config motor0_config = {
-    1,          // dir          - Motor direction
-    500,        // max_speed    - max motor speed
-    23040,      // qdec_cpr     - motor encoder count per rotation
-    400,        // qdec_cpr     - motor encoder count per rotation
-    0.0,        // sea_offset   - sea reset offset
-    1.0,        // speed_ratio  - motor speed ration 
-    1.0         // gear_ratio   - motor gear box gear ratio
+    1,          // dir              - Motor direction
+    800,        // max_speed        - max motor speed
+    23040,      // qdec_cpr         - motor encoder count per rotation
+    8000,       // qdec_cpr         - motor encoder count per rotation
+    13.0,       // sea_gear_ratio   - sea motor gear ratio
+    0.0,        // sea_offset       - sea reset offset
+    1.0,        // speed_ratio      - motor speed ration 
+    13.0        // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor1_config = {
-    1,          // dir          - Motor direction
-    500,        // max_speed    - max motor speed
-    23040,      // qdec_cpr     - motor encoder count per rotation
-    400,        // sea_cpr      - sea encoder count per rotation
-    0.0,        // sea_offset   - sea reset offset
-    1.0,        // speed_ratio  - motor speed ration 
-    1.0         // gear_ratio   - motor gear box gear ratio
+    1,          // dir              - Motor direction
+    800,        // max_speed        - max motor speed
+    23040,      // qdec_cpr         - motor encoder count per rotation
+    8000,       // sea_cpr          - sea encoder count per rotation
+    13.0,       // sea_gear_ratio   - sea motor gear ratio
+    0.0,        // sea_offset       - sea reset offset
+    1.0,        // speed_ratio      - motor speed ration 
+    12.0        // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor2_config = {
-    1,          // dir          - Motor direction
-    500,        // max_speed    - max motor speed
-    23040,      // qdec_cpr     - motor encoder count per rotation
-    400,        // sea_cpr      - sea encoder count per rotation
-    0.0,        // sea_offset   - sea reset offset
-    1.0,        // speed_ratio  - motor speed ration 
-    1.0         // gear_ratio   - motor gear box gear ratio
+    1,          // dir              - Motor direction
+    800,        // max_speed        - max motor speed
+    23040,      // qdec_cpr         - motor encoder count per rotation
+    8000,       // sea_cpr          - sea encoder count per rotation
+    13.0,       // sea_gear_ratio   - sea motor gear ratio
+    0.0,        // sea_offset       - sea reset offset
+    1.0,        // speed_ratio      - motor speed ration 
+    12.0        // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor3_config = {
-    1,          // dir          - Motor direction
-    500,        // max_speed    - max motor speed
-    23040,      // qdec_cpr     - motor encoder count per rotation
-    400,        // sea_cpr      - sea encoder count per rotation
-    12,        // sea_offset   - sea reset offset
-    1.0,        // speed_ratio  - motor speed ration 
-    1.0         // gear_ratio   - motor gear box gear ratio
+    1,          // dir              - Motor direction
+    800,        // max_speed        - max motor speed
+    23040,      // qdec_cpr         - motor encoder count per rotation
+    8000,       // sea_cpr          - sea encoder count per rotation
+    13.0,       // sea_gear_ratio   - sea motor gear ratio
+    0.0,        // sea_offset       - sea reset offset
+    1.0,        // speed_ratio      - motor speed ration 
+    12.0        // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor4_config = {
-    1,          // dir          - Motor direction
-    500,        // max_speed    - max motor speed
-    23040,      // qdec_cpr     - motor encoder count per rotation
-    400,        // sea_cpr      - sea encoder count per rotation
-    160,        // sea_offset   - sea reset offset
-    1.0,        // speed_ratio  - motor speed ration 
-    1.0         // gear_ratio   - motor gear box gear ratio
+    1,          // dir              - Motor direction
+    800,        // max_speed        - max motor speed
+    23040,      // qdec_cpr         - motor encoder count per rotation
+    8000,       // sea_cpr          - sea encoder count per rotation
+    13.0,       // sea_gear_ratio   - sea motor gear ratio
+    80.0,       // sea_offset       - sea reset offset
+    1.0,        // speed_ratio      - motor speed ration 
+    12.0        // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor5_config = {
-    -1,         // dir          - Motor direction
-    500,        // max_speed    - max motor speed
-    23040,      // qdec_cpr     - motor encoder count per rotation
-    400,        // sea_cpr      - sea encoder count per rotation
-    -20,        // sea_offset   - sea reset offset
-    1.0,        // speed_ratio  - motor speed ration 
-    1.0         // gear_ratio   - motor gear box gear ratio
+    -1,         // dir              - Motor direction
+    500,        // max_speed        - max motor speed
+    23040,      // qdec_cpr         - motor encoder count per rotation
+    8000,       // sea_cpr          - sea encoder count per rotation
+    36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
+    -10.0,      // sea_offset       - sea reset offset
+    1.0,        // speed_ratio      - motor speed ration 
+    52.0/16.0   // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor6_config = {
-    -1,         // dir          - Motor direction
-    500,        // max_speed    - max motor speed
-    23040,      // qdec_cpr     - motor encoder count per rotation
-    400,        // sea_cpr      - sea encoder count per rotation
-    130,        // sea_offset   - sea reset offset
-    1.0,        // speed_ratio  - motor speed ration 
-    1.0         // gear_ratio   - motor gear box gear ratio
+    -1,         // dir              - Motor direction
+    500,        // max_speed        - max motor speed
+    23040,      // qdec_cpr         - motor encoder count per rotation
+    8000,       // sea_cpr          - sea encoder count per rotation
+    36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
+    20.0,       // sea_offset       - sea reset offset
+    1.0,        // speed_ratio      - motor speed ration 
+    52.0/16.0   // gear_ratio       - motor gear box gear ratio
 };
 
 
