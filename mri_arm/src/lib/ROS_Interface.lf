@@ -14,6 +14,8 @@ preamble {=
 
 reactor ROS_Interface {
   input[7] current_pos: float
+  input[7] current_joint: float
+  input[7] joint_pos: float
   input[7] sea_pos: float
 
   output[7] target_pos: float
@@ -127,14 +129,14 @@ reactor ROS_Interface {
 
   =}
 
-  reaction(current_pos) {=
-    enc_data[0] = (int)(current_pos[0]->value * 1000);
-    enc_data[1] = (int)(current_pos[1]->value * 1000);
-    enc_data[2] = (int)(current_pos[2]->value * 1000);
-    enc_data[3] = (int)(current_pos[3]->value * 1000);
-    enc_data[4] = (int)(current_pos[4]->value * 1000);
-    enc_data[5] = (int)(current_pos[5]->value * 1000);
-    enc_data[6] = (int)(current_pos[6]->value * 1000);
+  reaction(joint_pos) {=
+    enc_data[0] = (int)(joint_pos[0]->value * 1000);
+    enc_data[1] = (int)(joint_pos[1]->value * 1000);
+    enc_data[2] = (int)(joint_pos[2]->value * 1000);
+    enc_data[3] = (int)(joint_pos[3]->value * 1000);
+    enc_data[4] = (int)(joint_pos[4]->value * 1000);
+    enc_data[5] = (int)(joint_pos[5]->value * 1000);
+    enc_data[6] = (int)(joint_pos[6]->value * 1000);
   =}
 
   reaction(sea_pos) {=

@@ -8,7 +8,7 @@ target C {
 
 import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
-import Home from "lib/Home.lf"
+import HomeController from "lib/Home_Controller.lf"
 import MotorController from "lib/Motor_Controller.lf"
 import ROS_Interface from "lib/ROS_Interface.lf"
 
@@ -31,9 +31,7 @@ main reactor {
     float target_pos[7] =   {0, 0, 0, 0, 0, 0, 0};
     float target_speed[7] = {0, 0, 0, 0, 0, 0, 0};
     bool target_sel[7] =    {0, 0, 0, 0, 0, 0, 0};
-
     static int at_home = 0;
-    static float tmp[500];
 
     static void MX_GPIO_Init(void) {
       GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -99,36 +97,28 @@ main reactor {
       huart6.Init.OverSampling = UART_OVERSAMPLING_16;
       HAL_UART_Init(&huart6);
     }
-
-
-    static void run_test(float* data) {
-      for (int j=0; j<500; j++) {
-        for(int i=0; i<100; i++) {
-          data[i] = data[i] * data[i];
-        }
-      }
-    }
   =}
-  // Main system clock we will use inside main
-  timer sys_tick(0 ms, 10 ms) 
-
-  // Switch moto position state
-  timer switch_motor(0 ms, 1000 ms)
+  
+  timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
+  timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
   state count: int = 1
 
   qdec = new QDEC()                           // FPGA-based QDEC Encoders
   usm = new USM()                             // Ultrasonic motor controllers
   ros_controller = new ROS_Interface()        // ROS UART Interface
-
   motor_controller = new MotorController()    // Main Motor driver + controller
-  home = new Home()                           // Used to home the motors
+  home_controller = new HomeController()      // Used to home the motors
 
-  
-  qdec.qdec_out -> motor_controller.qdec_current
-  qdec.sea_out -> motor_controller.qdec_sea
+  // Route encoder information to relevant reactors
+  qdec.qdec_out -> motor_controller.qdec_pos
   qdec.qdec_out -> ros_controller.current_pos
+  qdec.sea_out -> motor_controller.qdec_sea
   qdec.sea_out -> ros_controller.sea_pos
+
+  // Route joint targets/information
+  motor_controller.current_joint -> ros_controller.current_joint
   motor_controller.speed -> usm.speed
+  ros_controller.target_pos -> motor_controller.target_pos_ext
 
   reaction(startup) {=
     // Prep all GPIO values
@@ -161,18 +151,14 @@ main reactor {
     =}
 
   }
-
-  // Used to update Motor target values
-  // Reactor for updating motor target positions from manual targets
-  // ros_controller.target_pos -> motor_controller.target_pos  // Reactor for updating motor target positions from manual targets
   
-  
-  // Initial homing state for when we want home all of the joints
   mode HOME {
-    timer home_pulse(50 ms, 100 ms)
-    qdec.qdec_out -> home.current_pos
-    qdec.sea_out -> home.sea_pos
-    reaction(home_pulse) -> qdec.reset_qdec, reset(RUN) {=
+    // +-----------------------------------------------------------------------+
+    // | Robot Homing
+    // +-----------------------------------------------------------------------+
+    qdec.qdec_out -> home_controller.current_pos
+    qdec.sea_out -> home_controller.sea_pos
+    reaction(sys_tick) -> qdec.reset_qdec, reset(RUN) {=
       if (at_home) {
         for(int i=0; i<7; i++) {
           target_pos[i] = 0;
@@ -183,13 +169,13 @@ main reactor {
       }
     =}
 
-    reaction(home.is_home) {=
-      at_home = home.is_home->value;
+    reaction(home_controller.is_home) {=
+      at_home = home_controller.is_home->value;
     =}
 
-    reaction(home.motor_speed) {=
+    reaction(home_controller.motor_speed) {=
       for(int i=0; i<7; i++) {
-        target_speed[i] = home.motor_speed[i]->value;
+        target_speed[i] = home_controller.motor_speed[i]->value;
       }
     =}
 
@@ -203,15 +189,26 @@ main reactor {
 
   // Run state for when the robot is in operation
   mode RUN {
-    // reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_speed {=
-    //   for (int i=0; i<7; i++) {
-    //     lf_set(motor_controller.target_speed[i], target_speed[i]);
-    //   }
-    //   for (int i=0; i<7; i++) {
-    //     lf_set(motor_controller.target_sel[i], MODE_POS);
-    //   }
-    // =}
+    // +-----------------------------------------------------------------------+
+    // | Set the motor control values
+    // |    - Switch between velocity or position control
+    // |    - Switch between internal or external control
+    // +-----------------------------------------------------------------------+
+    reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_mode {=
+      for (int i=0; i<7; i++) {
+        lf_set(motor_controller.target_sel[i], MODE_POS);   // Position control
+        // lf_set(motor_controller.target_sel[i], MODE_VEL);   // Velocity control
+      }
 
+      lf_set(motor_controller.target_mode, MODE_INT);   // Internal control moder
+      // lf_set(motor_controller.target_mode, MODE_EXT);   // External control moder
+    =}
+
+
+
+    // +-----------------------------------------------------------------------+
+    // | Reactors for debugging/testing
+    // +-----------------------------------------------------------------------+
     reaction(switch_motor) {=
       if (self->count == 0) {
         self->count = 1;
@@ -225,22 +222,10 @@ main reactor {
         self->count = 0;
       }
       printf("switch state: %d\r\n", self->count);
-      for (int i=0; i<500; i++) {
-        tmp[i] = 2;
-      }
-
-
-      long start = HAL_GetTick();
-      run_test(tmp);
-      long end = HAL_GetTick();
-
-
-      printf("time taken: %ld\r\n", end-start);
-
-
     =}
 
-    reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_pos, motor_controller.target_speed {=
+    // Set the internal target position and/or velocity
+    reaction(sys_tick) -> motor_controller.target_pos_int, motor_controller.target_speed {=
       HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, self->count == 0);
       if (self->count == 0) {
         for (int i=0; i<7; i++) {
@@ -266,12 +251,6 @@ main reactor {
         for (int i=0; i<7; i++) {
           lf_set(motor_controller.target_speed[i], 50);
         }
-      }
-
-
-      for (int i=0; i<7; i++) {
-        // lf_set(motor_controller.target_sel[i], MODE_VEL);
-        lf_set(motor_controller.target_sel[i], MODE_POS);
       }
     =}
   }

@@ -1,0 +1,249 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include "stm32_startup.h"
+  #include <stdio.h>
+=}
+
+reactor HomeController(sample_period: time = 15 ms) {
+  timer trigger(0, sample_period)
+
+  input[7] current_pos: float
+  input[7] sea_pos: float
+
+  output[7] motor_speed: float
+  output is_home: int
+
+  // state is_home: int = 0
+  state home_speed: float[7] = {-20, -10, 100, 0, 30, 30, 30}
+
+  state last_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state last_sea: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state pos_diff: float[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state diffzero_cnt: int[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state update_cnt: int = 0
+
+  timer switch_update(0 ms, 40 ms)
+
+  preamble {=
+
+    volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
+
+    static float SEA_limits[7] = {0, 0, 2, 2, 0, 0, 0};
+    static int SEA_trig[7] = {0, 0, 0, 0, 0, 0, 0};
+    static float ref[7] = {0, 0, 0, 0, 0, 0, 0};
+    static float rpos[7] = {0, 0, 0, 0, 0, 0, 0};
+
+    static int printVals = false;
+    static int printcnt = 0;
+    static int printcnt_lim = 20;
+
+    static int home_state = 0;
+    static int _is_home = 0;
+
+
+    static float ref_0 = 0;
+    static float ref_1 = 0;
+    static float ref_3 = 0;
+
+    static void MX_GPIO_Init(void) {
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOB_CLK_ENABLE();
+      __HAL_RCC_GPIOH_CLK_ENABLE();
+
+      //+----------------------------------------------------------------+
+      //  Name,     
+      //  home0,    PA4
+      //  home1,    PA5
+      //  home2,    PA6
+      //  home3,    PA7
+      //  home4,    PA8
+      //  home5,    PA11
+      //  home6,    PA12
+      //+----------------------------------------------------------------+
+
+      /* Configure Switch pins : PC1, PC2, PC3 */
+      GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_11|GPIO_PIN_12;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    }
+
+    static float get_speed(float curr, float target) {
+      float speed = 110 * (curr - target);
+      speed = speed > 20? 20:speed;
+      speed = speed < -20? -20:speed;
+      return speed;
+    }
+
+    static float absf(float a) {
+      return a<0? -a:a;
+    }
+  
+  =}
+
+  reaction(switch_update) {=
+    switch_val[2] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6);
+    switch_val[3] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7);
+    switch_val[4] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8);
+    switch_val[5] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11);
+    switch_val[6] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12);
+
+    if (printVals && printcnt>=printcnt_lim) {
+      printf("switch vals: %d, %d, %d, %d, %d, %d, %d\r\n", switch_val[0], switch_val[1], switch_val[2], switch_val[3], switch_val[4], switch_val[5], switch_val[6]);
+    }
+    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
+
+  =}
+
+  reaction(current_pos, sea_pos) -> motor_speed, is_home {=
+    int spd = 5;
+    float target_0 = 2.0944;
+    float target_1 = 1.56;
+    float target_3 = 0.34;
+
+    bool home_stage[3] = {0, 1, 0};
+
+
+      //+----------------------------------------------------------------+
+      //  Homing states:
+      //
+      //  Home Stage (0) - Home base
+      //    - State(00) - Init state (Check if we want to home this stage)
+      //    - State(01) - Home in same direction
+      //    - State(02) - Home in opposite direction
+      //
+      //  Home Stage (1) - Home first joinjt
+      //    - State(10) - Init state (Check if we want to home this stage)
+      //    - State(11) - Home in same direction
+      //    - State(12) - Home in opposite direction
+      //
+      //  Home Stage (2) - Home second joint
+      //    - State(20) - Init state (Check if we want to home this stage)
+      //    - State(21) - Home in same direction
+      //    - State(22) - Home in opposite direction
+      //
+      //
+      //  - State(30) - Final return state
+      //+----------------------------------------------------------------+
+
+
+    // Calculate any relevant global information
+    //    Helps simplify the code
+    for (int i=0; i<7; i++) {
+      SEA_trig[i] = (sea_pos[i]->value > SEA_limits[i])? 1:
+                    (sea_pos[i]->value < -SEA_limits[i])? -1:
+                    0;
+      rpos[i] = current_pos[i]->value - ref[i];
+    }
+
+    // printf("tr1: %d, tr2: %d\r\n", SEA_trig[3], SEA_trig[4]);
+
+
+    if (_is_home == 0) {
+      switch (home_state) {
+
+        // + ---------------------------------------------------- +
+        // | Home joint module 0 (motors 0, 1, 2)
+        // + ---------------------------------------------------- +
+        case 00:           // Check if we want to home this module
+          printf("[HOME] Home module 0\r\n");
+          home_state = home_stage[0]? 01:10;
+          break;
+        case 01:           //
+          home_state = 02;
+          break;
+        case 02:           //
+          break;
+        
+        // + ---------------------------------------------------- +
+        // | Home joint module 1 (motors 3, 4)
+        // + ---------------------------------------------------- +
+        case 10:           // Check if we want to home this module
+          printf("[HOME] Home module 1\r\n");
+          home_state = home_stage[1]? 11:20;
+          break;
+        case 11:           //   First home the movement direction
+          self->home_speed[3] = -10;
+          self->home_speed[4] = 10;
+          if (SEA_trig[3] == 1 && SEA_trig[4] == -1 ) {
+            printf("    [H1] Home step 1 done\r\n");
+            self->home_speed[3] = 0;
+            self->home_speed[4] = 0;
+            ref[3] = current_pos[3]->value - 5;
+            ref[4] = current_pos[4]->value + 5;
+            home_state = 12;
+          }
+          break;
+        case 12:           //   Have the motors point up
+          self->home_speed[3] = get_speed(rpos[3], 0);
+          self->home_speed[4] = get_speed(rpos[4], 0);
+          if (absf(rpos[3]) < 0.01 && absf(rpos[4]) < 0.01) {
+            printf("    [H1] Home step 2 done\r\n");
+            home_state = 13;
+          }
+          break;
+        case 13:           //   Then, home with the rotary direction
+          self->home_speed[3] = -10 + -get_speed((rpos[4] - rpos[3]), 0);
+          self->home_speed[4] = -10 +  get_speed((rpos[4] - rpos[3]), 0);
+          if (SEA_trig[3] == 1 && SEA_trig[4] == 1) {
+            printf("    [H1] Home step 3 done\r\n");
+            home_state = 20;
+            self->home_speed[3] = 0;
+            self->home_speed[4] = 0;
+          }
+          break;
+        
+        // + ---------------------------------------------------- +
+        // | Home joint module 2 (motors 5, 6)
+        // + ---------------------------------------------------- +
+        case 20:           // Check if we want to home this module
+          printf("[HOME] Home module 2\r\n");
+          home_state = home_stage[2]? 21:30;
+          break;
+        case 21:           //
+          home_state = 22;
+          break;
+        case 22:           //
+          home_state = 30;
+          break;
+        
+        case 30:           //
+          printf("[HOME] Homing complete\r\n");
+          _is_home = 1;
+          break;
+
+
+        default:
+          _is_home = 1;
+      }
+
+
+
+
+    } else {
+      home_state = 0;
+      for(int i=0; i<7; i++) {
+        self->home_speed[i] = 0;
+      }
+    }
+
+    for(int i=0; i<7; i++) {
+      lf_set(motor_speed[i], self->home_speed[i]);
+    }
+
+    
+
+
+    lf_set(is_home, _is_home);
+  =}
+}

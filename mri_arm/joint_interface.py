@@ -21,7 +21,6 @@ def callback(message):
     angles = (0, 0, 0, 0, 0, 0, 0)
   else:
     STATE = 0
-    # angles = (0, -0.8, 0, 0.8, 0, 0, 0)
     angles = (2, 2, 2, 2, 2, 2, 2)
 
   # Send to microcontroller
@@ -62,7 +61,7 @@ def listener():
           if read_val[0] == 'e':
             data_str = read_val[1:-2].split(',')
             data_float = [conv_val(i) for i in data_str]
-            print(data_float)
+            print(f"joint: {data_float[0:7]} | SEA: {data_float[7:]}")
 
             curr_time = time.time() - start_time
 
