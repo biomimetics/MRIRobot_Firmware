@@ -47,3 +47,15 @@ just_flash:
 
 flash: build_dev
 	openocd -f /Users/$(USER)/openocd/tcl/interface/stlink.cfg -f /Users/$(USER)/openocd/tcl/target/stm32f4x.cfg -c "program $(BUILD_DIR)/$(TARGET).elf verify reset exit"
+
+
+
+
+#######################################
+# For runing scripts
+#######################################
+intf:
+	python3 scripts/joint_interface.py
+
+clean_data:
+	-rm -rf scripts/data/*
