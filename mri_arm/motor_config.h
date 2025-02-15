@@ -80,7 +80,7 @@ static Motor_Config motor5_config = {
     500,        // max_speed    - max motor speed
     23040,      // qdec_cpr     - motor encoder count per rotation
     400,        // sea_cpr      - sea encoder count per rotation
-    20,        // sea_offset   - sea reset offset
+    -20,        // sea_offset   - sea reset offset
     1.0,        // speed_ratio  - motor speed ration 
     1.0         // gear_ratio   - motor gear box gear ratio
 };
@@ -91,7 +91,7 @@ static Motor_Config motor6_config = {
     500,        // max_speed    - max motor speed
     23040,      // qdec_cpr     - motor encoder count per rotation
     400,        // sea_cpr      - sea encoder count per rotation
-    100,        // sea_offset   - sea reset offset
+    130,        // sea_offset   - sea reset offset
     1.0,        // speed_ratio  - motor speed ration 
     1.0         // gear_ratio   - motor gear box gear ratio
 };
