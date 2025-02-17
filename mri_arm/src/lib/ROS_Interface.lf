@@ -18,8 +18,8 @@ reactor ROS_Interface {
   input[7] joint_pos: float
   input[7] sea_pos: float
 
-  output[7] target_pos: float
-  output[7] target_vel: float
+  output[7] target_pos_ext: float
+  output[7] target_vel_ext: float
   output[7] target_state: int
 
   timer trigger_send(1000 ms, 50 ms)
@@ -169,10 +169,10 @@ reactor ROS_Interface {
   =}
 
   // Update our target position from most recently recieved
-  reaction(trigger_update) -> target_pos, target_vel {=
+  reaction(trigger_update) -> target_pos_ext, target_vel_ext {=
     for (int i=0; i<7; i++) {
-      lf_set(target_pos[i], scaled_joint_pos[i]);
-      lf_set(target_vel[i], scaled_joint_vel[i]);
+      lf_set(target_pos_ext[i], scaled_joint_pos[i]);
+      lf_set(target_vel_ext[i], scaled_joint_vel[i]);
     }
 
   =}
