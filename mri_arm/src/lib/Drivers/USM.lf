@@ -109,8 +109,8 @@ reactor USM {
 
 
       // Configure output pins (DIR/EN)
-      HAL_GPIO_WritePin(GPIOA,  GPIO_PIN_4|GPIO_PIN_5, GPIO_PIN_RESET);
-      GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5;
+      HAL_GPIO_WritePin(GPIOA,  GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
       GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
       GPIO_InitStruct.Pull = GPIO_PULLDOWN;
       GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -215,7 +215,7 @@ reactor USM {
     // Set USM direction values
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   _speed[0] >= 0);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    _speed[1] >= 0);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4,    _speed[2] >= 0);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    _speed[2] >= 0);
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    _speed[3] >= 0);
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    _speed[4] >= 0);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   _speed[5] >= 0);

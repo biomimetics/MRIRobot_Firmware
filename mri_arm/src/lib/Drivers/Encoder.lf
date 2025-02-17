@@ -30,7 +30,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     // static int printVals = true;
     static int printVals = true;
     static int printcnt = 0;
-    static int printcnt_lim = 100;
+    static int printcnt_lim = 50;
 
 
     // QDEC Commands
