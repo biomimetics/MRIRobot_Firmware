@@ -61,41 +61,29 @@ main reactor {
       HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     }
 
-    
-    static void MX_UART4_Init(void) {
-      huart4.Instance = UART4;
-      huart4.Init.BaudRate = 115200;
-      huart4.Init.WordLength = UART_WORDLENGTH_8B;
-      huart4.Init.StopBits = UART_STOPBITS_1;
-      huart4.Init.Parity = UART_PARITY_NONE;
-      huart4.Init.Mode = UART_MODE_TX_RX;
-      huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-      huart4.Init.OverSampling = UART_OVERSAMPLING_16;
-      HAL_UART_Init(&huart4);
+    extern UART_HandleTypeDef huart3;
+    extern UART_HandleTypeDef huart1;
+
+    // Define empty function handlers for UART callbacks
+    void HAL_UART_RxCallback3();
+    void HAL_UART_RxCallback1();
+
+    void HAL_UART_TxCallback1();
+
+    // Define global recieve callback
+    void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+      if (huart->Instance == USART3) {
+        HAL_UART_RxCallback3();
+      } else if (huart->Instance == USART1) {
+        HAL_UART_RxCallback1();
+      }
     }
 
-    static void MX_UART5_Init(void) {
-      huart5.Instance = UART5;
-      huart5.Init.BaudRate = 115200;
-      huart5.Init.WordLength = UART_WORDLENGTH_8B;
-      huart5.Init.StopBits = UART_STOPBITS_1;
-      huart5.Init.Parity = UART_PARITY_NONE;
-      huart5.Init.Mode = UART_MODE_TX_RX;
-      huart5.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-      huart5.Init.OverSampling = UART_OVERSAMPLING_16;
-      HAL_UART_Init(&huart5);
-    }
-
-    static void MX_UART6_Init(void) {
-      huart6.Instance = USART6;
-      huart6.Init.BaudRate = 115200;
-      huart6.Init.WordLength = UART_WORDLENGTH_8B;
-      huart6.Init.StopBits = UART_STOPBITS_1;
-      huart6.Init.Parity = UART_PARITY_NONE;
-      huart6.Init.Mode = UART_MODE_TX_RX;
-      huart6.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-      huart6.Init.OverSampling = UART_OVERSAMPLING_16;
-      HAL_UART_Init(&huart6);
+    // Define global recieve callback
+    void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+      if (huart == &huart1) {
+        HAL_UART_TxCallback1();
+      }
     }
   =}
   
@@ -119,15 +107,12 @@ main reactor {
   motor_controller.current_joint -> ros_controller.current_joint
   motor_controller.speed -> usm.speed
   ros_controller.target_pos -> motor_controller.target_pos_ext
+  ros_controller.target_vel -> motor_controller.target_vel_ext
 
   reaction(startup) {=
     // Prep all GPIO values
     MX_GPIO_Init();
 
-    // Prep UART interfaces
-    MX_UART4_Init();
-    MX_UART5_Init();
-    MX_UART6_Init();
   =}
 
 
@@ -180,11 +165,11 @@ main reactor {
       }
     =}
 
-    reaction(sys_tick) -> motor_controller.target_mode, motor_controller.target_sel, motor_controller.target_speed {=
+    reaction(sys_tick) -> motor_controller.target_mode, motor_controller.target_sel, motor_controller.target_vel_int {=
       for (int i=0; i<7; i++) {
-        lf_set(motor_controller.target_sel[i], MODE_VEL);
-        lf_set(motor_controller.target_mode, MODE_INT);
-        lf_set(motor_controller.target_speed[i], target_speed[i]);
+        lf_set(motor_controller.target_sel[i], MODE_VEL);                 // Set the mode as velocity control
+        lf_set(motor_controller.target_mode, MODE_INT);                   // Set source as internal
+        lf_set(motor_controller.target_vel_int[i], target_speed[i]);      // Set the target velocity
       }
     =}
   }
@@ -223,35 +208,35 @@ main reactor {
       } else {
         self->count = 0;
       }
-      printf("switch state: %d\r\n", self->count);
+      // printf("        switch state: %d\r\n", self->count);
     =}
 
     // Set the internal target position and/or velocity
-    reaction(sys_tick) -> motor_controller.target_pos_int, motor_controller.target_speed {=
+    reaction(sys_tick) -> motor_controller.target_pos_int, motor_controller.target_vel_int {=
       HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, self->count == 0);
       if (self->count == 0) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_speed[i], 50);
+          lf_set(motor_controller.target_vel_int[i], 50);
         }
       } else if (self->count == 1) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_speed[i], -50);
+          lf_set(motor_controller.target_vel_int[i], -50);
         }
       } else if (self->count == 2) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_speed[i], 50);
+          lf_set(motor_controller.target_vel_int[i], 50);
         }
       } else if (self->count == 3) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_speed[i], -50);
+          lf_set(motor_controller.target_vel_int[i], -50);
         }
       } else if (self->count == 4) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_speed[i], 50);
+          lf_set(motor_controller.target_vel_int[i], 50);
         }
       } else {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_speed[i], -50);
+          lf_set(motor_controller.target_vel_int[i], -50);
         }
       }
     =}

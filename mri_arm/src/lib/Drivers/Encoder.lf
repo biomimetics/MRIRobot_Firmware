@@ -27,8 +27,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     DMA_HandleTypeDef hdma_usart3_rx;
     DMA_HandleTypeDef hdma_usart3_tx;
 
-    // static int printVals = true;
-    static int printVals = true;
+    static int print_enc = false;
     static int printcnt = 0;
     static int printcnt_lim = 50;
 
@@ -87,8 +86,8 @@ reactor QDEC(sample_period: time = 5 ms) {
       HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     }
 
-
-    void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    // Recieve callback function
+    void HAL_UART_RxCallback3() {
       HAL_UART_Receive_DMA(&huart3, data, 98);
     }
 
@@ -133,7 +132,7 @@ reactor QDEC(sample_period: time = 5 ms) {
       float sea_raw = ((float) (count[i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr );
       lf_set(sea_out[i],  (motor_configs[i]->sea_gear_ratio * 10 * sea_raw) - (motor_configs[i]->sea_offset)/100 );
 
-      if (printVals && printcnt>=printcnt_lim) {
+      if (print_enc && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (sea_out[i]->value*100));
       }
     }
@@ -141,13 +140,13 @@ reactor QDEC(sample_period: time = 5 ms) {
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
       lf_set(qdec_out[i-7],  2*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr));
-      if (printVals && printcnt>=printcnt_lim) {
+      if (print_enc && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (qdec_out[i-7]->value*100));
       }
     }
 
     long end = HAL_GetTick();
-    if (printVals && printcnt>=printcnt_lim) {
+    if (print_enc && printcnt>=printcnt_lim) {
       printf("[%ld]", end-start);
       printf("| \r\n");
     }

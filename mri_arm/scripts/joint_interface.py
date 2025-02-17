@@ -26,21 +26,27 @@ def broadcaster():
         state = 0
 
     # Get messages
-    serial_send, serial_list = compressMsg(angles)
+    type = "POS"
+    serial_send, serial_list = compressMsg(angles,type=type)
 
     # Send to microcontroller
-    print("[SENT]: ", serial_list )
-    STM32_serial.write('p'.encode("utf-8"))
-    sleep(0.0205)
+    print(f"[SENT {type}]: {serial_list}")
     STM32_serial.write(serial_send)
 
-    sleep(3)
+    sleep(2)
 
-def compressMsg(msg):
-  serial_list = ['p'.encode("utf-8")]
+def compressMsg(msg, type = "POS"):
+  if type == "POS" :
+    serial_list = ['p'.encode("utf-8")]
+    serial_send = b'p'  
+  elif type == "VEL":
+    serial_list = ['v'.encode("utf-8")]
+    serial_send = b'v'
+  elif type == "STATE":
+    serial_list = ['s'.encode("utf-8")]
+    serial_send = b's'
+  
   compressed_inputs = [int(msg[i] * FP_COMPRESSION[i]) for i in range(len(FP_COMPRESSION))]
-    
-  serial_send = b''
   for i in range(0, len(compressed_inputs)):
     serial_list.append(compressed_inputs[i].to_bytes(2, 'big', signed=True))
     serial_send = serial_send + compressed_inputs[i].to_bytes(2, 'big', signed=True)

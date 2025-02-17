@@ -40,7 +40,8 @@ preamble {=
 // Import and/or declare reactor classes.
 reactor MotorController(refresh_period: time = 5 ms) {
   input[7] target_sel: MOTOR_MODE
-  input[7] target_speed: float
+  input[7] target_vel_int: float
+  input[7] target_vel_ext: float
   input[7] target_pos_int: float
   input[7] target_pos_ext: float
 
@@ -69,7 +70,6 @@ reactor MotorController(refresh_period: time = 5 ms) {
     control_j0.current_pos,
     control_j1.current_pos,
     control_j2.current_pos
-    
 
   // feed in the SEA positions
   qdec_sea ->
@@ -133,11 +133,21 @@ reactor MotorController(refresh_period: time = 5 ms) {
   =}
 
 
-  // Update passthrough values
-  reaction(target_sel, target_speed) {=
+  // Update passthrough values for mode select
+  reaction(target_sel) {=
     for(int i=0; i<7; i++) {
       self->sel[i] = target_sel[i]->value;
-      self->speed_spc[i] = target_speed[i]->value;
+    }
+  =}
+
+  // Update passthrough values for target velocity
+  reaction(target_vel_int, target_vel_ext, target_mode) {=
+    if (target_mode->value == MODE_INT) {
+      for(int i=0; i<7; i++)
+        self->speed_spc[i] = target_vel_int[i]->value;
+    } else if(target_mode->value == MODE_EXT) {
+      for(int i=0; i<7; i++)
+        self->speed_spc[i] = target_vel_ext[i]->value;
     }
   =}
 

@@ -19,41 +19,39 @@ reactor ROS_Interface {
   input[7] sea_pos: float
 
   output[7] target_pos: float
+  output[7] target_vel: float
+  output[7] target_state: int
 
   timer trigger_send(1000 ms, 50 ms)
-  timer trigger_read(0, 20 ms)
+  timer trigger_update(0, 10 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
   preamble {=
-    UART_HandleTypeDef huart1;        // usb-c tied urart for computer communication
+    UART_HandleTypeDef huart1;        // usb-c tied uart for computer communication
     extern UART_HandleTypeDef huart2;
 
     DMA_HandleTypeDef hdma_usart1_rx;
     DMA_HandleTypeDef hdma_usart1_tx;
 
+    static int print_ros = true;
+
     // Setup Rx and Tx buffers
-    static uint8_t rx_buffer[50];
-    static uint8_t tx_buffer[50];
+    static uint8_t rx_buffer[60];
+    static uint8_t tx_buffer[60];
 
     int enc_data[7];
     int sea_data[7];
     int16_t joint_data[7];
-    float scaled_joint_data[7];
+    float scaled_joint_pos[7];
+    float scaled_joint_vel[7];
 
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
 
-    static float get_target(uint8_t* data) {
-      float count = data[0] + (data[1]<<8) + (data[2]<<16) + (data[3]<<24) + (data[4]<<32);
-      return count;
-    }
-
-    void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
-      if (huart == &huart1) {
-        inFlight = 0;
-      }
-    }
+    // +---------------------------------------------------+
+    // | Init functions
+    // +---------------------------------------------------+
 
     static void MX_UART1_Init(void) {
       huart1.Instance = USART1;
@@ -70,30 +68,96 @@ reactor ROS_Interface {
 
     static void MX_DMA_Init(void) {
       __HAL_RCC_DMA2_CLK_ENABLE();
-
-      /* DMA interrupt init */
-      /* DMA2_Stream2_IRQn interrupt configuration */
       HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
       HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
-      /* DMA2_Stream7_IRQn interrupt configuration */
       HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 0, 0);
       HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
 
     }
 
-    
+    // +---------------------------------------------------+
+    // | Helper functions
+    // +---------------------------------------------------+
+    static float get_target(uint8_t* data) {
+      float count = data[0] + (data[1]<<8) + (data[2]<<16) + (data[3]<<24) + (data[4]<<32);
+      return count;
+    }
+
+    void print_resp(float* data) {
+      printf("      [%d, %d, %d, %d, %d, %d, %d]\r\n", 
+                        (int)(data[0]*100), (int)(data[1]*100), (int)(data[2]*100), (int)(data[3]*100), 
+                        (int)(data[4]*100), (int)(data[5]*100), (int)(data[6]*100));
+    }
+
+    float uncompress_data(uint8_t lower, uint8_t upper) {
+      return ((float) ((int16_t)lower  + (int16_t)(upper<<8)))/1000;
+    }
+
+    // +---------------------------------------------------+
+    // | UART DMA Callback functions
+    // +---------------------------------------------------+
+
+    // UART recieve callback
+    void HAL_UART_RxCallback1() {
+      if (rx_buffer[0] == 'p') {
+        set_joint_pos_data();
+      } else if (rx_buffer[0] == 'v') {
+        set_joint_vel_data();
+      } else if (rx_buffer[0] == 's') {
+        set_joint_state_data();
+      } else {
+        printf("Got bad data\r\n");
+      }
+
+      HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
+    }
+
+    // UART transmit callback
+    void HAL_UART_TxCallback1() {
+      inFlight = 0;
+    }
+
+    // When the rx_buffer command is a [set joint position] command
+    void set_joint_pos_data() {
+      for (int i=0; i<7; i++) {
+        scaled_joint_pos[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
+      }
+
+      if (print_ros)  {
+        printf("got [JOINT POS]: \r\n");
+        print_resp(scaled_joint_pos);
+      }
+    }
+
+    // When the rx_buffer command is a [set joint velocity] command
+    void set_joint_vel_data() {
+      for (int i=0; i<7; i++) {
+        scaled_joint_vel[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
+      }
+
+      if (print_ros)  {
+        printf("got [JOINT VEL]: \r\n");
+        print_resp(scaled_joint_vel);
+      }
+    }
+
+    // When the rx_buffer command is a [set joint state] command
+    // TODO: IDK if this wouldbe useful, but ill keep it here just incase
+    void set_joint_state_data() { }
   =}
 
   reaction(startup) {=
-    // Prep the send indicator
-    tx_buffer[0] = 'e';
-
-    // Prep UART interfaces
+    // Setup UART interfaces
     MX_DMA_Init();
     MX_UART1_Init();
+
+    // Prep ROS bridge DMA recieve
+    HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
     
   =}
 
+
+  // Send current state over the bridge
   reaction(trigger_send) {=
     if (!inFlight) {
       inFlight = 1; // Indicate that we are currently sending data
@@ -104,31 +168,16 @@ reactor ROS_Interface {
     }
   =}
 
-  reaction(trigger_read) -> target_pos {=
-    if (HAL_UART_Receive(&huart1, rx_buffer, 1, 0) == HAL_OK && (rx_buffer[0] == 'p')) {
-      if (HAL_UART_Receive(&huart1, rx_buffer, 14, 100) == HAL_OK) {
-        for (int i=0; i<7; i++) {
-          joint_data[i] = rx_buffer[(i*2)+1]  + (rx_buffer[(i*2)]<<8);
-        }
-
-        scaled_joint_data[0] = ((float) joint_data[0])/1000;
-        scaled_joint_data[1] = ((float) joint_data[1])/1000;
-        scaled_joint_data[2] = ((float) joint_data[2])/1000;
-        scaled_joint_data[3] = ((float) joint_data[3])/1000;
-        scaled_joint_data[4] = ((float) joint_data[3])/1000;
-        scaled_joint_data[5] = ((float) joint_data[1])/1000;
-        scaled_joint_data[6] = ((float) joint_data[6])/1000;
-
-        for (int i=0; i<7; i++) {
-          lf_set(target_pos[i], scaled_joint_data[i]);
-        }
-        printf("got: %d,%d,%d,%d,%d,%d,%d\n", (int)joint_data[0], (int)joint_data[1], (int)joint_data[2], (int)joint_data[3], (int)joint_data[4], (int)joint_data[5], (int)joint_data[6]);
-      }
-
+  // Update our target position from most recently recieved
+  reaction(trigger_update) -> target_pos, target_vel {=
+    for (int i=0; i<7; i++) {
+      lf_set(target_pos[i], scaled_joint_pos[i]);
+      lf_set(target_vel[i], scaled_joint_vel[i]);
     }
 
   =}
 
+  // Update our current USM position
   reaction(current_joint) {=
     enc_data[0] = (int)(current_joint[0]->value * 1000);
     enc_data[1] = (int)(current_joint[1]->value * 1000);
@@ -139,6 +188,7 @@ reactor ROS_Interface {
     enc_data[6] = (int)(current_joint[6]->value * 1000);
   =}
 
+  // Update our current SEA position
   reaction(sea_pos) {=
     sea_data[0] = (int)(sea_pos[0]->value * 1000);
     sea_data[1] = (int)(sea_pos[1]->value * 1000);
