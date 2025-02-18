@@ -3,8 +3,7 @@ target C {
   platform: {
     name: "stm32",
     board: "F446RE"
-  }, 
-  keepalive: true
+  }
 }
 
 preamble {=
@@ -24,6 +23,7 @@ reactor ROS_Interface {
   output[7] target_state: int
 
   timer trigger_send(1000 ms, 50 ms)
+  timer trigger_update(0, 10 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
@@ -45,8 +45,6 @@ reactor ROS_Interface {
     int16_t joint_data[7];
     float scaled_joint_pos[7];
     float scaled_joint_vel[7];
-
-    static void* action;
 
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
@@ -101,7 +99,17 @@ reactor ROS_Interface {
 
     // UART recieve callback
     void HAL_UART_RxCallback1() {
-      lf_schedule(action, 0);
+      if (rx_buffer[0] == 'p') {
+        set_joint_pos_data();
+      } else if (rx_buffer[0] == 'v') {
+        set_joint_vel_data();
+      } else if (rx_buffer[0] == 's') {
+        set_joint_state_data();
+      } else {
+        printf("Got bad data\r\n");
+      }
+
+      HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
     }
 
     // UART transmit callback
@@ -138,13 +146,10 @@ reactor ROS_Interface {
     void set_joint_state_data() { }
   =}
 
-  physical action trigger_update
-
-  reaction(startup) -> trigger_update {=
+  reaction(startup) {=
     // Setup UART interfaces
     MX_DMA_Init();
     MX_UART1_Init();
-    action = trigger_update;
 
     // Prep ROS bridge DMA recieve
     HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
@@ -165,21 +170,10 @@ reactor ROS_Interface {
 
   // Update our target position from most recently recieved
   reaction(trigger_update) -> target_pos_ext, target_vel_ext {=
-    if (rx_buffer[0] == 'p') {
-      set_joint_pos_data();
-      for (int i=0; i<7; i++)
-        lf_set(target_pos_ext[i], scaled_joint_pos[i]);
-    } else if (rx_buffer[0] == 'v') {
-      set_joint_vel_data();
-      for (int i=0; i<7; i++)
-        lf_set(target_vel_ext[i], scaled_joint_vel[i]);
-    } else if (rx_buffer[0] == 's') {
-      set_joint_state_data();
-    } else {
-      printf("Got bad data\r\n");
+    for (int i=0; i<7; i++) {
+      lf_set(target_pos_ext[i], scaled_joint_pos[i]);
+      lf_set(target_vel_ext[i], scaled_joint_vel[i]);
     }
-
-    HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
 
   =}
 

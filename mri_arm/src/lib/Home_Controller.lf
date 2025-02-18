@@ -38,7 +38,7 @@ reactor HomeController(sample_period: time = 15 ms) {
 
     volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
 
-    static float SEA_limits[7] = {0, 0, 0, 2.1, 2.1, 2, 2};
+    static float SEA_limits[7] = {0, 0, 0, 1.2, 1.2, 0.35, 0.35};
     static int SEA_trig[7] = {0, 0, 0, 0, 0, 0, 0};
     static float ref[7] = {0, 0, 0, 0, 0, 0, 0};
     static float rpos[7] = {0, 0, 0, 0, 0, 0, 0};
@@ -91,6 +91,12 @@ reactor HomeController(sample_period: time = 15 ms) {
   
   =}
 
+  reaction(startup) {=
+    for (int i=0; i<7; i++) {
+      self->home_speed[i] = 0;
+    }
+  =}
+
   reaction(switch_update) {=
     switch_val[2] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6);
     switch_val[3] = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7);
@@ -106,14 +112,7 @@ reactor HomeController(sample_period: time = 15 ms) {
   =}
 
   reaction(current_pos, sea_pos) -> motor_speed, is_home {=
-    int spd = 5;
-    float target_0 = 2.0944;
-    float target_1 = 1.56;
-    float target_3 = 0.34;
-
-    bool home_stage[3] = {0, 1, 0};
-
-
+    bool home_stage[3] = {1, 1, 0};
       //+----------------------------------------------------------------+
       //  Homing states:
       //
@@ -166,8 +165,8 @@ reactor HomeController(sample_period: time = 15 ms) {
             printf("    [H0] Home step 1 done\r\n");
             self->home_speed[5] = 0;
             self->home_speed[6] = 0;
-            ref[3] = current_pos[5]->value - 5;
-            ref[4] = current_pos[6]->value + 5;
+            ref[5] = current_pos[5]->value + (1/10) * sea_pos[5]->value - 5.35;
+            ref[6] = current_pos[6]->value + (1/10) * sea_pos[6]->value + 5.35;
             home_state = 02;
           }
           break;
@@ -183,7 +182,18 @@ reactor HomeController(sample_period: time = 15 ms) {
           self->home_speed[5] = -10 + -get_speed((rpos[6] - rpos[5]), 0);
           self->home_speed[6] = -10 +  get_speed((rpos[6] - rpos[5]), 0);
           if (SEA_trig[5] == 1 && SEA_trig[6] == 1) {
-            printf("    [H1] Home step 3 done\r\n");
+            printf("    [H0] Home step 3 done\r\n");
+            home_state = 04;
+            ref[5] = current_pos[5]->value + (1/10) * sea_pos[5]->value - 10.25;
+            ref[6] = current_pos[6]->value + (1/10) * sea_pos[6]->value - 10.25;
+          }
+          break;
+        
+          case 04:           //   Then, home with the rotary direction
+          self->home_speed[5] = get_speed(rpos[5], 0) + -get_speed((rpos[6] - rpos[5]), 0);
+          self->home_speed[6] = get_speed(rpos[6], 0) +  get_speed((rpos[6] - rpos[5]), 0);
+          if (absf(rpos[5]) < 0.01 && absf(rpos[6]) < 0.01) {
+            printf("    [H0] Home step 4 done\r\n");
             home_state = 10;
             self->home_speed[5] = 0;
             self->home_speed[6] = 0;
@@ -207,8 +217,8 @@ reactor HomeController(sample_period: time = 15 ms) {
             printf("    [H1] Home step 1 done\r\n");
             self->home_speed[3] = 0;
             self->home_speed[4] = 0;
-            ref[3] = current_pos[3]->value + (1/10) * sea_pos[3]->value + 20.41;
-            ref[4] = current_pos[4]->value - (1/10) * sea_pos[4]->value - 20.41;
+            ref[3] = current_pos[3]->value + (1/10) * sea_pos[3]->value + 20.35;
+            ref[4] = current_pos[4]->value + (1/10) * sea_pos[4]->value - 20.35;
             home_state = 12;
           }
           break;
@@ -221,10 +231,21 @@ reactor HomeController(sample_period: time = 15 ms) {
           }
           break;
         case 13:           //   Then, home with the rotary direction
-          self->home_speed[3] = -25 +  1.2*get_speed((rpos[4] - rpos[3]), 0);
-          self->home_speed[4] = -25 + -1.2*get_speed((rpos[4] - rpos[3]), 0);
+          self->home_speed[3] = -25 +  1.1*get_speed((rpos[4] - rpos[3]), 0);
+          self->home_speed[4] = -25 + -1.1*get_speed((rpos[4] - rpos[3]), 0);
           if (SEA_trig[3] == 1 && SEA_trig[4] == 1) {
             printf("    [H1] Home step 3 done\r\n");
+            home_state = 14;
+            ref[3] = current_pos[3]->value + (1/10) * sea_pos[3]->value + 38.1;
+            ref[4] = current_pos[4]->value + (1/10) * sea_pos[4]->value + 38.1;
+          }
+          break;
+
+        case 14:           //   Then, home with the rotary direction
+          self->home_speed[3] = -get_speed(rpos[3], 0) + 1.2*get_speed((rpos[4] - rpos[3]), 0);
+          self->home_speed[4] = -get_speed(rpos[4], 0) +  -1.2*get_speed((rpos[4] - rpos[3]), 0);
+          if (absf(rpos[3]) < 0.01 && absf(rpos[4]) < 0.01) {
+            printf("    [H0] Home step 4 done\r\n");
             home_state = 20;
             self->home_speed[3] = 0;
             self->home_speed[4] = 0;

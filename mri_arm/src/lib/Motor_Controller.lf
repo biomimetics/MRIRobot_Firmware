@@ -93,10 +93,10 @@ reactor MotorController(refresh_period: time = 5 ms) {
   reaction(target_vel_int, target_vel_ext, target_mode) {=
     if (target_mode->value == MODE_INT) {
       for(int i=0; i<7; i++)
-        self->target_vel[i] = target_vel_int[i]->value;
+        self->speed_spc[i] = target_vel_int[i]->value;
     } else if(target_mode->value == MODE_EXT) {
       for(int i=0; i<7; i++)
-        self->target_vel[i] = target_vel_ext[i]->value;
+        self->speed_spc[i] = target_vel_ext[i]->value;
     }
   =}
 
@@ -131,13 +131,6 @@ reactor MotorController(refresh_period: time = 5 ms) {
     lf_set(control_j2.target_joint[1], self->target_pos[6]);
     
   =}
-
-  // Update passthrough values for target velocity
-  reaction(trigger) {=
-    for(int i=0; i<7; i++)
-      self->speed_spc[i] = self->target_pos[i];
-  =}
-
 
   // Read out the positional control speed values
   reaction(
