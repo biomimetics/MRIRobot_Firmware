@@ -10,6 +10,8 @@ preamble {=
   #include "stm32f4xx_hal.h"
   #include "stm32_startup.h"
   #include <stdio.h>
+
+  #include <../../../motor_config.h>
 =}
 
 reactor ROS_Interface {
@@ -20,10 +22,13 @@ reactor ROS_Interface {
 
   output[7] target_pos_ext: float
   output[7] target_vel_ext: float
+
+  output[7] sea_offset: float
+  output[7] sea_lim: float
   output[7] target_state: int
 
-  timer trigger_send(0 ms, 30 ms)
-  timer trigger_update(0, 20 ms)
+  timer trigger_send(0 ms, 50 ms)
+  timer trigger_update(0, 50 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
@@ -42,9 +47,12 @@ reactor ROS_Interface {
 
     int enc_data[7];
     int sea_data[7];
-    int16_t joint_data[7];
-    float scaled_joint_pos[7];
-    float scaled_joint_vel[7];
+
+    float scaled_joint_pos[7]= {0, 0, 0, 0, 0, 0, 0};
+    float scaled_joint_vel[7]= {0, 0, 0, 0, 0, 0, 0};
+
+    float scaled_sea_offset[7] = {0, 0, 0, 0, 0, 0, 0};
+    float scaled_sea_lim[7]= {0, 0, 0, 0, 0, 0, 0};
 
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
@@ -99,12 +107,14 @@ reactor ROS_Interface {
 
     // UART recieve callback
     void HAL_UART_RxCallback1() {
-      if (rx_buffer[0] == 'p') {
+      if (rx_buffer[0] == 'p') {              // Change joint position target
         set_joint_pos_data();
-      } else if (rx_buffer[0] == 'v') {
+      } else if (rx_buffer[0] == 'v') {       // Change joint velocity target
         set_joint_vel_data();
-      } else if (rx_buffer[0] == 's') {
-        set_joint_state_data();
+      } else if (rx_buffer[0] == 'o') {       // Change joint sea offset
+        set_sea_offset_data();
+      } else if (rx_buffer[0] == 'l') {       // Change joint sea limit
+        set_sea_limit_data();
       } else {
         printf("Got bad data\r\n");
       }
@@ -141,9 +151,17 @@ reactor ROS_Interface {
       }
     }
 
-    // When the rx_buffer command is a [set joint state] command
-    // TODO: IDK if this wouldbe useful, but ill keep it here just incase
-    void set_joint_state_data() { }
+    // Functions for setting relevant info for seas
+    void set_sea_offset_data() {
+      for (int i=0; i<7; i++) {
+        scaled_sea_offset[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
+      }
+    }
+    void set_sea_limit_data() {
+      for (int i=0; i<7; i++) {
+        scaled_sea_lim[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
+      }
+    }
   =}
 
   reaction(startup) {=
@@ -153,7 +171,9 @@ reactor ROS_Interface {
 
     // Prep ROS bridge DMA recieve
     HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
-    
+
+    for (int i=0; i<7; i++) 
+      scaled_sea_lim[i] = motor_configs[i]->lim;
   =}
 
 
@@ -169,12 +189,13 @@ reactor ROS_Interface {
   =}
 
   // Update our target position from most recently recieved
-  reaction(trigger_update) -> target_pos_ext, target_vel_ext {=
+  reaction(trigger_update) -> target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
     for (int i=0; i<7; i++) {
-      lf_set(target_pos_ext[i], scaled_joint_pos[i]);
-      lf_set(target_vel_ext[i], scaled_joint_vel[i]);
+      lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
+      lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocityes
+      lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
+      lf_set(sea_lim[i], scaled_sea_lim[i]);            // Update sea limits
     }
-
   =}
 
   // Update our current USM position
@@ -188,7 +209,7 @@ reactor ROS_Interface {
     enc_data[6] = (int)(current_joint[6]->value * 1000);
   =}
 
-  // Update our current SEA position
+  // Update our current sea position
   reaction(sea_pos) {=
     sea_data[0] = (int)(sea_pos[0]->value * 1000);
     sea_data[1] = (int)(sea_pos[1]->value * 1000);

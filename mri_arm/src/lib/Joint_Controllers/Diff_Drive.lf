@@ -25,9 +25,13 @@ reactor Diff_Drive (
     - joint space: position of the differential gear modules    
     
     */
-    input[2] current_pos: float         // current position in [motor space]
+    input[2] current_pos: float         // Current position in [motor space]
     input[2] sea_pos: float             // Current SEA position
-    input[2] target_joint: float        // Target in [joint space]
+    input[2] target_joint: float        // Target positionin [joint space]
+
+
+    input[2] sea_offset: float          // sea spring offset
+    input[2] sea_lim: float             // sea error limit
     
     output[2] pos_joint: float          // Current position in [joint space]
     output[2] speed_out: float          // Speed out in [motor space]
@@ -37,42 +41,48 @@ reactor Diff_Drive (
     control_u0 = new SEAController()
     control_u1 = new SEAController()
 
-    // Forward SEA positions and output speeds
-    sea_pos -> control_u0.sea_pos, control_u1.sea_pos
-    control_u0.out, control_u1.out -> speed_out
+    reaction(startup) -> control_u0.constants, control_u1.constants {=
+        // Control Constants [Kp, Kd, Ki]
+        lf_set(control_u0.constants[0], motor_configs[self->motor_ID0]-> Kp);
+        lf_set(control_u0.constants[1], motor_configs[self->motor_ID0]-> Kd);
+        lf_set(control_u0.constants[2], 0);
 
-    // Forward current positions, after the gear reduction
-    reaction(current_pos) -> control_u0.current_pos, control_u1.current_pos {=
-        lf_set(control_u0.current_pos, current_pos[0]->value);
-        lf_set(control_u1.current_pos, current_pos[1]->value);
-    =}
-
-    
-    /* Comvert the targets in [joint space] -> [motor space]
-        [Joint Pitch]:   target_joint[0]
-        [Joint Roll ]:   target_joint[1]        */
-    reaction(target_joint) -> control_u0.target_pos, control_u1.target_pos {=
-        float abs_0 = target_joint[0]->value;
-        float abs_1 = target_joint[1]->value;
-        lf_set(control_u0.target_pos, abs_1 - abs_0);
-        lf_set(control_u1.target_pos, abs_1 + abs_0);
-    =}
-
-
-    /* Convert the current positions in [motor space] -> [joint space]
-        [Joint Pitch]:   pos_joint[0]
-        [Joint Roll ]:   pos_joint[1]       */
-    reaction(current_pos) -> pos_joint {=
-        // Apply gear reduction in motor space
-        float curr_0_post = current_pos[0]->value;
-        float curr_1_post = current_pos[1]->value;
-
-        // Transform from motor to joint space
-        lf_set(pos_joint[0], (curr_0_post - curr_1_post)/2);
-        lf_set(pos_joint[1], (curr_0_post + curr_1_post)/2);
+        lf_set(control_u1.constants[0], motor_configs[self->motor_ID1]-> Kp);
+        lf_set(control_u1.constants[1], motor_configs[self->motor_ID1]-> Kd);
+        lf_set(control_u1.constants[2], 0);
         
     =}
 
+    // Forward SEA positions and output speeds
+    current_pos -> control_u0.current_pos, control_u1.current_pos
+    sea_pos -> control_u0.sea_pos, control_u1.sea_pos
+    sea_lim -> control_u0.sea_lim, control_u1.sea_lim
+    control_u0.out, control_u1.out -> speed_out
+
+
+    // +-------------------------------------------------------------------------+
+    // | Perform any transformations between [joint space] and [motor space]
+    // |    [Joint Pitch]:   target_joint[0]
+    // |    [Joint Roll ]:   target_joint[1]
+    // +-------------------------------------------------------------------------+
+
+    // Comvert the targets in [joint space] -> [motor space]
+    reaction(target_joint) -> control_u0.target_pos, control_u1.target_pos {=
+        lf_set(control_u0.target_pos, target_joint[1]->value - target_joint[0]->value);
+        lf_set(control_u1.target_pos, target_joint[1]->value + target_joint[0]->value);
+    =}
+
+    // Comvert the SEA offsets in [joint space] -> [motor space]
+    reaction(sea_offset) -> control_u0.sea_offset, control_u1.sea_offset {=
+        lf_set(control_u0.sea_offset, sea_offset[1]->value - sea_offset[0]->value);
+        lf_set(control_u1.sea_offset, sea_offset[1]->value + sea_offset[0]->value);
+    =}
+
+    // Convert the current positions in [motor space] -> [joint space]
+    reaction(current_pos) -> pos_joint {=
+        lf_set(pos_joint[0], (current_pos[0]->value - current_pos[1]->value)/2);
+        lf_set(pos_joint[1], (current_pos[0]->value + current_pos[1]->value)/2);
+    =}
 
 }
 

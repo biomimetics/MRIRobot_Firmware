@@ -11,28 +11,29 @@ preamble {=
   #include <stdio.h>
 =}
 
-reactor PIDController(Kp: float = 5, Ki: float = 0, Kd: float = 1, LIM:float=0.1) {
+reactor PIDController(LIM:float=0.1) {
   input current_pos: float
   input sea_pos: float
   input target_pos: float
   output out: float
 
+  input sea_offset: float     // sea spring offset
+  input sea_lim: float        // sea error limit
+
+
+  input[3] constants: float;  // Control Constants [Kp, Ki, Kd]
+
   state last_pos: float = 0  // to help with state variables
   state prev_time: time = 0
-  state Kw: float = 0.9
 
-  state error_i: float = 0   // Integral error
-
-  reaction(target_pos, current_pos) -> out {=
+  reaction(target_pos, current_pos, constants) -> out {=
     instant_t now = lf_time_logical();
     interval_t interval = now - self->prev_time;
 
     float error_p = (target_pos->value) - (current_pos->value);
     float error_d = ((current_pos->value) - self->last_pos) / interval;
-    self->error_i = error_p + (self->Kw * self->error_i);
 
-    float pid_out = self->Kp * error_p + self->Kd * error_d;
-    // float pid_out = self->Kp * error_p;
+    float pid_out = constants[0]->value * error_p + constants[1]->value * error_d;
 
     if(pid_out > 30) {
       pid_out = 30;

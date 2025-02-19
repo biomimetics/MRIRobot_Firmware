@@ -20,7 +20,8 @@ def broadcaster():
         angles = (0, 0, 0, 0, 0, 0, 0)
         state = 1
       case 1:
-        angles = (0, 0, 0, 0, 0, 0, 1.57)
+        # angles = (0, 0, 0, 0, 1.57, 0, 1.57)
+        angles = (0, 0, 0, 1.57, 0, 1.57, 0)
         state = 0
       case _:
         state = 0

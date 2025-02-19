@@ -109,6 +109,9 @@ main reactor {
   ros_controller.target_pos_ext -> motor_controller.target_pos_ext
   ros_controller.target_vel_ext -> motor_controller.target_vel_ext
 
+  ros_controller.sea_offset -> motor_controller.sea_offset
+  ros_controller.sea_lim -> motor_controller.sea_lim
+
   reaction(startup) {=
     // Prep all GPIO values
     MX_GPIO_Init();

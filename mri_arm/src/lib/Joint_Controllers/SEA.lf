@@ -28,31 +28,31 @@ preamble {=
 
 reactor SEAController(
     // Control constants
-    Kp: float = -60,      // Proportional control constant
-    Ki: float = 00,    // Integral control constant
-    Kd: float = 30,     // Differential control constant
-    Ks: float = 110,   // SEA control constant
+    Ks: float = 110   // SEA control constant
 
     // SEA transition values
-    SEA_LIM_P: float = 0.2,
-    SEA_LIM_D: float = 100,
+    // SEA_LIM_P: float = 0.2,
+    // SEA_LIM_D: float = 100,
 
     // SEA passthrough values
-    LIM: float = 0.18,
-    CHANGE_P: float = 0.2,
-    CHANGE_D: float = 0.1
+    // LIM: float = 0.18,
+    // CHANGE_P: float = 0.2,
+    // CHANGE_D: float = 0.1
 
     ) {
-  input current_pos: float
-  input sea_pos: float
-  input target_pos: float
+  input current_pos: float    // current position
+  input sea_pos: float        // Current SEA position
+  input target_pos: float     // Target position
+
+  input sea_offset: float     // SEA spring offset
+  input sea_lim: float        // SEA error limit
+
+
+  input[3] constants: float;  // Control Constants [Kp, Kd, Ki]
+
   output out: float
   output pos_joint: float
 
-  // State variable, 1 for pos, 0 for force
-  // 0: For force feedback control
-  // 1: For standard positional control
-  // 2: For initial movement transience
   state fsm_state: SEA_MODE = 0
   state last_target: float = 0
   state last_sea: float = 0  // to help with state variables
@@ -62,38 +62,45 @@ reactor SEAController(
   state cycle_count: int = 0
   state print_data: bool = true
 
-  force_control = new FFBController(Kp=Ks, LIM=LIM, CHANGE_P=CHANGE_P, CHANGE_D=CHANGE_D)
-  pos_control = new PIDController(Kp=Kp, Kd=Kd, Ki=Ki)
-
+  force_control = new FFBController(Kp=Ks)
+  pos_control = new PIDController()
+  
   current_pos -> pos_joint
   current_pos -> force_control.current_pos
   sea_pos -> force_control.sea_pos
   target_pos -> force_control.target_pos
+  sea_offset -> force_control.sea_offset
+  sea_lim -> force_control.sea_lim
 
   current_pos -> pos_control.current_pos
   sea_pos -> pos_control.sea_pos
   target_pos -> pos_control.target_pos
+  constants -> pos_control.constants
+  sea_offset -> pos_control.sea_offset
+  sea_lim -> pos_control.sea_lim
 
-  reaction(sea_pos, target_pos) {=
-    float TRANS_CYCLES = 0;  // Number of cycles we stay in transient state
+  reaction(sea_pos, target_pos, sea_offset, sea_lim) {=
+    float TRANS_CYCLES = 500;  // Number of cycles we stay in transient state
+
+
+    float SEA_LIM_P = sea_lim->value * 1.8;
+    float SEA_LIM_D = sea_lim->value * 10;
 
     // Any necessary operations we have here
-    float sea_diff = (sea_pos->value - self->last_sea);
-    float sea_error = sea_pos->value;
-    self->last_sea = sea_pos->value;
+    float sea_value = sea_pos->value + sea_offset->value;
+    float sea_diff = (sea_value - self->last_sea);
+    float sea_error = sea_value;
+    self->last_sea = sea_value;
 
-    bool flag_p = (sea_error > self->SEA_LIM_P || sea_error < -self->SEA_LIM_P);
-    bool flag_d = (sea_diff > self->SEA_LIM_D || sea_diff < -self->SEA_LIM_D);
+    bool flag_p = (sea_error > SEA_LIM_P || sea_error < -SEA_LIM_P);
+    bool flag_d = (sea_diff > SEA_LIM_D || sea_diff < -SEA_LIM_D);
 
     if (self->last_target != target_pos->value) {
       self->fsm_state = PID_MODE;
       self->cycle_count = 0;
     }
 
-    /* SEA finite state machine:
-        0: PID movement state
-        1: Movement transient state (initial movement from new command)
-        2: Force feedback state for when we encounter an obstacle */
+    /* SEA finite state machine */
     switch(self->fsm_state){
       case PID_MODE: // For PID state
         if (flag_p || flag_d) {

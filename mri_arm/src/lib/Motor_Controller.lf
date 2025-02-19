@@ -40,10 +40,14 @@ preamble {=
 // Import and/or declare reactor classes.
 reactor MotorController(refresh_period: time = 5 ms) {
   input[7] target_sel: MOTOR_MODE
+
   input[7] target_vel_int: float
   input[7] target_vel_ext: float
   input[7] target_pos_int: float
   input[7] target_pos_ext: float
+
+  input[7] sea_offset: float
+  input[7] sea_lim: float
 
   input[7] qdec_pos: float
   input[7] qdec_sea: float
@@ -85,6 +89,18 @@ reactor MotorController(refresh_period: time = 5 ms) {
   control_j1.pos_joint,
   control_j2.pos_joint 
     -> current_joint
+
+  sea_offset ->
+    control_u0.sea_offset,
+    control_j0.sea_offset,
+    control_j1.sea_offset,
+    control_j2.sea_offset
+
+  sea_lim ->
+    control_u0.sea_lim,
+    control_j0.sea_lim,
+    control_j1.sea_lim,
+    control_j2.sea_lim
 
 
   // +----------------------------------------------------------------+

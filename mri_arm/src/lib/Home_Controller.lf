@@ -165,8 +165,8 @@ reactor HomeController(sample_period: time = 15 ms) {
             printf("    [H0] Home step 1 done\r\n");
             self->home_speed[5] = 0;
             self->home_speed[6] = 0;
-            ref[5] = current_pos[5]->value + (1/10) * sea_pos[5]->value - 5.35;
-            ref[6] = current_pos[6]->value + (1/10) * sea_pos[6]->value + 5.35;
+            ref[5] = current_pos[5]->value + (1/10) * sea_pos[5]->value - 1.58;
+            ref[6] = current_pos[6]->value + (1/10) * sea_pos[6]->value + 1.58;
             home_state = 02;
           }
           break;
@@ -184,8 +184,8 @@ reactor HomeController(sample_period: time = 15 ms) {
           if (SEA_trig[5] == 1 && SEA_trig[6] == 1) {
             printf("    [H0] Home step 3 done\r\n");
             home_state = 04;
-            ref[5] = current_pos[5]->value + (1/10) * sea_pos[5]->value - 10.25;
-            ref[6] = current_pos[6]->value + (1/10) * sea_pos[6]->value - 10.25;
+            ref[5] = current_pos[5]->value + (1/10) * sea_pos[5]->value - 3.05;
+            ref[6] = current_pos[6]->value + (1/10) * sea_pos[6]->value - 3.05;
           }
           break;
         
@@ -217,8 +217,8 @@ reactor HomeController(sample_period: time = 15 ms) {
             printf("    [H1] Home step 1 done\r\n");
             self->home_speed[3] = 0;
             self->home_speed[4] = 0;
-            ref[3] = current_pos[3]->value + (1/10) * sea_pos[3]->value + 20.35;
-            ref[4] = current_pos[4]->value + (1/10) * sea_pos[4]->value - 20.35;
+            ref[3] = current_pos[3]->value - (1/10) * sea_pos[3]->value + 1.58;
+            ref[4] = current_pos[4]->value - (1/10) * sea_pos[4]->value - 1.58;
             home_state = 12;
           }
           break;
@@ -236,8 +236,8 @@ reactor HomeController(sample_period: time = 15 ms) {
           if (SEA_trig[3] == 1 && SEA_trig[4] == 1) {
             printf("    [H1] Home step 3 done\r\n");
             home_state = 14;
-            ref[3] = current_pos[3]->value + (1/10) * sea_pos[3]->value + 38.1;
-            ref[4] = current_pos[4]->value + (1/10) * sea_pos[4]->value + 38.1;
+            ref[3] = current_pos[3]->value - (1/10) * sea_pos[3]->value + 3.08;
+            ref[4] = current_pos[4]->value - (1/10) * sea_pos[4]->value + 3.08;
           }
           break;
 

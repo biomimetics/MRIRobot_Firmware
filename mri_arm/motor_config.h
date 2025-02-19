@@ -16,6 +16,10 @@ typedef struct { /* __MOTOR_CONFIG_H */
     // Movement info
     float speed_ratio;      // motor speed ratio
     float gear_ratio;       // motor gear box gear ratio
+
+    float Kp;               // proportional control constant
+    float Kd;               // differential control constant
+    float lim;              // SEA limit
    } Motor_Config;
 
 
@@ -29,7 +33,11 @@ static Motor_Config motor0_config = {
     13.0,       // sea_gear_ratio   - sea motor gear ratio
     0.0,        // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
-    13.0        // gear_ratio       - motor gear box gear ratio
+    13.0,       // gear_ratio       - motor gear box gear ratio
+
+    40.0,       // Kp               - proportional control constant
+    10.0,       // Kd               - differential control constant
+    0.3         // lim              - SEA limit
 };
 
 
@@ -39,9 +47,13 @@ static Motor_Config motor1_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
-    -170.0,     // sea_offset       - sea reset offset
+    -60.0,      // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
-    21.0        // gear_ratio       - motor gear box gear ratio
+    21.0,       // gear_ratio       - motor gear box gear ratio
+
+    40.0,       // Kp               - proportional control constant
+    10.0,       // Kd               - differential control constant
+    0.5         // lim              - SEA limit
 };
 
 
@@ -51,9 +63,13 @@ static Motor_Config motor2_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
-    15.0,     // sea_offset       - sea reset offset
+    -30.0,      // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
-    21.0        // gear_ratio       - motor gear box gear ratio
+    21.0,       // gear_ratio       - motor gear box gear ratio
+
+    40.0,       // Kp               - proportional control constant
+    10.0,       // Kd               - differential control constant
+    0.5         // lim              - SEA limit
 };
 
 
@@ -63,9 +79,13 @@ static Motor_Config motor3_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     13.0,       // sea_gear_ratio   - sea motor gear ratio
-    -50.0,      // sea_offset       - sea reset offset
+    -00.0,      // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
-    12.0        // gear_ratio       - motor gear box gear ratio
+    12.0,       // gear_ratio       - motor gear box gear ratio
+
+    80.0,       // Kp               - proportional control constant
+    30.0,       // Kd               - differential control constant
+    0.9        // lim              - SEA limit
 };
 
 
@@ -75,9 +95,13 @@ static Motor_Config motor4_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     13.0,       // sea_gear_ratio   - sea motor gear ratio
-    50.0,       // sea_offset       - sea reset offset
+    10.0,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
-    12.0        // gear_ratio       - motor gear box gear ratio
+    12.0,       // gear_ratio       - motor gear box gear ratio
+
+    80.0,       // Kp               - proportional control constant
+    30.0,       // Kd               - differential control constant
+    0.7        // lim              - SEA limit
 };
 
 
@@ -87,9 +111,13 @@ static Motor_Config motor5_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
-    -3.0,      // sea_offset       - sea reset offset
+    -10.0,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
-    52.0/16.0   // gear_ratio       - motor gear box gear ratio
+    52.0/16.0,  // gear_ratio       - motor gear box gear ratio
+
+    -40.0,      // Kp               - proportional control constant
+    10.0,       // Kd               - differential control constant
+    0.15        // lim              - SEA limit
 };
 
 
@@ -99,9 +127,13 @@ static Motor_Config motor6_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
-    8.0,       // sea_offset       - sea reset offset
+    13,         // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
-    52.0/16.0   // gear_ratio       - motor gear box gear ratio
+    52.0/16.0,  // gear_ratio       - motor gear box gear ratio
+
+    -40.0,      // Kp               - proportional control constant
+    10.0,       // Kd               - differential control constant
+    0.15        // lim              - SEA limit
 };
 
 

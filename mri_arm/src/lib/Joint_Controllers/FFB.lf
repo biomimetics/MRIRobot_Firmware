@@ -11,27 +11,37 @@ preamble {=
   #include <stdio.h>
 =}
 
-reactor FFBController(Kp: float = 12, LIM: float = 0.003, CHANGE_P: float = 0.02, CHANGE_D: float = 0.002) {
+reactor FFBController(Kp: float = 12) {
   input current_pos: float
   input sea_pos: float
   input target_pos: float
   output out: float
 
+  input sea_offset: float     // sea spring offset
+  input sea_lim: float        // sea error limit
+
+
   state fsm_state: int
   state last_sea: float = 0  // to help with state variables
 
-  // The Force Feedback controller (FFB) works to set the force experienced by the SEA to zero
-  // This is done by sensing the SEA displacement and if it is greater than
+  // The Force Feedback controller (FFB) works to set the force experienced by the sea to zero
+  // This is done by sensing the sea displacement and if it is greater than
   // a certian threshold, we will move in a direction
-  reaction(target_pos, current_pos, sea_pos) -> out {=
+  reaction(target_pos, current_pos, sea_pos, sea_offset, sea_lim) -> out {=
     float pid_out;
 
-    float error_p = sea_pos->value;
-    float sea_diff = (sea_pos->value - self->last_sea);
-    self->last_sea = sea_pos->value;
+    // Use sea offset and limit data
+    float CHANGE_P = sea_lim->value * 0.95;
+    float CHANGE_D = sea_lim->value * 0.5;
+    float LIM = sea_lim->value; 
+    float sea_value = sea_pos->value + sea_offset->value;
 
-    bool flag_p = (error_p > self->CHANGE_P || error_p < -self->CHANGE_P);
-    bool flag_d = (sea_diff > self->CHANGE_D || sea_diff < -self->CHANGE_D);
+    float error_p = sea_value;
+    float sea_diff = (sea_value - self->last_sea);
+    self->last_sea = sea_value;
+
+    bool flag_p = (error_p > CHANGE_P || error_p < -CHANGE_P);
+    bool flag_d = (sea_diff > CHANGE_D || sea_diff < -CHANGE_D);
     // FSM for control state.
     // 0: We are in the idle state
     // 1: We are moving
@@ -42,7 +52,7 @@ reactor FFBController(Kp: float = 12, LIM: float = 0.003, CHANGE_P: float = 0.02
         break;
       case 1: // For movement state
         pid_out = self->Kp * error_p;
-        self->fsm_state = (error_p > self->LIM || error_p < -self->LIM);
+        self->fsm_state = (error_p > LIM || error_p < -LIM);
         break;
 
     }
