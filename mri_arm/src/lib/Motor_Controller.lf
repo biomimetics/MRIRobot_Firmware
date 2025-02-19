@@ -53,8 +53,8 @@ reactor MotorController(refresh_period: time = 5 ms) {
   output[7] speed: float
   output[7] current_joint: float
 
-  state target_vel: float[7];
-  state target_pos: float[7];
+  state target_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state target_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
 
   state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0}
   state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0}
@@ -121,7 +121,7 @@ reactor MotorController(refresh_period: time = 5 ms) {
       control_j1.target_joint,
       control_j2.target_joint
       {=
-
+    // printf("UPDATE VAL: %d\r\n", (int)(100 * self->target_pos[5]));
     lf_set(control_u0.target_pos,      self->target_pos[0]);
     lf_set(control_j0.target_joint[0], self->target_pos[1]);
     lf_set(control_j0.target_joint[1], self->target_pos[2]);

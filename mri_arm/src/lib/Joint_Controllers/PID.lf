@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
 =}
 
-reactor PIDController(Kp: float = 5, Ki: float = 0, Kd: float = 1) {
+reactor PIDController(Kp: float = 5, Ki: float = 0, Kd: float = 1, LIM:float=0.1) {
   input current_pos: float
   input sea_pos: float
   input target_pos: float
@@ -34,11 +34,16 @@ reactor PIDController(Kp: float = 5, Ki: float = 0, Kd: float = 1) {
     float pid_out = self->Kp * error_p + self->Kd * error_d;
     // float pid_out = self->Kp * error_p;
 
-    if(pid_out > 100) {
-      pid_out = 100;
-    } else if(pid_out < -100) {
-      pid_out = -100;
+    if(pid_out > 30) {
+      pid_out = 30;
+    } else if(pid_out < -30) {
+      pid_out = -30;
     } 
+
+    if(pid_out < self->LIM && pid_out > -self->LIM) {
+      pid_out = 0;
+    }
+
     lf_set(out, pid_out);
 
     self->last_pos = current_pos->value;

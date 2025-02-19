@@ -33,12 +33,6 @@ reactor Diff_Drive (
     output[2] speed_out: float          // Speed out in [motor space]
 
     state target_motors: float[2] = {0, 0}
-    state gear_ratios: float[2] = {0, 0}
-
-    reaction(startup) {=
-        self->gear_ratios[0] = motor_configs[self->motor_ID0]->gear_ratio;
-        self->gear_ratios[1] = motor_configs[self->motor_ID1]->gear_ratio;
-    =}
 
     control_u0 = new SEAController()
     control_u1 = new SEAController()
@@ -49,8 +43,8 @@ reactor Diff_Drive (
 
     // Forward current positions, after the gear reduction
     reaction(current_pos) -> control_u0.current_pos, control_u1.current_pos {=
-        lf_set(control_u0.current_pos, current_pos[0]->value * self->gear_ratios[0]);
-        lf_set(control_u1.current_pos, current_pos[1]->value * self->gear_ratios[1]);
+        lf_set(control_u0.current_pos, current_pos[0]->value);
+        lf_set(control_u1.current_pos, current_pos[1]->value);
     =}
 
     
@@ -58,8 +52,10 @@ reactor Diff_Drive (
         [Joint Pitch]:   target_joint[0]
         [Joint Roll ]:   target_joint[1]        */
     reaction(target_joint) -> control_u0.target_pos, control_u1.target_pos {=
-        lf_set(control_u0.target_pos, target_joint[0]->value + target_joint[1]->value);
-        lf_set(control_u1.target_pos, target_joint[0]->value - target_joint[1]->value);
+        float abs_0 = target_joint[0]->value;
+        float abs_1 = target_joint[1]->value;
+        lf_set(control_u0.target_pos, abs_1 - abs_0);
+        lf_set(control_u1.target_pos, abs_1 + abs_0);
     =}
 
 
@@ -68,12 +64,13 @@ reactor Diff_Drive (
         [Joint Roll ]:   pos_joint[1]       */
     reaction(current_pos) -> pos_joint {=
         // Apply gear reduction in motor space
-        float curr_0_post = current_pos[0]->value / self->gear_ratios[0];
-        float curr_1_post = current_pos[1]->value / self->gear_ratios[1];
+        float curr_0_post = current_pos[0]->value;
+        float curr_1_post = current_pos[1]->value;
 
         // Transform from motor to joint space
-        lf_set(pos_joint[0], (curr_0_post + curr_1_post)/2);
-        lf_set(pos_joint[1], (curr_0_post - curr_1_post)/2);
+        lf_set(pos_joint[0], (curr_0_post - curr_1_post)/2);
+        lf_set(pos_joint[1], (curr_0_post + curr_1_post)/2);
+        
     =}
 
 

@@ -139,7 +139,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
-      lf_set(qdec_out[i-7],  2*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr));
+      lf_set(qdec_out[i-7],  2*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr)/ motor_configs[i-7]->gear_ratio);
       if (print_enc && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (qdec_out[i-7]->value*100));
       }

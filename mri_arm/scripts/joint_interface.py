@@ -20,7 +20,7 @@ def broadcaster():
         angles = (0, 0, 0, 0, 0, 0, 0)
         state = 1
       case 1:
-        angles = (2, 2, 2, 2, 2, 2, 2)
+        angles = (0, 0, 0, 0, 0, 0, 1.57)
         state = 0
       case _:
         state = 0
@@ -33,7 +33,7 @@ def broadcaster():
     print(f"[SENT {type}]: {serial_list}")
     STM32_serial.write(serial_send)
 
-    sleep(2)
+    input()
 
 def compressMsg(msg, type = "POS"):
   if type == "POS" :
