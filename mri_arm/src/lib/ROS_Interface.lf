@@ -54,6 +54,8 @@ reactor ROS_Interface {
     float scaled_sea_offset[7] = {0, 0, 0, 0, 0, 0, 0};
     float scaled_sea_lim[7]= {0, 0, 0, 0, 0, 0, 0};
 
+    float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
+
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
 
@@ -200,23 +202,15 @@ reactor ROS_Interface {
 
   // Update our current USM position
   reaction(current_joint) {=
-    enc_data[0] = (int)(current_joint[0]->value * 1000);
-    enc_data[1] = (int)(current_joint[1]->value * 1000);
-    enc_data[2] = (int)(current_joint[2]->value * 1000);
-    enc_data[3] = (int)(current_joint[3]->value * 1000);
-    enc_data[4] = (int)(current_joint[4]->value * 1000);
-    enc_data[5] = (int)(current_joint[5]->value * 1000);
-    enc_data[6] = (int)(current_joint[6]->value * 1000);
+    for (int i=0; i<7; i++) {
+      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
+    }
   =}
 
   // Update our current sea position
   reaction(sea_pos) {=
-    sea_data[0] = (int)(sea_pos[0]->value * 1000);
-    sea_data[1] = (int)(sea_pos[1]->value * 1000);
-    sea_data[2] = (int)(sea_pos[2]->value * 1000);
-    sea_data[3] = (int)(sea_pos[3]->value * 1000);
-    sea_data[4] = (int)(sea_pos[4]->value * 1000);
-    sea_data[5] = (int)(sea_pos[5]->value * 1000);
-    sea_data[6] = (int)(sea_pos[6]->value * 1000);
+    for (int i=0; i<7; i++) {
+      sea_data[i] = (int)(sea_pos[i]->value * 1000);
+    }
   =}
 }
