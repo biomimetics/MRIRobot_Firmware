@@ -85,7 +85,7 @@ static Motor_Config motor3_config = {
 
     80.0,       // Kp               - proportional control constant
     30.0,       // Kd               - differential control constant
-    0.9        // lim              - SEA limit
+    0.95        // lim              - SEA limit
 };
 
 
@@ -101,7 +101,7 @@ static Motor_Config motor4_config = {
 
     80.0,       // Kp               - proportional control constant
     30.0,       // Kd               - differential control constant
-    0.7        // lim              - SEA limit
+    0.75        // lim              - SEA limit
 };
 
 

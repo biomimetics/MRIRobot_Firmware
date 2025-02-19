@@ -134,8 +134,8 @@ reactor ROS_Interface {
       }
 
       if (print_ros)  {
-        printf("got [JOINT POS]: \r\n");
-        print_resp(scaled_joint_pos);
+        // printf("got [JOINT POS]: \r\n");
+        // print_resp(scaled_joint_pos);
       }
     }
 
@@ -147,7 +147,7 @@ reactor ROS_Interface {
 
       if (print_ros)  {
         printf("got [JOINT VEL]: \r\n");
-        print_resp(scaled_joint_vel);
+        // print_resp(scaled_joint_vel);
       }
     }
 

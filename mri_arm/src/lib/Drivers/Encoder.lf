@@ -27,7 +27,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     DMA_HandleTypeDef hdma_usart3_rx;
     DMA_HandleTypeDef hdma_usart3_tx;
 
-    static int print_enc = true;
+    static int print_enc = false;
     static int printcnt = 0;
     static int printcnt_lim = 50;
 

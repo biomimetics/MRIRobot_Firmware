@@ -55,6 +55,7 @@ reactor SEAController(
 
   state fsm_state: SEA_MODE = 0
   state last_target: float = 0
+  state sea_value: float = 0  // to help with state variables
   state last_sea: float = 0  // to help with state variables
 
   state last_out: float = 0  // to help with state variables
@@ -83,14 +84,15 @@ reactor SEAController(
     float TRANS_CYCLES = 500;  // Number of cycles we stay in transient state
 
 
-    float SEA_LIM_P = sea_lim->value * 1.8;
+    float SEA_LIM_P = sea_lim->value * 1.9;
     float SEA_LIM_D = sea_lim->value * 10;
+    float m = 0.5;
 
     // Any necessary operations we have here
-    float sea_value = sea_pos->value + sea_offset->value;
-    float sea_diff = (sea_value - self->last_sea);
-    float sea_error = sea_value;
-    self->last_sea = sea_value;
+    self->sea_value = (1.0 - m)*self->sea_value + m*(sea_pos->value + sea_offset->value);
+    float sea_diff = (self->sea_value - self->last_sea);
+    float sea_error = self->sea_value;
+    self->last_sea = self->sea_value;
 
     bool flag_p = (sea_error > SEA_LIM_P || sea_error < -SEA_LIM_P);
     bool flag_d = (sea_diff > SEA_LIM_D || sea_diff < -SEA_LIM_D);
