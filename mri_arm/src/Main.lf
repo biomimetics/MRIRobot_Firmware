@@ -186,12 +186,12 @@ main reactor {
     // +-----------------------------------------------------------------------+
     reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_mode {=
       for (int i=0; i<7; i++) {
-        lf_set(motor_controller.target_sel[i], MODE_POS);   // Position control
-        // lf_set(motor_controller.target_sel[i], MODE_VEL);   // Velocity control
+        // lf_set(motor_controller.target_sel[i], MODE_POS);   // Position control
+        lf_set(motor_controller.target_sel[i], MODE_VEL);   // Velocity control
       }
 
-      // lf_set(motor_controller.target_mode, MODE_INT);   // Internal control moder
-      lf_set(motor_controller.target_mode, MODE_EXT);   // External control moder
+      lf_set(motor_controller.target_mode, MODE_INT);   // Internal control moder
+      // lf_set(motor_controller.target_mode, MODE_EXT);   // External control moder
     =}
 
 
@@ -211,7 +211,7 @@ main reactor {
       } else {
         self->count = 0;
       }
-      // printf("        switch state: %d\r\n", self->count);
+      printf("        switch state: %d\r\n", self->count);
     =}
 
     // Set the internal target position and/or velocity
@@ -219,27 +219,33 @@ main reactor {
       HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, self->count == 0);
       if (self->count == 0) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_pos_int[i], 5);
+          lf_set(motor_controller.target_pos_int[i], 10);
+          lf_set(motor_controller.target_vel_int[i], 20);
         }
       } else if (self->count == 1) {
         for (int i=0; i<7; i++) {
           lf_set(motor_controller.target_pos_int[i], 0);
+          lf_set(motor_controller.target_vel_int[i], 0);
         }
       } else if (self->count == 2) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_pos_int[i], 5);
+          lf_set(motor_controller.target_pos_int[i], 10);
+          lf_set(motor_controller.target_vel_int[i], 20);
         }
       } else if (self->count == 3) {
         for (int i=0; i<7; i++) {
           lf_set(motor_controller.target_pos_int[i], 0);
+          lf_set(motor_controller.target_vel_int[i], 0);
         }
       } else if (self->count == 4) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_pos_int[i], 5);
+          lf_set(motor_controller.target_pos_int[i], 10);
+          lf_set(motor_controller.target_vel_int[i], 20);
         }
       } else {
         for (int i=0; i<7; i++) {
           lf_set(motor_controller.target_pos_int[i], 0);
+          lf_set(motor_controller.target_vel_int[i], 0);
         }
       }
     =}
