@@ -29,7 +29,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     static int print_enc = true;
     static int printcnt = 0;
-    static int printcnt_lim = 100;
+    static int printcnt_lim = 70;
 
 
     // QDEC Commands
@@ -135,6 +135,10 @@ reactor QDEC(sample_period: time = 5 ms) {
       if (print_enc && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (sea_out[i]->value*100));
       }
+    }
+
+    if (print_enc && printcnt>=printcnt_lim) {
+      printf(" | ");
     }
 
     // Get values for USM encoders

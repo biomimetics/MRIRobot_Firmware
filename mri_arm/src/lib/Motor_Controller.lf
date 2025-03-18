@@ -70,6 +70,10 @@ reactor MotorController(refresh_period: time = 5 ms) {
 
   timer trigger(0, refresh_period)
   control_u0 = new SEAController()
+  // control_j0 = new Diff_Motor(motor_ID0=1, motor_ID1=2)
+  // control_j1 = new Diff_Motor(motor_ID0=3, motor_ID1=4)
+  // control_j2 = new Diff_Motor(motor_ID0=5, motor_ID1=6)
+
   control_j0 = new Diff_Joint(motor_ID0=1, motor_ID1=2)
   control_j1 = new Diff_Joint(motor_ID0=3, motor_ID1=4)
   control_j2 = new Diff_Joint(motor_ID0=5, motor_ID1=6)

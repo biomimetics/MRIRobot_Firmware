@@ -31,8 +31,8 @@ reactor FFBController(Kp: float = 12) {
     float pid_out;
 
     // Use sea offset and limit data
-    float CHANGE_P = sea_lim->value * 0.95;
-    float CHANGE_D = sea_lim->value * 0.5;
+    float CHANGE_P = sea_lim->value * 1.5;
+    float CHANGE_D = sea_lim->value * 10;
     float LIM = sea_lim->value; 
     float sea_value = sea_pos->value + sea_offset->value;
 

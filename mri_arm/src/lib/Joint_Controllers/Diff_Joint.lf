@@ -13,6 +13,7 @@ preamble {=
     #include "stm32f4xx_hal.h"
     #include <stdio.h>
     #include <../../../motor_config.h>
+    #include <../../../joint_config.h>
 =}
 
 reactor Diff_Joint (
@@ -44,12 +45,12 @@ reactor Diff_Joint (
 
     reaction(startup) -> control_u0.constants, control_u1.constants {=
         // Control Constants [Kp, Kd, Ki]
-        lf_set(control_u0.constants[0], motor_configs[self->motor_ID0]-> Kp);
-        lf_set(control_u0.constants[1], motor_configs[self->motor_ID0]-> Kd);
+        lf_set(control_u0.constants[0], joint_configs[self->motor_ID0]-> Kp);
+        lf_set(control_u0.constants[1], joint_configs[self->motor_ID0]-> Kd);
         lf_set(control_u0.constants[2], 0);
 
-        lf_set(control_u1.constants[0], motor_configs[self->motor_ID1]-> Kp);
-        lf_set(control_u1.constants[1], motor_configs[self->motor_ID1]-> Kd);
+        lf_set(control_u1.constants[0], joint_configs[self->motor_ID1]-> Kp);
+        lf_set(control_u1.constants[1], joint_configs[self->motor_ID1]-> Kd);
         lf_set(control_u1.constants[2], 0);
         
     =}
@@ -82,8 +83,8 @@ reactor Diff_Joint (
 
     // Comvert the motor outputs in [joint space] -> [motor space]
     reaction(control_u0.out, control_u1.out) -> speed_out {=
-        lf_set(speed_out[0], control_u1.out->value - control_u0.out->value);
-        lf_set(speed_out[1], control_u1.out->value + control_u0.out->value);
+        lf_set(speed_out[1], control_u1.out->value - control_u0.out->value);
+        lf_set(speed_out[0], control_u1.out->value + control_u0.out->value);
     =}
 
 
