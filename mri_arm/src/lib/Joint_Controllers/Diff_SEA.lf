@@ -69,6 +69,7 @@ reactor Diff_SEA (
     input[2] sea_lim: float                 // sea error limit          [joint space]
     
     output[2] pos_joint: float              // Current position in      [joint space]
+    output[2] pos_sea: float                // Current sea position in  [joint space]
     output[2] speed_out: float              // Speed out in             [motor space]
 
     timer motor_tick(0, 10 ms)
@@ -235,6 +236,12 @@ reactor Diff_SEA (
     reaction(current_pos) -> pos_joint {=
         lf_set(pos_joint[0], (current_pos[0]->value - current_pos[1]->value)/2);
         lf_set(pos_joint[1], (current_pos[0]->value + current_pos[1]->value)/2);
+    =}
+
+    // Convert the current sea positions in [motor space] -> [joint space]
+    reaction(sea_pos) -> pos_sea {=
+        lf_set(pos_sea[0], (sea_pos[0]->value - sea_pos[1]->value)/2);
+        lf_set(pos_sea[1], (sea_pos[0]->value + sea_pos[1]->value)/2);
     =}
 
 }
