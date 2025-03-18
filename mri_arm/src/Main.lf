@@ -105,6 +105,7 @@ main reactor {
 
   // Route joint targets/information
   motor_controller.current_joint -> ros_controller.current_joint
+  motor_controller.current_joint_sea -> ros_controller.current_joint_sea
   motor_controller.speed -> usm.speed
   ros_controller.target_pos_ext -> motor_controller.target_pos_ext
   ros_controller.target_vel_ext -> motor_controller.target_vel_ext

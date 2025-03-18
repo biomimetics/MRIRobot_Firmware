@@ -52,6 +52,7 @@ reactor SEAController(
 
   output out: float
   output pos_joint: float
+  output pos_sea: float
 
   state fsm_state: SEA_MODE = 0
   state last_target: float = 0
@@ -67,6 +68,8 @@ reactor SEAController(
   pos_control = new PIDController()
   
   current_pos -> pos_joint
+  sea_pos -> pos_sea
+  
   current_pos -> force_control.current_pos
   sea_pos -> force_control.sea_pos
   target_pos -> force_control.target_pos

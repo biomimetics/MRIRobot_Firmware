@@ -59,6 +59,8 @@ reactor MotorController(refresh_period: time = 5 ms) {
 
   output[7] speed: float
   output[7] current_joint: float
+  output[7] current_joint_sea: float
+  
 
   state target_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
   state target_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
@@ -92,6 +94,12 @@ reactor MotorController(refresh_period: time = 5 ms) {
   control_j1.pos_joint,
   control_j2.pos_joint 
     -> current_joint
+  
+  control_u0.pos_sea, 
+  control_j0.pos_sea, 
+  control_j1.pos_sea,
+  control_j2.pos_sea 
+    -> current_joint_sea
 
   sea_offset ->
     control_u0.sea_offset,
