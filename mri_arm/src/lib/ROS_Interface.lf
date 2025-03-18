@@ -52,7 +52,7 @@ reactor ROS_Interface {
     float scaled_joint_vel[7]= {0, 0, 0, 0, 0, 0, 0};
 
     float scaled_sea_offset[7] = {0, 0, 0, 0, 0, 0, 0};
-    float scaled_sea_lim[7]= {0, 0, 0, 0, 0, 0, 0};
+    float scaled_sea_lim[7]= {1.5, 1.5, 9, 9, 12, 12, 12};
 
     float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
 
@@ -173,9 +173,6 @@ reactor ROS_Interface {
 
     // Prep ROS bridge DMA recieve
     HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
-
-    for (int i=0; i<7; i++) 
-      scaled_sea_lim[i] = motor_configs[i]->lim;
   =}
 
 

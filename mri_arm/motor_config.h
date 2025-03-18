@@ -37,7 +37,6 @@ static Motor_Config motor0_config = {
 
     40.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    0.3         // lim              - SEA limit
 };
 
 
@@ -47,13 +46,12 @@ static Motor_Config motor1_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
-    -160.0,      // sea_offset       - sea reset offset
+    -160.0,     // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     21.0,       // gear_ratio       - motor gear box gear ratio
 
     40.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    1.2         // lim              - SEA limit
 };
 
 
@@ -69,7 +67,6 @@ static Motor_Config motor2_config = {
 
     40.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    1.2         // lim              - SEA limit
 };
 
 
@@ -85,7 +82,6 @@ static Motor_Config motor3_config = {
 
     100.0,       // Kp               - proportional control constant
     30.0,       // Kd               - differential control constant
-    0.95        // lim              - SEA limit
 };
 
 
@@ -101,7 +97,6 @@ static Motor_Config motor4_config = {
 
     100.0,       // Kp               - proportional control constant
     30.0,       // Kd               - differential control constant
-    0.75        // lim              - SEA limit
 };
 
 
@@ -117,7 +112,6 @@ static Motor_Config motor5_config = {
 
     -40.0,      // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    0.15        // lim              - SEA limit
 };
 
 
@@ -133,7 +127,6 @@ static Motor_Config motor6_config = {
 
     -40.0,      // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    0.15        // lim              - SEA limit
 };
 
 
