@@ -69,8 +69,8 @@ reactor Diff_Joint (
 
     // Comvert the targets in [motor space] -> [joint space]
     reaction(current_pos, sea_pos) -> control_u0.current_pos, control_u1.current_pos {=
-        float pos0 = current_pos[0]->value + sea_pos[0]->value;
-        float pos1 = current_pos[1]->value + sea_pos[1]->value;
+        float pos0 = current_pos[0]->value + (sea_pos[0]->value/10);
+        float pos1 = current_pos[1]->value + (sea_pos[1]->value/10);
         lf_set(control_u0.current_pos, (pos0 - pos1)/2);
         lf_set(control_u1.current_pos, (pos0 + pos1)/2);
     =}
@@ -89,14 +89,12 @@ reactor Diff_Joint (
 
 
 // --------------------- Passthrough values  --------------------- 
-    // Convert the current positions in [motor space] -> [joint space]
-    reaction(current_pos) -> pos_joint {=
-        lf_set(pos_joint[0], (current_pos[0]->value - current_pos[1]->value)/2);
-        lf_set(pos_joint[1], (current_pos[0]->value + current_pos[1]->value)/2);
-    =}
-
-    // Convert the current sea positions in [motor space] -> [joint space]
-    reaction(sea_pos) -> pos_sea {=
+    // Convert the current joint and sea positions in [motor space] -> [joint space]
+    reaction(current_pos, sea_pos) -> pos_joint, pos_sea {=
+        float pos0 = current_pos[0]->value + (sea_pos[0]->value/10);
+        float pos1 = current_pos[1]->value + (sea_pos[1]->value/10);
+        lf_set(pos_joint[0], (pos0 - pos1)/2);
+        lf_set(pos_joint[1], (pos0 + pos1)/2);
         lf_set(pos_sea[0], (sea_pos[0]->value - sea_pos[1]->value)/2);
         lf_set(pos_sea[1], (sea_pos[0]->value + sea_pos[1]->value)/2);
     =}
