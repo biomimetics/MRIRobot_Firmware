@@ -58,6 +58,7 @@ reactor ROS_Interface {
     float scaled_sea_lim[7]= {0, 0, 0, 0, 0, 0, 0};
 
     float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
+    int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
 
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
@@ -160,6 +161,7 @@ reactor ROS_Interface {
     void set_sea_offset_data() {
       for (int i=0; i<7; i++) {
         scaled_sea_offset[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
+        loopback_offset[i] =  1000 * ((int) scaled_sea_offset[i]);
       }
     }
     void set_sea_limit_data() {
@@ -177,21 +179,29 @@ reaction(startup) {=
   // Prep ROS bridge DMA recieve
   HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
 
-  for (int i=0; i<7; i++) 
+  for (int i=0; i<7; i++) {
     scaled_sea_lim[i] = joint_configs[i]->lim;
     scaled_sea_offset[i] = 0;
+  }
+    
 =}
 
 
 
   // Send current state over the bridge
   reaction(trigger_send) {=
+    
+    int loopback_data[7]= {0, 0, 0, 0, 0, 0, 0};
+    for (int i=0; i<7; i++) {
+      loopback_data[i] = (int) (1000 * scaled_joint_pos[i]);
+    }
+
     if (!inFlight) {
       inFlight = 1; // Indicate that we are currently sending data
       int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
-            enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
+            loopback_data[0], loopback_data[1], loopback_data[2], loopback_data[3], loopback_data[4], loopback_data[5], loopback_data[6], 
             sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
-            scaled_sea_offset[0], scaled_sea_offset[1], scaled_sea_offset[2], scaled_sea_offset[3], scaled_sea_offset[4], scaled_sea_offset[5], scaled_sea_offset[6]);
+            loopback_offset[0], loopback_offset[1], loopback_offset[2], loopback_offset[3], loopback_offset[4], loopback_offset[5], loopback_offset[6]);
       HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
     }
   =}
