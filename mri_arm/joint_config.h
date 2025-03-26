@@ -31,25 +31,25 @@ static Joint_Config config2 = {
 static Joint_Config config3 = {
     100.0,       // Kp               - proportional control constant
     30.0,        // Kd               - differential control constant
-    0.65        // lim              - SEA limit
+    0.9         // lim              - SEA limit
 };
 
 static Joint_Config config4 = {
     100.0,       // Kp               - proportional control constant
     30.0,        // Kd               - differential control constant
-    0.65        // lim              - SEA limit
+    0.9         // lim              - SEA limit
 };
 
 static Joint_Config config5 = {
     -30.0,      // Kp               - proportional control constant
     10.0,        // Kd               - differential control constant
-    0.18        // lim              - SEA limit
+    0.6         // lim              - SEA limit
 };
 
 static Joint_Config config6 = {
     -30.0,      // Kp               - proportional control constant
     10.0,        // Kd               - differential control constant
-    0.15        // lim              - SEA limit
+    0.6         // lim              - SEA limit
 };
 
 

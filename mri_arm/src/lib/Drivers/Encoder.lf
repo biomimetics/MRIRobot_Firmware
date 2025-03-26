@@ -129,8 +129,9 @@ reactor QDEC(sample_period: time = 5 ms) {
     // Get values for SEA encoders
     for (int i=0; i<7; i++) {
       // 0.5644 = 25.4/45
-      float sea_raw = ((float) (count[i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr );
-      lf_set(sea_out[i],  (motor_configs[i]->sea_gear_ratio * 10 * sea_raw) - (motor_configs[i]->sea_offset)/100 );
+      float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr );
+      float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
+      lf_set(sea_out[i],  (sea_input*100 - (motor_configs[i]->sea_offset)/10)/motor_configs[i]->gear_ratio );
 
       if (print_enc && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (sea_out[i]->value*100));
@@ -143,7 +144,8 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
-      lf_set(qdec_out[i-7],  2*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr)/ motor_configs[i-7]->gear_ratio);
+      float motor_raw = 2*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr);
+      lf_set(qdec_out[i-7],  motor_raw / motor_configs[i-7]->gear_ratio);
       if (print_enc && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (qdec_out[i-7]->value*100));
       }

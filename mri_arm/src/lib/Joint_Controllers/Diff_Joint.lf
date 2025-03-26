@@ -91,8 +91,11 @@ reactor Diff_Joint (
 // --------------------- Passthrough values  --------------------- 
     // Convert the current joint and sea positions in [motor space] -> [joint space]
     reaction(current_pos, sea_pos) -> pos_joint, pos_sea {=
-        float pos0 = current_pos[0]->value + (sea_pos[0]->value/10);
-        float pos1 = current_pos[1]->value + (sea_pos[1]->value/10);
+        // float pos0 = current_pos[0]->value - (sea_pos[0]->value/10);
+        // float pos1 = current_pos[1]->value - (sea_pos[1]->value/10);
+
+        float pos0 = current_pos[0]->value + (motor_configs[self->motor_ID0]->dir)*(sea_pos[0]->value/10);
+        float pos1 = current_pos[1]->value + (motor_configs[self->motor_ID1]->dir)*(sea_pos[1]->value/10);
         lf_set(pos_joint[0], (pos0 - pos1)/2);
         lf_set(pos_joint[1], (pos0 + pos1)/2);
         lf_set(pos_sea[0], (sea_pos[0]->value - sea_pos[1]->value)/2);
