@@ -55,7 +55,7 @@ reactor ROS_Interface {
     float scaled_joint_vel[7]= {0, 0, 0, 0, 0, 0, 0};
 
     float scaled_sea_offset[7] = {0, 0, 0, 0, 0, 0, 0};
-    float scaled_sea_lim[7]= {0.5, 0.5, 0.9, 0.9, 1.2, 1.2, 1.2};
+    float scaled_sea_lim[7]= {0, 0, 0, 0, 0, 0, 0};
 
     float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
 
@@ -179,6 +179,7 @@ reaction(startup) {=
 
   for (int i=0; i<7; i++) 
     scaled_sea_lim[i] = joint_configs[i]->lim;
+    scaled_sea_offset[i] = 0;
 =}
 
 
@@ -187,20 +188,20 @@ reaction(startup) {=
   reaction(trigger_send) {=
     if (!inFlight) {
       inFlight = 1; // Indicate that we are currently sending data
-      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
             enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
-            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
+            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
+            scaled_sea_offset[0], scaled_sea_offset[1], scaled_sea_offset[2], scaled_sea_offset[3], scaled_sea_offset[4], scaled_sea_offset[5], scaled_sea_offset[6]);
       HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
     }
   =}
 
   // Update our target position from most recently recieved
-  reaction(trigger_update) -> target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
+  reaction(trigger_update) -> target_pos_ext, target_vel_ext, sea_offset{=
     for (int i=0; i<7; i++) {
       lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
       lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocityes
       lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
-      lf_set(sea_lim[i], scaled_sea_lim[i]);            // Update sea limits
     }
   =}
 
