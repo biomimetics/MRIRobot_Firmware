@@ -55,7 +55,7 @@ reactor ROS_Interface {
     float scaled_joint_vel[7]= {0, 0, 0, 0, 0, 0, 0};
 
     float scaled_sea_offset[7] = {0, 0, 0, 0, 0, 0, 0};
-    float scaled_sea_lim[7]= {0, 0, 0, 0, 0, 0, 0};
+    float scaled_sea_lim[7]= {1000, 1000, 1000, 1000, 1000, 1000, 1000};
 
     float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
     int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
@@ -119,8 +119,6 @@ reactor ROS_Interface {
         set_joint_vel_data();
       } else if (rx_buffer[0] == 'o') {       // Change joint sea offset
         set_sea_offset_data();
-      } else if (rx_buffer[0] == 'l') {       // Change joint sea limit
-        set_sea_limit_data();
       } else {
         printf("Got bad data\r\n");
       }
@@ -161,13 +159,11 @@ reactor ROS_Interface {
     void set_sea_offset_data() {
       for (int i=0; i<7; i++) {
         scaled_sea_offset[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
-        loopback_offset[i] =  1000 * ((int) scaled_sea_offset[i]);
+        loopback_offset[i] =   (int)( 1000 * scaled_sea_offset[i]);
       }
-    }
-    void set_sea_limit_data() {
-      for (int i=0; i<7; i++) {
-        scaled_sea_lim[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
-      }
+
+      printf("got [JOINT OFFSET]: \r\n");
+      print_resp(scaled_sea_offset);
     }
   =}
 
@@ -201,11 +197,12 @@ reaction(startup) {=
   =}
 
   // Update our target position from most recently recieved
-  reaction(trigger_update) -> target_pos_ext, target_vel_ext, sea_offset{=
+  reaction(trigger_update) -> target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
     for (int i=0; i<7; i++) {
       lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
       lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocityes
       lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
+      lf_set(sea_lim[i], scaled_sea_lim[i]);      // Update sea offset values
     }
   =}
 

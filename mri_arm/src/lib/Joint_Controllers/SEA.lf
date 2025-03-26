@@ -28,7 +28,7 @@ preamble {=
 
 reactor SEAController(
     // Control constants
-    Ks: float = 110   // SEA control constant
+    Ks: float = 40   // SEA control constant
 
     // SEA transition values
     // SEA_LIM_P: float = 0.2,
@@ -92,7 +92,7 @@ reactor SEAController(
     float m = 0.8;
 
     // Any necessary operations we have here
-    self->sea_value = (1.0 - m)*self->sea_value + m*(sea_pos->value + sea_offset->value);
+    self->sea_value = (1.0 - m)*self->sea_value + m*(sea_pos->value - sea_offset->value*10);
     float sea_diff = (self->sea_value - self->last_sea);
     float sea_error = self->sea_value;
     self->last_sea = self->sea_value;

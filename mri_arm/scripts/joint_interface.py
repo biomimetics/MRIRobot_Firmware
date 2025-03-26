@@ -66,7 +66,7 @@ def convVal(value):
 def listener(STM32_serial, file_name):
   start_time = time.time()
   while True:
-    if STM32_serial.in_waiting >= 40:
+    if STM32_serial.in_waiting >= 60:
       read_val = STM32_serial.readline().decode('utf-8')
       if read_val == "":
         break
@@ -74,7 +74,7 @@ def listener(STM32_serial, file_name):
       if read_val[0] == 'e':
         data_str = read_val[1:-2].split(',')
         data_float = [convVal(i) for i in data_str]
-        print(f"    [MSG] joint: {data_float[0:7]} | SEA: {data_float[7:]}")
+        print(f"    [MSG] joint: {data_float[0:7]} | SEA: {data_float[7:14]}")
         curr_time = time.time() - start_time
 
         f = open(file_name,'a')

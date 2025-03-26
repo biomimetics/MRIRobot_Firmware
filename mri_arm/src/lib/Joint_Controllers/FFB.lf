@@ -34,7 +34,7 @@ reactor FFBController(Kp: float = 12) {
     float CHANGE_P = sea_lim->value * 1.5;
     float CHANGE_D = sea_lim->value * 10;
     float LIM = sea_lim->value; 
-    float sea_value = sea_pos->value + sea_offset->value;
+    float sea_value = sea_pos->value - sea_offset->value*10;
 
     float error_p = sea_value;
     float sea_diff = (sea_value - self->last_sea);
