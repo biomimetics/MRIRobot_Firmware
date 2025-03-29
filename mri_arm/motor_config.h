@@ -20,10 +20,10 @@ typedef struct { /* __MOTOR_CONFIG_H */
 
 
 
-// Define config for motor 0
+// --------------------------------------- Base joint --------------------------------------- 
 static Motor_Config motor0_config = {
     1,          // dir              - Motor direction
-    500,        // max_speed        - max motor speed
+    300,        // max_speed        - max motor speed
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // qdec_cpr         - motor encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
@@ -35,11 +35,11 @@ static Motor_Config motor0_config = {
 
 static Motor_Config motor1_config = {
     1,          // dir              - Motor direction
-    500,        // max_speed        - max motor speed
+    300,        // max_speed        - max motor speed
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
-    0,          // sea_offset       - sea reset offset
+    -195,          // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     21.0,       // gear_ratio       - motor gear box gear ratio
 };
@@ -47,23 +47,27 @@ static Motor_Config motor1_config = {
 
 static Motor_Config motor2_config = {
     1,          // dir              - Motor direction
-    500,        // max_speed        - max motor speed
+    300,        // max_speed        - max motor speed
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
-    22.0,       // sea_gear_ratio   - sea motor gear ratio
+    20.0,       // sea_gear_ratio   - sea motor gear ratio
     -20.0,      // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     21.0,       // gear_ratio       - motor gear box gear ratio
 };
+// --------------------------------------- Base joint --------------------------------------- 
 
 
+
+
+// --------------------------------------- Elbow joint --------------------------------------- 
 static Motor_Config motor3_config = {
     1,          // dir              - Motor direction
-    300,        // max_speed        - max motor speed
+    100,        // max_speed        - max motor speed
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     13.0,       // sea_gear_ratio   - sea motor gear ratio
-    -15.0,      // sea_offset       - sea reset offset
+    45.0,      // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     12.0,       // gear_ratio       - motor gear box gear ratio
 };
@@ -71,19 +75,23 @@ static Motor_Config motor3_config = {
 
 static Motor_Config motor4_config = {
     1,          // dir              - Motor direction
-    300,        // max_speed        - max motor speed
+    100,        // max_speed        - max motor speed
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     13.0,       // sea_gear_ratio   - sea motor gear ratio
-    45.0,       // sea_offset       - sea reset offset
+    25.0,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     12.0,       // gear_ratio       - motor gear box gear ratio
 };
+// --------------------------------------- Elbow joint --------------------------------------- 
 
 
+
+
+// --------------------------------------- Wrist joint --------------------------------------- 
 static Motor_Config motor5_config = {
     -1,         // dir              - Motor direction
-    200,        // max_speed        - max motor speed
+    150,        // max_speed        - max motor speed
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotati--1---on
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
@@ -95,7 +103,7 @@ static Motor_Config motor5_config = {
 
 static Motor_Config motor6_config = {
     -1,         // dir              - Motor direction
-    200,        // max_speed        - max motor speed
+    150,        // max_speed        - max motor speed
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
@@ -103,6 +111,7 @@ static Motor_Config motor6_config = {
     1.0,        // speed_ratio      - motor speed ration 
     52.0/16.0,  // gear_ratio       - motor gear box gear ratio
 };
+// --------------------------------------- Wrist joint --------------------------------------- 
 
 
 

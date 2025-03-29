@@ -162,8 +162,6 @@ reactor ROS_Interface {
         loopback_offset[i] =   (int)( 1000 * scaled_sea_offset[i]);
       }
 
-      printf("got [JOINT OFFSET]: \r\n");
-      print_resp(scaled_sea_offset);
     }
   =}
 

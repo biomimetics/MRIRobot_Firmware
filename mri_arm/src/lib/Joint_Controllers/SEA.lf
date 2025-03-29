@@ -87,7 +87,7 @@ reactor SEAController(
     float TRANS_CYCLES = 500;  // Number of cycles we stay in transient state
 
 
-    float SEA_LIM_P = sea_lim->value * 1.9;
+    float SEA_LIM_P = sea_lim->value;
     float SEA_LIM_D = sea_lim->value * 100;
     float m = 0.8;
 
@@ -131,8 +131,8 @@ reactor SEAController(
 
   reaction(force_control.out, pos_control.out) -> out {=
     // Caps to decrease the rate of rise and fall
-    float RISE_CAP = 20;
-    float FALL_CAP = 20;
+    float RISE_CAP = 10;
+    float FALL_CAP = 10;
 
     switch(self->fsm_state){
       case PID_MODE: // For PID state
