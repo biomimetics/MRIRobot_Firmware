@@ -36,15 +36,15 @@ static Joint_Config config2 = {
 
 // --------------------------------------- Elbow joint --------------------------------------- 
 static Joint_Config config3 = {
-    30.0,       // Kp               - proportional control constant
+    20.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    1.0         // lim              - SEA limit
+    0.6         // lim              - SEA limit
 };
 
 static Joint_Config config4 = {
-    30.0,       // Kp               - proportional control constant
+    20.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    0.6         // lim              - SEA limit
+    0.05         // lim              - SEA limit
 };
 // --------------------------------------- Elbow joint --------------------------------------- 
 
@@ -54,13 +54,13 @@ static Joint_Config config4 = {
 static Joint_Config config5 = {
     -10.0,      // Kp               - proportional control constant
     0.0,       // Kd               - differential control constant
-    0.6         // lim              - SEA limit
+    1.2         // lim              - SEA limit
 };
 
 static Joint_Config config6 = {
     -10.0,      // Kp               - proportional control constant
     0.0,       // Kd               - differential control constant
-    0.3         // lim              - SEA limit
+    0.7         // lim              - SEA limit
 };
 // --------------------------------------- Wrist joint --------------------------------------- 
 
