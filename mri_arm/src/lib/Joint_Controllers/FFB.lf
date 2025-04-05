@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
 =}
 
-reactor FFBController(Kp: float = 12) {
+reactor FFBController {
   input current_pos: float
   input sea_pos: float
   input target_pos: float
@@ -20,6 +20,8 @@ reactor FFBController(Kp: float = 12) {
   input sea_offset: float     // sea spring offset
   input sea_lim: float        // sea error limit
 
+  input[4] constants: float  // Control Constants [Kp, Ki, Kd, Ks]
+
 
   state fsm_state: int
   state last_sea: float = 0  // to help with state variables
@@ -27,7 +29,7 @@ reactor FFBController(Kp: float = 12) {
   // The Force Feedback controller (FFB) works to set the force experienced by the sea to zero
   // This is done by sensing the sea displacement and if it is greater than
   // a certian threshold, we will move in a direction
-  reaction(target_pos, current_pos, sea_pos, sea_offset, sea_lim) -> out {=
+  reaction(target_pos, current_pos, constants, sea_pos, sea_offset, sea_lim) -> out {=
     float pid_out;
 
     // Use sea offset and limit data
@@ -51,7 +53,7 @@ reactor FFBController(Kp: float = 12) {
         self->fsm_state = flag_p || flag_d;
         break;
       case 1: // For movement state
-        pid_out = self->Kp * error_p;
+        pid_out = constants[3]->value * error_p;
         self->fsm_state = (error_p > LIM || error_p < -LIM);
         break;
 

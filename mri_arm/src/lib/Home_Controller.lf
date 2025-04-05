@@ -10,6 +10,31 @@ preamble {=
   #include "stm32f4xx_hal.h"
   #include "stm32_startup.h"
   #include <stdio.h>
+
+  #ifndef __HOME_MODE_ENUM
+  #define __HOME_MODE_ENUM
+
+  // Set Motor Mode -> velocity or position control
+  typedef enum {
+      WRIST0 = 0U, 
+      WRIST1 = 1U, 
+      WRIST2 = 2U, 
+      WRIST3 = 3U,
+
+      ELBOW0 = 10U, 
+      ELBOW1 = 11U, 
+      ELBOW2 = 12U, 
+      ELBOW3 = 13U, 
+      ELBOW4 = 14U, 
+
+      SHOULDER0 = 20U, 
+      SHOULDER1 = 21U, 
+      SHOULDER2 = 22U, 
+
+      DONE = 30U
+    } HOME_STATE;
+
+  #endif /* __HOME_MODE_ENUM */
 =}
 
 reactor HomeController(sample_period: time = 15 ms) {
@@ -35,25 +60,18 @@ reactor HomeController(sample_period: time = 15 ms) {
   timer switch_update(0 ms, 40 ms)
 
   preamble {=
-
-    volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
-
-    static float SEA_limits[7] = {0, 0, 0, 1.2, 1.2, 0.35, 0.35};
-    static int SEA_trig[7] = {0, 0, 0, 0, 0, 0, 0};
-    static float ref[7] = {0, 0, 0, 0, 0, 0, 0};
-    static float rpos[7] = {0, 0, 0, 0, 0, 0, 0};
-
     static int printVals = false;
     static int printcnt = 0;
     static int printcnt_lim = 20;
 
-    static int home_state = 0;
+    volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
+    static float SEA_limits[7] = {0, 0, 0, 1.6, 1.6, 0.6, 0.6};
+    static int SEA_trig[7] = {0, 0, 0, 0, 0, 0, 0};
+    static float ref[7] = {0, 0, 0, 0, 0, 0, 0};
+    static float rpos[7] = {0, 0, 0, 0, 0, 0, 0};
+
+    static HOME_STATE home_state = WRIST0;
     static int _is_home = 0;
-
-
-    static float ref_0 = 0;
-    static float ref_1 = 0;
-    static float ref_3 = 0;
 
     static void MX_GPIO_Init(void) {
       GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -116,23 +134,24 @@ reactor HomeController(sample_period: time = 15 ms) {
       //+----------------------------------------------------------------+
       //  Homing states:
       //
-      //  Home Stage (0) - Home second joint
-      //    - State(00) - Init state (Check if we want to home this stage)
-      //    - State(01) - Home in same direction
-      //    - State(02) - Home in opposite direction
+      //  Home Stage (WRIST) - Home second joint
+      //    - State(WRIST0) - Init state (Check if we want to home this stage)
+      //    - State(WRIST1) - Home in same direction
+      //    - State(WRIST2) - Home in opposite direction
+      //    - State(WRIST3) - Return to center
       //
-      //  Home Stage (1) - Home first joint
-      //    - State(10) - Init state (Check if we want to home this stage)
-      //    - State(11) - Home in same direction
-      //    - State(12) - Home in opposite direction
+      //  Home Stage (ELBOW) - Home first joint
+      //    - State(ELBOW0) - Init state (Check if we want to home this stage)
+      //    - State(ELBOW1) - Home in same direction
+      //    - State(ELBOW2) - Home in opposite direction
       //
-      //  Home Stage (2) - Home base
-      //    - State(20) - Init state (Check if we want to home this stage)
-      //    - State(21) - Home in same direction
-      //    - State(22) - Home in opposite direction
+      //  Home Stage (SHOLDER) - Home base
+      //    - State(SHOULDER0) - Init state (Check if we want to home this stage)
+      //    - State(SHOULDER2) - Home in same direction
+      //    - State(SHOULDER3) - Home in opposite direction
       //
       //
-      //  - State(30) - Final return state
+      //  - State(DONE) - Final return state
       //+----------------------------------------------------------------+
 
 
@@ -140,162 +159,141 @@ reactor HomeController(sample_period: time = 15 ms) {
     //    Helps simplify the code
     for (int i=0; i<7; i++) {
       SEA_trig[i] = (sea_pos[i]->value > SEA_limits[i])? 1:
-                    (sea_pos[i]->value < -SEA_limits[i])? -1:
-                    0;
+                    (sea_pos[i]->value < -SEA_limits[i])? -1: 0;
       rpos[i] = current_pos[i]->value - ref[i];
     }
-
-    // printf("tr1: %d, tr2: %d\r\n", SEA_trig[3], SEA_trig[4]);
 
 
     if (_is_home == 0) {
       switch (home_state) {
-
         // + ---------------------------------------------------- +
-        // | Home joint module 0 (motors 5, 6)
+        // | Home joint module WRIST
         // + ---------------------------------------------------- +
-        case 00:           // Check if we want to home this module
-          printf("[HOME] Home module 0\r\n");
-          home_state = home_stage[0]? 01:10;
+        case WRIST0:           // Check if we want to home this module
+          printf("[HOME] Home module WRIST\r\n");
+          home_state = home_stage[0]? WRIST1:ELBOW0;
           break;
-        case 01:           //
-          self->home_speed[5] = -10;
-          self->home_speed[6] = 10;
-          if (SEA_trig[5] == 1 && SEA_trig[6] == -1 ) {
-            printf("    [H0] Home step 1 done\r\n");
+        case WRIST1:           //
+          self->home_speed[5] = 10;
+          self->home_speed[6] = -10;
+          if (SEA_trig[5] == -1 && SEA_trig[6] == 1 ) {
+            printf("    [WRIST] Home step 1 done\r\n");
             self->home_speed[5] = 0;
             self->home_speed[6] = 0;
-            ref[5] = current_pos[5]->value + (1/10) * sea_pos[5]->value - 1.58;
-            ref[6] = current_pos[6]->value + (1/10) * sea_pos[6]->value + 1.58;
-            home_state = 02;
+            ref[5] = current_pos[5]->value - (1/10) * sea_pos[5]->value;
+            ref[6] = current_pos[6]->value - (1/10) * sea_pos[6]->value;
+            home_state = WRIST2;
           }
           break;
-        case 02:           //   Have the motors point up
-          self->home_speed[5] = get_speed(rpos[5], 0);
-          self->home_speed[6] = get_speed(rpos[6], 0);
-          if (absf(rpos[5]) < 0.01 && absf(rpos[6]) < 0.01) {
-            printf("    [H0] Home step 2 done\r\n");
-            home_state = 03;
-          }
-          break;
-        case 03:           //   Then, home with the rotary direction
+        case WRIST2:           //   Then, home with the rotary direction
           self->home_speed[5] = -10 + -get_speed((rpos[6] - rpos[5]), 0);
           self->home_speed[6] = -10 +  get_speed((rpos[6] - rpos[5]), 0);
           if (SEA_trig[5] == 1 && SEA_trig[6] == 1) {
-            printf("    [H0] Home step 3 done\r\n");
-            home_state = 04;
-            ref[5] = current_pos[5]->value + (1/10) * sea_pos[5]->value - 3.05;
-            ref[6] = current_pos[6]->value + (1/10) * sea_pos[6]->value - 3.05;
+            printf("    [WRIST] Home step 2 done\r\n");
+            home_state = WRIST3;
+            ref[5] = current_pos[5]->value - (1/10) * sea_pos[5]->value - 3.22;
+            ref[6] = current_pos[6]->value - (1/10) * sea_pos[6]->value - 3.22;
           }
           break;
-        
-          case 04:           //   Then, home with the rotary direction
+        case WRIST3:           //   Then, home with the rotary direction
           self->home_speed[5] = get_speed(rpos[5], 0) + -get_speed((rpos[6] - rpos[5]), 0);
           self->home_speed[6] = get_speed(rpos[6], 0) +  get_speed((rpos[6] - rpos[5]), 0);
           if (absf(rpos[5]) < 0.01 && absf(rpos[6]) < 0.01) {
-            printf("    [H0] Home step 4 done\r\n");
-            home_state = 10;
+            printf("    [WRIST] Home step 3 done\r\n");
+            home_state = ELBOW0;
             self->home_speed[5] = 0;
             self->home_speed[6] = 0;
           }
           break;
-        
+      
 
 
 
         // + ---------------------------------------------------- +
-        // | Home joint module 1 (motors 3, 4)
+        // | Home joint module ELBOW
         // + ---------------------------------------------------- +
-        case 10:           // Check if we want to home this module
-          printf("[HOME] Home module 1\r\n");
-          home_state = home_stage[1]? 11:20;
+        case ELBOW0:           // Check if we want to home this module
+          printf("[HOME] Home module ELBOW\r\n");
+          home_state = home_stage[1]? ELBOW1:SHOULDER0;
           break;
-        case 11:           //   First home the movement direction
-          self->home_speed[3] = -25;
-          self->home_speed[4] = 25;
+        case ELBOW1:           //   First home the movement direction
+          self->home_speed[3] = -8;
+          self->home_speed[4] = 8;
           if (SEA_trig[3] == 1 && SEA_trig[4] == -1 ) {
-            printf("    [H1] Home step 1 done\r\n");
+            printf("    [ELBOW] Home step 1 done\r\n");
             self->home_speed[3] = 0;
             self->home_speed[4] = 0;
-            ref[3] = current_pos[3]->value - (1/10) * sea_pos[3]->value + 1.58;
-            ref[4] = current_pos[4]->value - (1/10) * sea_pos[4]->value - 1.58;
-            home_state = 12;
+            ref[3] = current_pos[3]->value + (1/10) * sea_pos[3]->value;
+            ref[4] = current_pos[4]->value + (1/10) * sea_pos[4]->value;
+            home_state = ELBOW2;
           }
           break;
-        case 12:           //   Have the motors point up
-          self->home_speed[3] = -get_speed(rpos[3], 0);
-          self->home_speed[4] = -get_speed(rpos[4], 0);
-          if (absf(rpos[3]) < 0.01 && absf(rpos[4]) < 0.01) {
-            printf("    [H1] Home step 2 done\r\n");
-            home_state = 13;
-          }
-          break;
-        case 13:           //   Then, home with the rotary direction
+        case ELBOW2:           //   Have the motors point up
           self->home_speed[3] = -25 +  1.1*get_speed((rpos[4] - rpos[3]), 0);
           self->home_speed[4] = -25 + -1.1*get_speed((rpos[4] - rpos[3]), 0);
           if (SEA_trig[3] == 1 && SEA_trig[4] == 1) {
-            printf("    [H1] Home step 3 done\r\n");
-            home_state = 14;
-            ref[3] = current_pos[3]->value - (1/10) * sea_pos[3]->value + 3.08;
-            ref[4] = current_pos[4]->value - (1/10) * sea_pos[4]->value + 3.08;
+            printf("    [ELBOW] Home step 2 done\r\n");
+            home_state = ELBOW3;
+            ref[3] = current_pos[3]->value + (1/10) * sea_pos[3]->value + 3.22;
+            ref[4] = current_pos[4]->value + (1/10) * sea_pos[4]->value + 3.22;
           }
           break;
-
-        case 14:           //   Then, home with the rotary direction
+        case ELBOW3:           //   Then, home with the rotary direction
           self->home_speed[3] = -get_speed(rpos[3], 0) + 1.2*get_speed((rpos[4] - rpos[3]), 0);
           self->home_speed[4] = -get_speed(rpos[4], 0) +  -1.2*get_speed((rpos[4] - rpos[3]), 0);
           if (absf(rpos[3]) < 0.01 && absf(rpos[4]) < 0.01) {
-            printf("    [H0] Home step 4 done\r\n");
-            home_state = 20;
+            printf("    [ELBOW] Home step 3 done\r\n");
+            home_state = ELBOW4;
             self->home_speed[3] = 0;
             self->home_speed[4] = 0;
           }
           break;
+
+        case ELBOW4:           //   Then, home with the rotary direction
+        home_state = SHOULDER0;
+          break;
         
 
 
 
         // + ---------------------------------------------------- +
-        // | Home joint module 2 (motors 0, 1, 2)
+        // | Home joint module SHOULDER
         // + ---------------------------------------------------- +
-        case 20:           // Check if we want to home this module
-          printf("[HOME] Home module 2\r\n");
-          home_state = home_stage[2]? 21:30;
+        case SHOULDER0:           // Check if we want to home this module
+          printf("[HOME] Home module SHOULDER\r\n");
+          home_state = home_stage[2]? SHOULDER1:DONE;
           break;
-        case 21:           //
-          home_state = 22;
+        case SHOULDER1:           //
+          home_state = SHOULDER2;
           break;
-        case 22:           //
-          home_state = 30;
+        case SHOULDER2:           //
+          home_state = DONE;
           break;
         
-        case 30:           //
+
+
+
+        // + ---------------------------------------------------- +
+        // | Homing complete
+        // + ---------------------------------------------------- +
+        case DONE:           // Homing complete
           printf("[HOME] Homing complete\r\n");
           _is_home = 1;
           break;
-
-
         default:
           _is_home = 1;
       }
 
-
-
-
     } else {
-      home_state = 0;
+      home_state = DONE;
       for(int i=0; i<7; i++) {
         self->home_speed[i] = 0;
       }
     }
-
+    // Set the output
     for(int i=0; i<7; i++) {
       lf_set(motor_speed[i], self->home_speed[i]);
     }
-
-    
-
-
     lf_set(is_home, _is_home);
   =}
 }

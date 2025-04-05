@@ -6,6 +6,7 @@ typedef struct { /* __JOINT_CONFIG_H */
     float Kp;               // proportional control constant
     float Kd;               // differential control constant
     float lim;              // SEA limit
+    float Ks;              // SEA limit
    } Joint_Config;
 
 
@@ -15,13 +16,15 @@ typedef struct { /* __JOINT_CONFIG_H */
 static Joint_Config config0 = {
     40.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    0.3         // lim              - SEA limit
+    0.3,        // lim              - SEA limit
+    40          // Ks
 };
 
 static Joint_Config config1 = {
     40.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    1.2         // lim              - SEA limit
+    1.2,        // lim              - SEA limit
+    40          // Ks
 };
 
 static Joint_Config config2 = {
@@ -38,13 +41,15 @@ static Joint_Config config2 = {
 static Joint_Config config3 = {
     20.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    0.6         // lim              - SEA limit
+    0.6,        // lim              - SEA limit
+    80          // Ks
 };
 
 static Joint_Config config4 = {
     20.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    0.05         // lim              - SEA limit
+    0.05,         // lim              - SEA limit
+    80          // Ks
 };
 // --------------------------------------- Elbow joint --------------------------------------- 
 
@@ -54,13 +59,15 @@ static Joint_Config config4 = {
 static Joint_Config config5 = {
     -10.0,      // Kp               - proportional control constant
     0.0,       // Kd               - differential control constant
-    1.2         // lim              - SEA limit
+    1.2,        // lim              - SEA limit
+    40          // Ks
 };
 
 static Joint_Config config6 = {
     -10.0,      // Kp               - proportional control constant
-    0.0,       // Kd               - differential control constant
-    0.7         // lim              - SEA limit
+    0.0,        // Kd               - differential control constant
+    0.7,        // lim              - SEA limit
+    40          // Ks
 };
 // --------------------------------------- Wrist joint --------------------------------------- 
 

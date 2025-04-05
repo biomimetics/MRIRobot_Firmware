@@ -158,27 +158,50 @@ reactor ROS_Interface {
     // Functions for setting relevant info for seas
     void set_sea_offset_data() {
       for (int i=0; i<7; i++) {
-        scaled_sea_offset[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
-        loopback_offset[i] =   (int)( 1000 * scaled_sea_offset[i]);
+        if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
+          scaled_sea_offset[i] = 0;
+          loopback_offset[i] = 0;
+        } else {
+          scaled_sea_offset[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
+          loopback_offset[i] = (int)(1000 * scaled_sea_offset[i]);
+          
+        }
+        
       }
 
     }
   =}
 
-reaction(startup) {=
-  // Setup UART interfaces
-  MX_DMA_Init();
-  MX_UART1_Init();
+  reaction(startup) {=
+    // Setup UART interfaces
+    MX_DMA_Init();
+    MX_UART1_Init();
 
-  // Prep ROS bridge DMA recieve
-  HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
+    // Prep ROS bridge DMA recieve
+    HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
 
-  for (int i=0; i<7; i++) {
-    scaled_sea_lim[i] = joint_configs[i]->lim;
-    scaled_sea_offset[i] = 0;
-  }
-    
-=}
+    /* Configure Switch pins : PC1 */
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    __HAL_RCC_GPIOH_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, GPIO_PIN_RESET);
+    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
+    for (int i=0; i<7; i++) {
+      scaled_sea_lim[i] = joint_configs[i]->lim;
+      scaled_sea_offset[i] = 0;
+    }
+      
+  =}
 
 
 
@@ -199,9 +222,17 @@ reaction(startup) {=
     for (int i=0; i<7; i++) {
       lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
       lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocityes
-      lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
       lf_set(sea_lim[i], scaled_sea_lim[i]);      // Update sea offset values
+
+
+      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1));
+      if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
+        lf_set(sea_offset[i], 0);      // Update sea offset values
+      } else {
+        lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
+      }
     }
+      
   =}
 
   // Update our current USM position

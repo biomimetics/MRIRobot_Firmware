@@ -21,7 +21,7 @@ reactor PIDController(LIM:float=0.1) {
   input sea_lim: float        // sea error limit
 
 
-  input[3] constants: float;  // Control Constants [Kp, Ki, Kd]
+  input[4] constants: float  // Control Constants [Kp, Ki, Kd, Ks]
 
   state last_pos: float = 0  // to help with state variables
   state prev_time: time = 0

@@ -26,20 +26,7 @@ preamble {=
   #endif /* __SEA_MODE_ENUM */
 =}
 
-reactor SEAController(
-    // Control constants
-    Ks: float = 40   // SEA control constant
-
-    // SEA transition values
-    // SEA_LIM_P: float = 0.2,
-    // SEA_LIM_D: float = 100,
-
-    // SEA passthrough values
-    // LIM: float = 0.18,
-    // CHANGE_P: float = 0.2,
-    // CHANGE_D: float = 0.1
-
-    ) {
+reactor SEAController {
   input current_pos: float    // current position
   input sea_pos: float        // Current SEA position
   input target_pos: float     // Target position
@@ -48,7 +35,7 @@ reactor SEAController(
   input sea_lim: float        // SEA error limit
 
 
-  input[3] constants: float;  // Control Constants [Kp, Kd, Ki]
+  input[4] constants: float  // Control Constants [Kp, Kd, Ki]
 
   output out: float
   output pos_joint: float
@@ -64,7 +51,7 @@ reactor SEAController(
   state cycle_count: int = 0
   state print_data: bool = true
 
-  force_control = new FFBController(Kp=Ks)
+  force_control = new FFBController()
   pos_control = new PIDController()
   
   current_pos -> pos_joint
@@ -79,6 +66,7 @@ reactor SEAController(
   current_pos -> pos_control.current_pos
   sea_pos -> pos_control.sea_pos
   target_pos -> pos_control.target_pos
+  constants -> force_control.constants
   constants -> pos_control.constants
   sea_offset -> pos_control.sea_offset
   sea_lim -> pos_control.sea_lim

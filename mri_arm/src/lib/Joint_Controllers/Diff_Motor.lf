@@ -47,10 +47,12 @@ reactor Diff_Motor (
         lf_set(control_u0.constants[0], motor_configs[self->motor_ID0]-> Kp);
         lf_set(control_u0.constants[1], motor_configs[self->motor_ID0]-> Kd);
         lf_set(control_u0.constants[2], 0);
+        lf_set(control_u0.constants[3], motor_configs[self->motor_ID0]-> Ks);
 
         lf_set(control_u1.constants[0], motor_configs[self->motor_ID1]-> Kp);
         lf_set(control_u1.constants[1], motor_configs[self->motor_ID1]-> Kd);
         lf_set(control_u1.constants[2], 0);
+        lf_set(control_u1.constants[3], motor_configs[self->motor_ID1]-> Ks);
         
     =}
 
