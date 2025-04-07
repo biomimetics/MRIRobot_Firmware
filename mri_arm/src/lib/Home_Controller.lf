@@ -65,7 +65,7 @@ reactor HomeController(sample_period: time = 15 ms) {
     static int printcnt_lim = 20;
 
     volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
-    static float SEA_limits[7] = {0, 0, 0, 1.6, 1.6, 0.6, 0.6};
+    static float SEA_limits[7] = {0, 0, 0, 1.8, 1.8, 0.6, 0.6};
     static int SEA_trig[7] = {0, 0, 0, 0, 0, 0, 0};
     static float ref[7] = {0, 0, 0, 0, 0, 0, 0};
     static float rpos[7] = {0, 0, 0, 0, 0, 0, 0};

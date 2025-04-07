@@ -77,7 +77,7 @@ reactor SEAController {
 
     float SEA_LIM_P = sea_lim->value;
     float SEA_LIM_D = sea_lim->value * 100;
-    float m = 0.8;
+    float m = 0.5;
 
     // Any necessary operations we have here
     self->sea_value = (1.0 - m)*self->sea_value + m*(sea_pos->value - sea_offset->value*10);
