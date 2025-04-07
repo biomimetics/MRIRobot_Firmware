@@ -16,8 +16,8 @@ typedef struct { /* __JOINT_CONFIG_H */
 static Joint_Config config0 = {
     40.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    0.3,        // lim              - SEA limit
-    40          // Ks
+    1.2,        // lim              - SEA limit
+    10          // Ks
 };
 
 static Joint_Config config1 = {
@@ -30,7 +30,8 @@ static Joint_Config config1 = {
 static Joint_Config config2 = {
     40.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    1.4         // lim              - SEA limit
+    1.4,        // lim              - SEA limit
+    40          // Ks
 };
 // --------------------------------------- Base joint --------------------------------------- 
 
@@ -41,14 +42,14 @@ static Joint_Config config2 = {
 static Joint_Config config3 = {
     20.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    1.0,        // lim              - SEA limit
+    1.4,        // lim              - SEA limit
     80          // Ks
 };
 
 static Joint_Config config4 = {
     20.0,       // Kp               - proportional control constant
     10.0,       // Kd               - differential control constant
-    1.0,         // lim              - SEA limit
+    1.4,        // lim              - SEA limit
     80          // Ks
 };
 // --------------------------------------- Elbow joint --------------------------------------- 

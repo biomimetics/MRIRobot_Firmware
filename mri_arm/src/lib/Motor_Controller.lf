@@ -113,6 +113,14 @@ reactor MotorController(refresh_period: time = 5 ms) {
     control_j1.sea_lim,
     control_j2.sea_lim
 
+  reaction(startup) -> control_u0.constants{=
+    // Control Constants [Kp, Kd, Ki]
+    lf_set(control_u0.constants[0], joint_configs[0]-> Kp);
+    lf_set(control_u0.constants[1], joint_configs[0]-> Kd);
+    lf_set(control_u0.constants[2], 0);
+    lf_set(control_u0.constants[3], joint_configs[0]-> Ks);
+  =}
+
 
   // +----------------------------------------------------------------+
   // | MUX between the different target modes
