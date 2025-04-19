@@ -67,7 +67,8 @@ static Motor_Config motor3_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     13.0,       // sea_gear_ratio   - sea motor gear ratio
-    -2,      // sea_offset       - sea reset offset
+    2,       // sea_offset       - sea reset offset
+    // -1.5,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     12.0,       // gear_ratio       - motor gear box gear ratio
 };
@@ -79,7 +80,8 @@ static Motor_Config motor4_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     13.0,       // sea_gear_ratio   - sea motor gear ratio
-    1.45,        // sea_offset       - sea reset offset
+    -1.5,         // sea_offset       - sea reset offset
+    // 2,         // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     12.0,       // gear_ratio       - motor gear box gear ratio
 };
@@ -95,7 +97,7 @@ static Motor_Config motor5_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotati--1---on
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
-    -0.2,       // sea_offset       - sea reset offset
+    0.3,        // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     52.0/16.0,  // gear_ratio       - motor gear box gear ratio
 };
@@ -107,7 +109,7 @@ static Motor_Config motor6_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder count per rotation
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
-    0.3,         // sea_offset       - sea reset offset
+    -0.2,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     52.0/16.0,  // gear_ratio       - motor gear box gear ratio
 };
