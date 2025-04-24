@@ -27,7 +27,7 @@ static Motor_Config motor0_config = {
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // qdec_cpr         - motor encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
-    0,       // sea_offset       - sea reset offset
+    -0.5,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
     21.0,       // gear_ratio       - motor gear box gear ratio
 };

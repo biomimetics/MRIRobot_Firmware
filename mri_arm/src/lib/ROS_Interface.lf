@@ -30,8 +30,8 @@ reactor ROS_Interface {
   output[7] sea_lim: float
   output[7] target_state: int
 
-  timer trigger_send(0 ms, 50 ms)
-  timer trigger_update(0, 50 ms)
+  timer trigger_send(0 ms, 20 ms)
+  timer trigger_update(0, 20 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
