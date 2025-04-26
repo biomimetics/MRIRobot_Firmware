@@ -202,9 +202,11 @@ main reactor {
     reaction(switch_motor) {=
       if (self->count == 0) {
         self->count = 1;
+        printf("\nSTOP\r\n");
       } else if (self->count == 1) {
         self->count = 2;
       } else if (self->count == 2) {
+        printf("\n\nSTOP\r\n");
         self->count = 3;
       } else if (self->count == 3) {
         self->count = 4;
