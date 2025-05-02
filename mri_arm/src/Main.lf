@@ -88,7 +88,7 @@ main reactor {
   =}
   
   timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
-  timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
+  timer switch_motor(0 ms, 3000 ms)     // Switch moto position state
   state count: int = 1
 
   qdec = new QDEC()                           // FPGA-based QDEC Encoders
@@ -186,8 +186,8 @@ main reactor {
     // +-----------------------------------------------------------------------+
     reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_mode {=
       for (int i=0; i<7; i++) {
-        // lf_set(motor_controller.target_sel[i], MODE_POS);   // Position control
-        lf_set(motor_controller.target_sel[i], MODE_VEL);   // Velocity control
+        lf_set(motor_controller.target_sel[i], MODE_POS);   // Position control
+        // lf_set(motor_controller.target_sel[i], MODE_VEL);   // Velocity control
       }
 
       lf_set(motor_controller.target_mode, MODE_INT);   // Internal control moder
@@ -210,6 +210,8 @@ main reactor {
         self->count = 3;
       } else if (self->count == 3) {
         self->count = 4;
+      } else if (self->count == 4) {
+        self->count = 5;
       } else {
         self->count = 0;
       }
@@ -221,7 +223,7 @@ main reactor {
       HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, self->count == 0);
       if (self->count == 0) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_pos_int[i], 10);
+          lf_set(motor_controller.target_pos_int[i], 0.5);
           lf_set(motor_controller.target_vel_int[i], 40);
         }
       } else if (self->count == 1) {
@@ -231,7 +233,7 @@ main reactor {
         }
       } else if (self->count == 2) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_pos_int[i], 10);
+          lf_set(motor_controller.target_pos_int[i], 0.5);
           lf_set(motor_controller.target_vel_int[i], 40);
         }
       } else if (self->count == 3) {
@@ -241,7 +243,7 @@ main reactor {
         }
       } else if (self->count == 4) {
         for (int i=0; i<7; i++) {
-          lf_set(motor_controller.target_pos_int[i], 10);
+          lf_set(motor_controller.target_pos_int[i], 0.5);
           lf_set(motor_controller.target_vel_int[i], 40);
         }
       } else {

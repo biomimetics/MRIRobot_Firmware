@@ -84,7 +84,7 @@ def listener(STM32_serial, file_name):
     
 
 # Script to try and connect to STM32
-known_hosts = ["D30JKY57", "DU0D4EM2"]
+known_hosts = ["D30JKY57", "DU0D4EM2", "D30J4NS6"]
 def getHost():
   print("Attempting to connect to STM32 Host")
   for host in known_hosts:

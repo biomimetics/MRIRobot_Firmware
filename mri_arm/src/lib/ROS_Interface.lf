@@ -27,8 +27,8 @@ reactor ROS_Interface {
   output[7] sea_lim: float
   output[7] target_state: int
 
-  timer trigger_send(0 ms, 50 ms)
-  timer trigger_update(0, 50 ms)
+  timer trigger_send(0 ms, 30 ms)
+  timer trigger_update(0, 30 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
@@ -203,7 +203,7 @@ reactor ROS_Interface {
   // Update our current USM position
   reaction(current_joint) {=
     for (int i=0; i<7; i++) {
-      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
+      enc_data[i] = (int)(current_joint[i]->value * 10000) * dir_offsets[i];
     }
   =}
 
