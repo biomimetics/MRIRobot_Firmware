@@ -203,7 +203,7 @@ reactor ROS_Interface {
   // Update our current USM position
   reaction(current_joint) {=
     for (int i=0; i<7; i++) {
-      enc_data[i] = (int)(current_joint[i]->value * 10000) * dir_offsets[i];
+      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
     }
   =}
 
