@@ -12,6 +12,15 @@ BUILD_DIR = bin
 SRC_GEN = src-gen
 INCL = include
 
+UNAME_S := $(shell uname -s)
+OPENOCD_PATH 		:= 
+	ifeq ($(UNAME_S),Darwin) 
+		OPENOCD_PATH = /Users/$(USER)/openocd
+	endif
+	ifeq ($(UNAME_S),Linux)
+		OPENOCD_PATH = /home/$(USER)/openocd
+	endif
+
 #######################################
 # clean up
 #######################################
@@ -43,10 +52,9 @@ build_test:
 # flash the controller
 #######################################
 just_flash:
-	openocd -f /Users/$(USER)/openocd/tcl/interface/stlink.cfg -f /Users/$(USER)/openocd/tcl/target/stm32f4x.cfg -c "program $(BUILD_DIR)/$(TARGET).elf verify reset exit"
-
-flash: build_dev
-	openocd -f /Users/$(USER)/openocd/tcl/interface/stlink.cfg -f /Users/$(USER)/openocd/tcl/target/stm32f4x.cfg -c "program $(BUILD_DIR)/$(TARGET).elf verify reset exit"
+	openocd -f $(OPENOCD_PATH)/tcl/interface/stlink.cfg -f $(OPENOCD_PATH)/tcl/target/stm32f4x.cfg -c "program $(BUILD_DIR)/$(TARGET).elf verify reset exit"
+	
+flash: build_dev just_flash	
 
 
 
