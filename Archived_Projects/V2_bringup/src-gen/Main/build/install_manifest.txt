@@ -1,1 +1,0 @@
-/Users/naichenzhao/Desktop/MRIRobotProject/MRIRobot/Firmware/V2_bringup/bin/Main.elf
