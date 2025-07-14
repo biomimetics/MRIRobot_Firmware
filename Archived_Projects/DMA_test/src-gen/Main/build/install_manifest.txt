@@ -1,1 +1,0 @@
-/Users/naichenzhao/Desktop/BML/MRIRobotProject/MRIRobot/Firmware/DMA_test/bin/Main.elf
