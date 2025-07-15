@@ -1,72 +1,71 @@
 Pinouts IO used for STM32F446 nucleo-64 (stm32 dev board) for MRI robot arm control
 
-Not yet assigned: PA12, PB10, PB12, PC8-PC13
-Assigned: 2 quadrature decoder inputs, 1 DAC, 8 PWM output, 2 stepper motor pulse frequency, 1 HX711 load cell
+Not yet assigned: 
+Assigned: 
 
 
 Chip 	IO	Function	ST Morpho connector
 PA0		UART4TX			CN7-28 
-PA1		UART4RX		CN7-30 
-PA2		USART2_TX		-					-
-PA3		USART2_RX		-
-PA4		Home0			CN7-32
-***PA5		DAC2			*CONFLICT with LD2* ***
+PA1		UART4RX			CN7-30 
+PA2		-				CN10-35					-
+PA3		-				CN10-37
+PA4		Home0			CN7-32		connection to future homing switch on robot
+***PA5	U_Dir1			*CONFLICT with LD2* ***
 PA5		LD2 (green led)	CN10-11		
 *** PA6 and PA7 are open drain, and need 2K pullup resistor to 3.3 or 5V
-PA6		TIM13_CH1		CN10-13	pulse frequency output #1 (Step motor 1)
-PA7		TIM14_CH1		CN10-15	pulse frequency output #2
-PA8		TIM1_CH1		CN10-23	used for PWM1 out
-PA9		TIM1_CH2		CN10-21	used for PWM2 out
-PA10	TIM1_CH3		CN10-33	used for PWM3 out
-PA11	TIM1_CH4		CN10-14	used for PWM4 out
-
-PA12	GPIOA_12		CN10-12 digital output 1
+PA6		U_Dir2			CN10-13	
+PA7		Home3			CN10-15	pulse frequency output #2
+PA8		Home4			CN10-23	
+PA9		UART1TX			CN10-21		connection to ROS computer on J4
+PA10	UART1RX			CN10-33		connection to ROS computer on J4
+PA11	Home5			CN10-14	
+PA12	Home6			CN10-12 
 
 PA13	JTMS-SWDIO		JTAG test mode select needed for debugger 1/5
 PA14	JTCK-SWCLK		JTAG Test clock needed for debugger 2/5
-PA15	JTDI/LED3			JTAG test data input needed for debugger 3/5
+PA15	JTDI/LED3		JTAG test data input needed for debugger 3/5
 
 ***** GPIO PORT B ****
 PB0		LED2			CN7-34
-PB1		ADC12_IN9		CN10-24
-PB2 	TIM2_CH4		CN10-22	used for HX711 PD_SCK
-
+PB1		U_En0			CN10-24	Ultrasonic Motor 0 enable
+PB2 	U_En1			CN10-22	
+		 
+PB3		U_En2			CN10-31
 PB3 	JTDO/TRACE		JTAG Test Data Output needed for debugging 4/5
+
+PB4		U_PWM0			CN10-27	PWM-> DA for U_Ana0 for ultrasonic motor 0
 PB4		NJTRST			JTAG Test nReset needed for debugging 5/5
-PB5		GPIOB_5 Input 	CN10-29=CN9-5 used for HX711 #1 DOUT
 
-PB6 	TIM4_CH1		CN10-17	used for PWM5 out
+PB5		U_PWM1		 	CN10-29
+PB6 	U_PWM4			CN10-17	
 PB7 	U_PWM5			CN7-21	
-PB8 	TIM4_CH3		CN10-3	used for PWM7 out
-PB9 	TIM4_CH4		CN10-5	used for PWM8 out
-
-PB10	GPIOB_10		CN10-25 Quad encoder 5A index
+PB8 	U_PWM6			CN10-3	
+PB9 	U_En3			CN10-5	
+PB10	U_En4			CN10-25 
 PB11	no connection
-PB12	GPIOB_12		CN10-16	Quad encoder 3 index  
-
-*** PB13, PB14, PB15 are open drain, and need 2K pullup resistor to 3.3 or 5V
-PB13	GPIOB_13		CN10-30	(step motor 1 direction)
-PB14	GPIOB_14		CN10-28	(step motor 2 direction)
-PB15	GPIOB_15		CN10-26	Step motor enable
+PB12	U_En5			CN10-16	
+PB13	U_En6			CN10-30	
+PB14	U_Dir6			CN10-28	
+PB15	U_Dir5			CN10-26	
 
 ***** GPIO PORT C ****
-PC0		ADC123_IN10		CN7-38
-PC1		ADC123_IN11		CN7-36
-PC2		ADC123_IN12		CN7-35
-PC3		ADC123_IN13		CN7-37
-PC4		ADC123_IN14		CN10-34
-PC5		ADC123_IN15		CN10-6
+PC0		SW0				CN7-38
+PC1		SW1				CN7-36
+PC2		SW2				CN7-35
+PC3		SW3				CN7-37
+PC4		U_Dir3			CN10-34
+PC5		U_Dir4			CN10-6
 
-PC6		TIM3_CH1		CN10-4	quadrature INA (also TIM8_CH1)
-PC7		TIM3_CH2		CN10-19	quadrature INB (also TIM8_CH2)
-PC8		GPIOC_8			CN10-2 digital output 2 (also TIM8_CH3)
-PC9		GPIOC_9			CN10-1 digital output 3 (also TIM8_CH4)
+PC6		UART6TX			CN10-4	
+PC7		UART6RX			CN10-19	
+PC8		U_PWM2			CN10-2 
+PC9		U_PWM3			CN10-1 
 
-PC10	UART3TX			CN7-1
-PC11	UART3RX			CN7-2
+PC10	UART3TX			CN7-1		FPGA: encoder 
+PC11	UART3RX			CN7-2		 FPGA: encoder DMA
 PC12	UART5TX			CN7-3
 
-PC13	U_Dir0		CN7-23	
+PC13	U_Dir0			CN7-23	USM 0 direction control
 
 PC14	Home1?		CN7-25	used by low speed clock
 PC15	Home2?		CN7-27	used by low speed clock
@@ -77,18 +76,6 @@ PH1		LED0		CN7-31
 
 **************************************
 Timers used:
-TIM1: PWM1-4  (Advanced timer)
-TIM2: PD_SCK for HX711 using OnePulse mode to generate 40 us pulse CH4, PB2 (32 bit GP timer)
-TIM3: quadrature decoder input (16 bit GP timer)
-TIM4: PWM5-8 (16 bit GP timer)
-TIM5: quadrature decoder input (32 bit GP timer)
-TIM6: open	basic timer
-TIM7: open	basic timer
-TIM8: open	advanced timer
-TIM9: open	2 channel timer
-TIM10: open 	1 channel GP timer
-TIM11: open 	1 channel GP timer
-TIM12: open	2 channel timer
-TIM13, TIM14 pulse frequency output for stepper motor control (1 channel GP timer)
+
 
 	
