@@ -14,7 +14,7 @@ PA4		Home0			CN7-32		connection to future homing switch on robot
 PA5		LD2 (green led)	CN10-11		
 *** PA6 and PA7 are open drain, and need 2K pullup resistor to 3.3 or 5V
 PA6		U_Dir2			CN10-13	
-PA7		Home3			CN10-15	pulse frequency output #2
+PA7		Home3			CN10-15	
 PA8		Home4			CN10-23	
 PA9		UART1TX			CN10-21		connection to ROS computer on J4
 PA10	UART1RX			CN10-33		connection to ROS computer on J4
@@ -49,9 +49,9 @@ PB14	U_Dir6			CN10-28
 PB15	U_Dir5			CN10-26	
 
 ***** GPIO PORT C ****
-PC0		SW0				CN7-38
-PC1		SW1				CN7-36
-PC2		SW2				CN7-35
+PC0		SW0				CN7-38		1 for Warm Boot  0 for Cold boot
+PC1		SW1				CN7-36		0: set SEA offset from ROS, 1: set SEA offset to zero.
+PC2		SW2				CN7-35		toggle qdec enable
 PC3		SW3				CN7-37
 PC4		U_Dir3			CN10-34
 PC5		U_Dir4			CN10-6
@@ -72,7 +72,7 @@ PC15	Home2?		CN7-27	used by low speed clock
 
 PD2		UART5RX		CN7-4
 PH0		LED1		CN7-29
-PH1		LED0		CN7-31
+PH1		LED0		CN7-31	used for showing state of pin PC1 switch
 
 **************************************
 Timers used:
