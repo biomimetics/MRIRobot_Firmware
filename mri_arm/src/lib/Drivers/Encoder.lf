@@ -127,6 +127,8 @@ reactor QDEC(sample_period: time = 5 ms) {
     }
 
     // Get values for SEA encoders
+    if (print_enc && printcnt>=printcnt_lim) 
+    {  printf("Encoder.lf: ");}  
     for (int i=0; i<4; i++) {
       // 0.5644 = 25.4/45
       float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr );

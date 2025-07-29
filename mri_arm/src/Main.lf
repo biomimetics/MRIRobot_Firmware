@@ -8,7 +8,7 @@ target C {
 
 import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
-import HomeController from "lib/Home_Controller.lf"
+# import HomeController from "lib/Home_Controller.lf"
 import MotorController from "lib/Motor_Controller.lf"
 import ROS_Interface from "lib/ROS_Interface.lf"
 
@@ -16,7 +16,7 @@ preamble {=
   #include <stdio.h>
   #include "stm32f4xx_hal.h"
   #include "stm32_startup.h"
-=}
+  =}
 
 // Import and/or declare reactor classes.
 main reactor {
@@ -121,8 +121,16 @@ main reactor {
 
 
   initial mode STARTUP {
-    reaction(sys_tick) -> qdec.reset_qdec, reset(RUN), reset(HOME) {=
-      lf_set(qdec.reset_qdec, true);
+    reaction(sys_tick) -> qdec.reset_qdec, reset(SAFE), reset(RUN), reset(HOME) {=
+      lf_set(qdec.reset_qdec, true); // reset qdec to zero for USM joints
+      printf("\r\n");
+      printf("==============================\r\n");
+      printf("July 29, 2025\r\n");
+      printf("==== [Startup: Safe velocity control only, no encoders] ====\r\n");
+      printf("==============================\r\n\r\n");
+      lf_set_mode(SAFE);
+
+     /* 
       if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0)) {
         printf("\r\n");
         printf("==============================\r\n");
@@ -135,8 +143,8 @@ main reactor {
         printf("==== [Startup: Cold Boot] ====\r\n");
         printf("==============================\r\n\r\n");
         lf_set_mode(HOME);
-
       }
+        */
     =}
 
   }
@@ -174,6 +182,31 @@ main reactor {
         lf_set(motor_controller.target_mode, MODE_INT);                   // Set source as internal
         lf_set(motor_controller.target_sel[i], MODE_VEL);                 // Set the mode as velocity control
         lf_set(motor_controller.target_vel_int[i], target_speed[i]);      // Set the target velocity
+      }
+    =}
+  }
+
+  // safe run state for velocity only
+  mode SAFE {
+    // +-----------------------------------------------------------------------+
+    // | Set the motor control values
+    // |    - Switch  to velocity control
+    // |    - Switch  to external control
+    // +-----------------------------------------------------------------------+
+    reaction(sys_tick) -> motor_controller.target_sel, motor_controller.target_mode {=
+      for (int i=0; i<7; i++) {
+        //lf_set(motor_controller.target_sel[i], MODE_POS);   // Position control
+        lf_set(motor_controller.target_sel[i], MODE_VEL);   // Velocity control
+      }
+
+      // lf_set(motor_controller.target_mode, MODE_INT);   // Internal control moder
+      lf_set(motor_controller.target_mode, MODE_EXT);   // External control moder
+    =}
+// Set the internal target position and/or velocity
+    reaction(sys_tick) -> motor_controller.target_pos_int, motor_controller.target_vel_int {=
+      for (int i=0; i<7; i++) {
+        lf_set(motor_controller.target_pos_int[i], 0);
+        lf_set(motor_controller.target_vel_int[i], 0);
       }
     =}
   }
