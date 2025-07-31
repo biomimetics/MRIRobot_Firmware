@@ -132,6 +132,7 @@ reactor ROS_Interface {
 // add test data function to simulate ROS interface
     void RxCallbackTest() {
       rx_buffer[0] = 'v';
+      HAL_UART_RxCallback1();
     }
 
 
@@ -160,7 +161,7 @@ reactor ROS_Interface {
 
       if (print_ros)  {
         printf("got [JOINT VEL]: \r\n");
-        // print_resp(scaled_joint_vel);
+        print_resp(scaled_joint_vel);
       }
     }
 

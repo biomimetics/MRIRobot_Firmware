@@ -27,7 +27,7 @@ reactor USM {
 
     static int print_usm = true;
     static int printcnt = 0;
-    static int printcnt_lim = 200;
+    static int printcnt_lim = 500;
 
     static void MX_TIM3_Init(void) {
       TIM_ClockConfigTypeDef sClockSourceConfig = {0};
