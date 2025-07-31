@@ -32,6 +32,7 @@ reactor ROS_Interface {
 
   timer trigger_send(0 ms, 20 ms)
   timer trigger_update(0, 20 ms)
+  timer trigger_test(0, 2000 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
@@ -114,7 +115,7 @@ reactor ROS_Interface {
     // | UART DMA Callback functions
     // +---------------------------------------------------+
 
-    // UART recieve callback
+    // UART receive callback
     void HAL_UART_RxCallback1() {
       if (rx_buffer[0] == 'p') {              // Change joint position target
         set_joint_pos_data();
@@ -125,9 +126,14 @@ reactor ROS_Interface {
       } else {
         printf("Got bad data\r\n");
       }
-
       HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
     }
+
+// add test data function to simulate ROS interface
+    void RxCallbackTest() {
+      rx_buffer[0] = 'v';
+    }
+
 
     // UART transmit callback
     void HAL_UART_TxCallback1() {
@@ -206,7 +212,11 @@ reactor ROS_Interface {
       
   =}
 
-
+  reaction(trigger_test) {=
+    printf("ROS_Interface trigger_update\r\n");
+    RxCallbackTest();
+   
+  =}
 
   // Send current state over the bridge
   reaction(trigger_send) {=

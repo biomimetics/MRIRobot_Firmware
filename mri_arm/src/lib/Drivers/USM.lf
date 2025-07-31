@@ -25,6 +25,10 @@ reactor USM {
     volatile float USM_LIMIT = 0.06;
     volatile int en_usm;
 
+    static int print_usm = true;
+    static int printcnt = 0;
+    static int printcnt_lim = 200;
+
     static void MX_TIM3_Init(void) {
       TIM_ClockConfigTypeDef sClockSourceConfig = {0};
       TIM_MasterConfigTypeDef sMasterConfig = {0};
@@ -197,11 +201,19 @@ reactor USM {
   reaction(speed) {=
     en_usm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_3) && !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, en_usm);
-
+    
+    if (print_usm && printcnt>=printcnt_lim) {
+        printf("USM speed: ");
+    }
     for (int i=0; i<7; i++) {
       _speed[i] = en_usm? speed[i]->value * motor_configs[i]->dir : 0;
+      if (print_usm && printcnt>=printcnt_lim) {
+          printf("%d  ", _speed[i]);
+      }
     }
-
+    if (print_usm && printcnt>=printcnt_lim) {
+          printf("\n\r");
+    }  
     // Set USM enable values
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    _speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    _speed[1] > USM_LIMIT || _speed[1] < -USM_LIMIT);
@@ -230,6 +242,8 @@ reactor USM {
     TIM4->CCR1 = convSpeed(_speed[4], 4);  // Set period for USM4
     TIM4->CCR2 = convSpeed(_speed[5], 5);  // Set period for USM5
     TIM4->CCR3 = convSpeed(_speed[6], 6);  // Set period for USM6
+
+    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
 
   =}
 

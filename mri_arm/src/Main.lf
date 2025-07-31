@@ -95,7 +95,7 @@ main reactor {
   usm = new USM()                             // Ultrasonic motor controllers
   ros_controller = new ROS_Interface()        // ROS UART Interface
   motor_controller = new MotorController()    // Main Motor driver + controller
-  home_controller = new HomeController()      // Used to home the motors
+  // home_controller = new HomeController()      // Used to home the motors
 
   // Route encoder information to relevant reactors
   qdec.qdec_out -> motor_controller.qdec_pos
@@ -153,8 +153,8 @@ main reactor {
     // +-----------------------------------------------------------------------+
     // | Robot Homing
     // +-----------------------------------------------------------------------+
-    qdec.qdec_out -> home_controller.current_pos
-    qdec.sea_out -> home_controller.sea_pos
+   // qdec.qdec_out -> home_controller.current_pos
+   // qdec.sea_out -> home_controller.sea_pos
     timer home_pulse(50 ms, 100 ms)
     reaction(home_pulse) -> qdec.reset_qdec, reset(RUN) {=
       if (at_home) {
@@ -162,27 +162,30 @@ main reactor {
           target_pos[i] = 0;
         }
         lf_set(qdec.reset_qdec, true);
-        lf_set_mode(RUN);
+     //   lf_set_mode(RUN);
         printf("--- Finished Homing ---\r\n");
       }
     =}
-
+/*
     reaction(home_controller.is_home) {=
       at_home = home_controller.is_home->value;
     =}
-
+ */
+/*
     reaction(home_controller.motor_speed) {=
       for(int i=0; i<7; i++) {
         target_speed[i] = home_controller.motor_speed[i]->value;
       }
     =}
-
+*/
     reaction(sys_tick) -> motor_controller.target_mode, motor_controller.target_sel, motor_controller.target_vel_int {=
       for (int i=0; i<7; i++) {
         lf_set(motor_controller.target_mode, MODE_INT);                   // Set source as internal
         lf_set(motor_controller.target_sel[i], MODE_VEL);                 // Set the mode as velocity control
-        lf_set(motor_controller.target_vel_int[i], target_speed[i]);      // Set the target velocity
+        lf_set(motor_controller.target_vel_int[i], target_speed[i]);
+              // Set the target velocity
       }
+      printf("---  Homing Mode - velocity set---\r\n");
     =}
   }
 
