@@ -1,5 +1,0 @@
-set(HASHSET_SOURCES hashset.c hashset_itr.c)
-
-
-list(TRANSFORM HASHSET_SOURCES PREPEND utils/hashset/)
-list(APPEND REACTORC_SOURCES ${HASHSET_SOURCES})
