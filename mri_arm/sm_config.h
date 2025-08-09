@@ -4,11 +4,12 @@
 #define __SM_CONFIG_H
 
 // Set ModeMachine behavior mode: 0 for IDLE, 1 for HOME, 2 for RUN
-enum mode_enum {
+typedef enum {
     SET_IDLE = 0,
     SET_HOMING = 1,
-    SET_RUN = 2
-  };
+    SET_RUN_POS = 2,
+    SET_RUN_VEL = 3
+  } MODE_ENUM;
 
 #endif /* __SM_CONFIG_H */
 

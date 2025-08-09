@@ -14,6 +14,7 @@ preamble {=
 
 reactor USM {
   input[7] speed: float
+  input force_disable_motor_pins: bool
 
   preamble {=
     TIM_HandleTypeDef htim1;
@@ -198,7 +199,20 @@ reactor USM {
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);   // USM_5, PB8
   =}
 
-  reaction(speed) {=
+  reaction(force_disable_motor_pins) {=
+    if (force_disable_motor_pins->value){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   0);
+      HAL_Delay(1);
+    }
+  =}
+
+  reaction(speed) force_disable_motor_pins {=
     en_usm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_3) && !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, en_usm);
     
@@ -215,36 +229,48 @@ reactor USM {
           printf("\n\r");
     }  
     // Set USM enable values
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    _speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    _speed[1] > USM_LIMIT || _speed[1] < -USM_LIMIT);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    _speed[2] > USM_LIMIT || _speed[2] < -USM_LIMIT);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    _speed[3] > USM_LIMIT || _speed[3] < -USM_LIMIT);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   _speed[4] > USM_LIMIT || _speed[4] < -USM_LIMIT);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   _speed[5] > USM_LIMIT || _speed[5] < -USM_LIMIT);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   _speed[6] > USM_LIMIT || _speed[6] < -USM_LIMIT);
-    HAL_Delay(1);
+    if (force_disable_motor_pins->value){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   0);
+      HAL_Delay(1);
+    }
+    else {
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    _speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    _speed[1] > USM_LIMIT || _speed[1] < -USM_LIMIT);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    _speed[2] > USM_LIMIT || _speed[2] < -USM_LIMIT);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    _speed[3] > USM_LIMIT || _speed[3] < -USM_LIMIT);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   _speed[4] > USM_LIMIT || _speed[4] < -USM_LIMIT);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   _speed[5] > USM_LIMIT || _speed[5] < -USM_LIMIT);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   _speed[6] > USM_LIMIT || _speed[6] < -USM_LIMIT);
+      HAL_Delay(1);
 
-    // Set USM direction values
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   _speed[0] >= 0);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    _speed[1] >= 0);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    _speed[2] >= 0);
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    _speed[3] >= 0);
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    _speed[4] >= 0);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   _speed[5] >= 0);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   _speed[6] >= 0);
-    HAL_Delay(1);
+      // Set USM direction values
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   _speed[0] >= 0);
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    _speed[1] >= 0);
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    _speed[2] >= 0);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    _speed[3] >= 0);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    _speed[4] >= 0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   _speed[5] >= 0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   _speed[6] >= 0);
+      HAL_Delay(1);
 
-    // Set USM speed values
-    TIM3->CCR1 = convSpeed(_speed[0], 0);  // Set period for USM0
-    TIM3->CCR2 = convSpeed(_speed[1], 1);  // Set period for USM1
-    TIM3->CCR3 = convSpeed(_speed[2], 2);  // Set period for USM2
-    TIM3->CCR4 = convSpeed(_speed[3], 3);  // Set period for USM3
-    TIM4->CCR1 = convSpeed(_speed[4], 4);  // Set period for USM4
-    TIM4->CCR2 = convSpeed(_speed[5], 5);  // Set period for USM5
-    TIM4->CCR3 = convSpeed(_speed[6], 6);  // Set period for USM6
+      // Set USM speed values
+      TIM3->CCR1 = convSpeed(_speed[0], 0);  // Set period for USM0
+      TIM3->CCR2 = convSpeed(_speed[1], 1);  // Set period for USM1
+      TIM3->CCR3 = convSpeed(_speed[2], 2);  // Set period for USM2
+      TIM3->CCR4 = convSpeed(_speed[3], 3);  // Set period for USM3
+      TIM4->CCR1 = convSpeed(_speed[4], 4);  // Set period for USM4
+      TIM4->CCR2 = convSpeed(_speed[5], 5);  // Set period for USM5
+      TIM4->CCR3 = convSpeed(_speed[6], 6);  // Set period for USM6
 
-    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
-
+      printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
+    }
+  
   =}
 
 }

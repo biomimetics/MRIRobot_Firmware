@@ -70,8 +70,8 @@ reactor MotorController(refresh_period: time = 5 ms) {
   state target_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
   state target_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
 
-  state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0}
-  state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
+  state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for position control
 
   timer trigger(0, refresh_period)
   control_u0 = new SEAController()

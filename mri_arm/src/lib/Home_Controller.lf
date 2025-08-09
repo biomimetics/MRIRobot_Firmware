@@ -114,10 +114,11 @@ reactor HomeController(sample_period: time = 20 ms) {
   
   =}
 
-  reaction(startup) {=
+  reaction(startup) -> is_home {=
     for (int i=0; i<7; i++) {
       self->home_speed[i] = 0;
     }
+    lf_set(is_home, false); // have is_home set to false by default
   =}
 
   reaction(switch_update) {=
@@ -335,7 +336,7 @@ reactor HomeController(sample_period: time = 20 ms) {
       for(int i=0; i<7; i++) {
         lf_set(motor_speed[i], self->home_speed[i]);
       }
-      lf_set(is_home, bool(_is_home));
+      lf_set(is_home, _is_home);
     }
   =}
 }

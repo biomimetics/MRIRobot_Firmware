@@ -18,37 +18,137 @@ preamble {=
 =}
 
 reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms){
-    input set_mode_change: mode_enum 
+    input set_mode_change: MODE_ENUM 
     input is_homing_finished: bool
 
     output reset_qdec: bool
     output motor_controller_target_posvel_mode: TARGET_SRC // maybe rename this enum type, it's vague
     output[7] motor_controller_target_sel: MOTOR_MODE
     //output[7] motor_controller_target_velocity_external: float // really not sure if we want this one here
-    output[7] motor_controller_target_velocity_internal: float // we should use this to force velocities to zero when idling
+    //output[7] motor_controller_target_velocity_internal: float // we should use this to force velocities to zero when idling
 
     output enable_homing_command: bool
     output enable_motor_command: bool
+    output force_disable_motor_pins: bool
 
     // timer for sending updates depending on the current mode
     timer system_tick(0 ms, refresh_period)
     timer slow_system_tick(0 ms, slow_refresh_period)
 
+    state _is_homing_finished: bool = false
+    state _current_mode: MODE_ENUM = 0 // initially set to idle
+    state _current_mode_name: string = "STARTUP"
+
     preamble {= 
-    void kill_motors(){};
+      void set_power_relay(bool on_or_off){return;};
+      
+
     =}
 
-    method handleModeSwitch(set_mode_enum: int): void {=
-      switch (set_mode_enum) {
+    method handleModeSwitch(set_mode_enum: MODE_ENUM): void {=
+      switch (set_mode_enum->value) {
         case 0: // set mode to idle
+          
+          enableIdleMotorSettings();  
           lf_set_mode(IDLE);
+          printf("Mode set to IDLE!");
+          _current_mode_name->value = "IDLE";
+          
         case 1: // set mode to home
+          printf("Starting mode switch to homing...");
+          setHomingMotorSettings();  
           lf_set_mode(HOME);
-        case 2: // set mode to run
+          printf("Mode set to HOME!");
+          _current_mode_name->value = "HOME";
+        
+        case 2: // set mode to run, use pos control
+          printf("Starting mode switch to running with position control...");
+          if (self->_is_homing_finished){
+            setRunMotorSettings(true);
+            lf_set_mode(RUN);
+            printf("Mode set to RUN!");
+            _current_mode_name->value = "RUN_POS";
+          }
+          else {
+            printf("!!! Homing is not finished! Cannot do position control. Reverting to IDLE mode... !!!");
+            handleModeSwitch(SET_IDLE);
+            return;
+          }
+          
+        case 3: // set mode to run, use vel control
+          printf("Starting mode switch to running with velocity control...");
+          setRunMotorSettings(false);
           lf_set_mode(RUN);
+          _current_mode_name->value = "RUN_VEL";
+          printf("Mode set to RUN!");
       }
-      =}
+      _current_mode->value = set_mode_enum->value;
+      return;
+    =}
 
+    
+    // method for initalizing values when switching into idle mode
+    method enableIdleMotorSettings(force_disable_motor_pins): void {=
+      // allow motor pins to be enabled by USM.lf
+      lf_set(force_disable_motor_pins, true); 
+
+      // Set source as internal to ignore motor commands from ROS
+      lf_set(motor_controller_target_posvel_mode, MODE_INT); 
+
+      for (int i=0; i<7; i++) {
+        // Set each motor mode to velocity control
+        lf_set(motor_controller_target_sel[i], MODE_VEL); 
+        
+      }
+
+      // Disable sending motor or homing commands from their reactors
+      lf_set(enable_motor_command, false);
+      lf_set(enable_homing_command, false);
+      return;
+    =}
+
+    // method for initalizing values when switching into homing mode.
+    method setHomingMotorSettings(): void {=
+      // allow motor pins to be enabled by USM.lf
+      lf_set(force_disable_motor_pins, false); 
+
+      // Set source as internal to ignore motor commands from ROS
+      lf_set(motor_controller_target_posvel_mode, MODE_INT); 
+
+      // Set the mode as velocity control
+      for (int i=0; i<7; i++) {
+        lf_set(motor_controller_target_sel[i], MODE_VEL); 
+      }
+
+      // Set homing and motor controllers to active
+      lf_set(enable_homing_command, true);
+      lf_set(enable_motor_command, true);
+      return;
+    =}
+
+    method setRunMotorSettings(use_pos: bool): void {=
+      // allow motor pins to be enabled by USM.lf
+      lf_set(force_disable_motor_pins, false); 
+
+      // Set source as extneral to follow motor commands from ROS
+      lf_set(motor_controller_target_posvel_mode, MODE_INT); 
+
+      // Set the mode to either position or velocity control
+      for (int i=0; i<7; i++) {
+        if (use_pos){
+          lf_set(motor_controller_target_sel[i], MODE_POS); 
+        }
+        else{
+          lf_set(motor_controller_target_sel[i], MODE_VEL); 
+        }
+      }
+
+      // Disable homing commands and enable motor commands
+      lf_set(enable_homing_command, false);
+      lf_set(enable_motor_command, true);
+      return;
+    =}
+    
     /*##### 
     # Modes
     #####*/
@@ -61,60 +161,43 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     }
 
     mode IDLE {
-      reaction(system_tick){=
-        kill_motors(); // keeps motor pins disabled
+      reaction(slow_system_tick) -> force_disable_motor_pins{=
+        lf_set(force_disable_motor_pins, true); // keeps motor pins disabled, may be redundant
+        set_power_relay(false); // set power relay to off
       =}
 
       reaction updateMode (set_mode_change) -> IDLE, HOME, RUN{=
-        handleModeSwitch(set_mode_change);
+        handleModeSwitch(set_mode_change->value);
       =}
       
     }
     
 
     mode HOME {
-      reaction(system_tick){=
-        kill_motors(); // make sure to keep 
-      =}
+      //reaction(slow_system_tick) -> motor_controller_target_posvel_mode, motor_controller_target_sel {=
+      //  enableHomingMotorSettings()
+      //=}
 
       reaction updateMode (set_mode_change) -> IDLE, HOME, RUN{=
-        handleModeSwitch(set_mode_change);
+        handleModeSwitch(set_mode_change->value);
       =}
-
-      /*
-      timer home_pulse(50 ms, 100 ms)
-      reaction(home_pulse) -> reset_qdec{=
-          if (at_home) {
-            for(int i=0; i<7; i++) {
-              target_pos[i] = 0;
-            }
-            lf_set(reset_qdec, true);
-            printf("--- Finished Homing ---\r\n");
-          }
-        =}
-      */
       
-      reaction(is_homing_finished) {=
+      reaction(is_homing_finished) -> reset_qdec{=
         if (is_homing_finished->value){
+          self->_is_homing_finished = is_homing_finished->value;
           lf_set(reset_qdec, true);
           printf("--- Finished Homing ---\r\n");
-          lf_set_mode(IDLE)
+          handleModeSwitch(SET_IDLE);
         }
       =}
       
-      reaction(slow_system_tick) -> motor_controller_target_posvel_mode, motor_controller_target_sel {=
-        lf_set(motor_controller_target_posvel_mode, MODE_INT); // Set source as internal
-        for (int i=0; i<7; i++) {
-          lf_set(motor_controller_target_sel[i], MODE_VEL); // Set the mode as velocity control
-        }
-
-      =}
+      
     }
 
     mode RUN {
-      reaction(system_tick){=
-        kill_motors(); // make sure to keep 
-      =}
+      //reaction(slow_system_tick){=
+      //  kill_motors(); // make sure to keep 
+      //=}
 
       reaction updateMode (set_mode_change) -> IDLE, HOME, RUN{=
         handleModeSwitch(set_mode_change);
@@ -124,7 +207,6 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     /*##### 
     # Input reactions
     #####*/
-
 
     /*##### 
     # Output reactions

@@ -17,7 +17,7 @@ preamble {=
 
 =}
 
-reactor ROSInterface {
+reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, period_offset: time = 5 ms){
   //input[7] current_pos: float // unused!
   //input[7] joint_pos: float // unused!
   //input[7] sea_pos: float // unused!
@@ -37,13 +37,13 @@ reactor ROSInterface {
   output[7] sea_lim: float
 
   // outputs for sending state changes
-  output set_mode_change: mode_enum
+  output set_mode_change: MODE_ENUM
 
   
 
   // trigger timers
-  timer trigger_send(0 ms, 20 ms)
-  timer trigger_update(0 ms, 20 ms)
+  timer trigger_send(0 ms, send_period)
+  timer trigger_update(period_offset, recieve_period)
   timer trigger_test(0 ms, 2000 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
@@ -144,6 +144,20 @@ reactor ROSInterface {
       HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
     }
 
+    void handle_usbc_recieve() {
+      if (rx_buffer[0] == 'p') {              // Change joint position target
+        set_joint_pos_data();
+      } else if (rx_buffer[0] == 'v') {       // Change joint velocity target
+        set_joint_vel_data();
+      } else if (rx_buffer[0] == 'o') {       // Change joint sea offset
+        set_sea_offset_data();
+      }  else if (rx_buffer[0] == 's') {
+        set_mode_change();
+      } else {
+        printf("Got bad data\r\n");
+      }
+      HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
+    }
 
     // UART transmit callback
     void HAL_UART_TxCallback1() {
@@ -191,6 +205,23 @@ reactor ROSInterface {
       }
     }
 
+    // this function assumes rx_buffer[1] has a char for '0', '1', '2', or '3' for now. Consider changing this. Also may need to make this a reactor method.
+    void set_mode_change() {
+      // rx_buffer[0] == 's'
+      char received_state = rx_buffer[1];
+      switch (received_state) {
+        case '0': // set mode to idle
+          lf_set(set_mode_change, 0); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
+        case '1': // set mode to home
+          lf_set(set_mode_change, 1);
+        case '2': // set mode to run
+          lf_set(set_mode_change, 2);
+        case '3': // set mode to run
+          lf_set(set_mode_change, 3);
+      }
+      return;
+    }
+
     /*##### 
     # helper functions for testing
     #####*/
@@ -204,6 +235,7 @@ reactor ROSInterface {
     }
 
   =}
+
 
   reaction(startup) {=
     // Setup UART interfaces
@@ -275,6 +307,10 @@ reactor ROSInterface {
   /*##### 
     # Output reactions
     #####*/
+
+  reaction(trigger_update) {=
+    handle_usbc_recieve();
+  =}
 
   // Update our target position from most recently recieved
   reaction(trigger_update) -> target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
