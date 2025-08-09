@@ -19,7 +19,9 @@ preamble {=
   #include <stdio.h>
   #include "stm32f4xx_hal.h"
   #include "stm32_startup.h"
+  #include <../../../sm_config.h>
 
+  /*
   #ifndef __MOTOR_MODE_ENUM
   #define __MOTOR_MODE_ENUM
 
@@ -36,11 +38,15 @@ preamble {=
       MODE_EXT = 1U,
     } TARGET_SRC;
 
-  #endif /* __MOTOR_MODE_ENUM */
+  #endif // __MOTOR_MODE_ENUM
+  */
+
 =}
 
 // Import and/or declare reactor classes.
 reactor MotorController(refresh_period: time = 5 ms) {
+  input enable_motor_command: bool
+
   input[7] target_sel: MOTOR_MODE
 
   input[7] target_vel_int: float
@@ -187,9 +193,12 @@ reactor MotorController(refresh_period: time = 5 ms) {
   // +----------------------------------------------------------------+
   // | Set speed output
   // +----------------------------------------------------------------+
-  reaction(trigger, target_sel) -> speed{=
-    // We use this to set either the speed or position of the motors
+  reaction(trigger, target_sel) enable_motor_command -> speed{=
+    if (enable_motor_command){
+      // We use this to set either the speed or position of the motors
     for(int i=0; i<7; i++)
       lf_set(speed[i], (target_sel[i]->value == MODE_POS)? self->speed_posc[i]: self->speed_spc[i]);
+    }
+    // consider adding an else statement to force velocity control and set the target velocities to zero. Mode_Machine should do that anyways.
   =}
 }

@@ -13,26 +13,38 @@ preamble {=
 
   #include <../../../motor_config.h>
   #include <../../../joint_config.h>
+  #include <../../../sm_config.h>
+
 =}
 
-reactor ROS_Interface {
-  input[7] current_pos: float
-  input[7] current_joint: float
-  input[7] current_joint_sea: float
-  
-  input[7] joint_pos: float
-  input[7] sea_pos: float
+reactor ROSInterface {
+  //input[7] current_pos: float // unused!
+  //input[7] joint_pos: float // unused!
+  //input[7] sea_pos: float // unused!
+  //output[7] target_state: int // unused!
 
+  //inputs from motor controller to send back to ROS
+  input[7] current_joint: float // position of joints from usm encoders
+  input[7] current_joint_sea: float // position of seas from sea encoders
+  
+  
+
+  // outputs for sending to motor controller
   output[7] target_pos_ext: float
   output[7] target_vel_ext: float
 
   output[7] sea_offset: float
   output[7] sea_lim: float
-  output[7] target_state: int
 
+  // outputs for sending state changes
+  output set_mode_change: mode_enum
+
+  
+
+  // trigger timers
   timer trigger_send(0 ms, 20 ms)
-  timer trigger_update(0, 20 ms)
-  timer trigger_test(0, 2000 ms)
+  timer trigger_update(0 ms, 20 ms)
+  timer trigger_test(0 ms, 2000 ms)
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
@@ -71,6 +83,7 @@ reactor ROS_Interface {
     // | Init functions
     // +---------------------------------------------------+
 
+    // fast usbc, should be /dev/ttyUSB0 on ros side
     static void MX_UART1_Init(void) {
       huart1.Instance = USART1;
       huart1.Init.BaudRate = 921600;
@@ -96,6 +109,8 @@ reactor ROS_Interface {
     // +---------------------------------------------------+
     // | Helper functions
     // +---------------------------------------------------+
+
+    // UNUSED!
     static float get_target(uint8_t* data) {
       float count = data[0] + (data[1]<<8) + (data[2]<<16) + (data[3]<<24) + (data[4]<<32);
       return count;
@@ -129,20 +144,15 @@ reactor ROS_Interface {
       HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
     }
 
-// add test data function to simulate ROS interface
-    void RxCallbackTest() {
-      rx_buffer[0] = 'v';
-      for (int i = 1; i < 14; i=i+2){
-        rx_buffer[i] = 2; rx_buffer[i+1]=3;
-      }
-      HAL_UART_RxCallback1();
-    }
-
 
     // UART transmit callback
     void HAL_UART_TxCallback1() {
       inFlight = 0;
     }
+
+    /*##### 
+    # helper functions for handling inputs from ROS connection
+    #####*/
 
     // When the rx_buffer command is a [set joint position] command
     void set_joint_pos_data() {
@@ -151,8 +161,8 @@ reactor ROS_Interface {
       }
 
       if (print_ros)  {
-        // printf("got [JOINT POS]: \r\n");
-        // print_resp(scaled_joint_pos);
+        printf("got [JOINT POS]: \r\n");
+        print_resp(scaled_joint_pos);
       }
     }
 
@@ -177,12 +187,22 @@ reactor ROS_Interface {
         } else {
           scaled_sea_offset[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
           loopback_offset[i] = (int)(1000 * scaled_sea_offset[i]);
-          
         }
-        
       }
-
     }
+
+    /*##### 
+    # helper functions for testing
+    #####*/
+    // add test data function to simulate ROS interface
+    void RxCallbackTest() {
+      rx_buffer[0] = 'v';
+      for (int i = 1; i < 14; i=i+2){
+        rx_buffer[i] = 2; rx_buffer[i+1]=3;
+      }
+      HAL_UART_RxCallback1();
+    }
+
   =}
 
   reaction(startup) {=
@@ -222,6 +242,24 @@ reactor ROS_Interface {
    
   =}
 
+  /*##### 
+    # Input reactions
+    #####*/
+
+  // Update our current USM position to send to ROS
+  reaction(current_joint) {=
+    for (int i=0; i<7; i++) {
+      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
+    }
+  =}
+
+  // Update our current sea position to send to ROS
+  reaction(current_joint_sea) {=
+    for (int i=0; i<7; i++) {
+      sea_data[i] = (int)(current_joint_sea[i]->value * 1000);
+    }
+  =}
+
   // Send current state over the bridge
   reaction(trigger_send) {=
     if (!inFlight) {
@@ -234,11 +272,15 @@ reactor ROS_Interface {
     }
   =}
 
+  /*##### 
+    # Output reactions
+    #####*/
+
   // Update our target position from most recently recieved
   reaction(trigger_update) -> target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
     for (int i=0; i<7; i++) {
       lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
-      lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocityes
+      lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocities
       lf_set(sea_lim[i], scaled_sea_lim[i]);      // Update sea offset values
 
 
@@ -250,19 +292,5 @@ reactor ROS_Interface {
       }
     }
       
-  =}
-
-  // Update our current USM position
-  reaction(current_joint) {=
-    for (int i=0; i<7; i++) {
-      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
-    }
-  =}
-
-  // Update our current sea position
-  reaction(current_joint_sea) {=
-    for (int i=0; i<7; i++) {
-      sea_data[i] = (int)(current_joint_sea[i]->value * 1000);
-    }
   =}
 }
