@@ -15,6 +15,7 @@ preamble {=
   #include <../../../joint_config.h>
   #include <../../../sm_config.h>
 
+  /*
   typedef struct mode_status{
     MODE_ENUM current_mode_index;
     bool is_homing_finished;
@@ -24,7 +25,7 @@ preamble {=
     TARGET_SRC motor_controller_internal_external_target_mode;
     MOTOR_MODE[7] motor_controller_target_sel;
   } mode_status;
-
+  */
 =}
 
 reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms){
