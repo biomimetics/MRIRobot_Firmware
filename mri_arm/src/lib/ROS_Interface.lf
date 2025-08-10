@@ -44,7 +44,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
 
 
   // trigger timers
-  timer trigger_send(0 ms, send_period)
+  timer trigger_send(0 ms, send_period) // unused!
   timer trigger_update(period_offset, recieve_period)
   timer trigger_test(0 ms, 2000 ms)
 
@@ -246,6 +246,14 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       
     }
 
+    void handle_usbc_transmit_encoders(){
+      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+            enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
+            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
+            loopback_offset[0], loopback_offset[1], loopback_offset[2], loopback_offset[3], loopback_offset[4], loopback_offset[5], loopback_offset[6]);
+      HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
+    }
+
     // UART transmit callback
     void HAL_UART_TxCallback1() {
       inFlight = 0;
@@ -419,7 +427,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
   =}
 
   // Send current state over the bridge
-  reaction(trigger_send) {=
+  /*
+  reaction(trigger_send) {= // moved to receive_transmit_update reaction
     if (!inFlight) {
       inFlight = 1; // Indicate that we are currently sending data
       int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
@@ -429,15 +438,19 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
     }
   =}
+  */
 
   /*##### 
     # Output reactions
     #####*/
 
-  reaction(trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
+  reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
     // handle receiving new data from ROS
     handle_usbc_receive_to_idle();
 
+    // handle sending back robot's encoder state
+    handle_usbc_transmit_encoders();
+    
     // handle mode changes if they occurr
     if (flag_update_set_mode_change){
       switch (desired_state_char){
@@ -453,8 +466,6 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
         
       flag_update_set_mode_change = false;
     }
-
-    // if handshake from handle_usbc_receive_to_idle is good, set the received motor positions
 
     // set target_poisitons and velocities as well as sea offsets
     for (int i=0; i<7; i++) {
