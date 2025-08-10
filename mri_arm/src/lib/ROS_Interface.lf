@@ -211,13 +211,13 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       char received_state = rx_buffer[1];
       switch (received_state) {
         case '0': // set mode to idle
-          lf_set(set_mode_change, 0); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
+          lf_set(set_mode_change, SET_IDLE); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
         case '1': // set mode to home
-          lf_set(set_mode_change, 1);
+          lf_set(set_mode_change, SET_HOMING);
         case '2': // set mode to run
-          lf_set(set_mode_change, 2);
+          lf_set(set_mode_change, SET_RUN_POS);
         case '3': // set mode to run
-          lf_set(set_mode_change, 3);
+          lf_set(set_mode_change, SET_RUN_VEL);
       }
       return;
     }

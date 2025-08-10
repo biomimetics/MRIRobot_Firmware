@@ -17,6 +17,8 @@ preamble {=
   #include <stdio.h>
   #include "stm32f4xx_hal.h"
   #include "stm32_startup.h"
+
+  
   =}
 
 // Import and/or declare reactor classes.
@@ -121,7 +123,7 @@ main reactor {
   mode_machine.reset_qdec -> qdec.reset_qdec
   mode_machine.enable_motor_command -> motor_controller.enable_motor_command
   mode_machine.enable_homing_command -> home_controller.enable_homing_command
-  mode_machine.motor_controller_target_posvel_mode -> motor_controller.target_mode
+  mode_machine.motor_controller_internal_external_target_mode -> motor_controller.target_mode
   mode_machine.motor_controller_target_sel -> motor_controller.target_sel
   mode_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
 
