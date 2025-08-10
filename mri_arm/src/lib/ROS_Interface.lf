@@ -15,6 +15,9 @@ preamble {=
   #include <../../../joint_config.h>
   #include <../../../sm_config.h>
 
+  #define DMA_TX_BUFFER_SIZE 60
+  #define DMA_RX_BUFFER_SIZE 60
+  #define DMA_RECEIVE_SIZE 15
 =}
 
 reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, period_offset: time = 5 ms){
@@ -57,9 +60,12 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     static int print_ros = true;
 
     // Setup Rx and Tx buffers
-    static uint8_t rx_buffer[60];
-    static uint8_t tx_buffer[60];
+    //static uint16_t dma_receive_size = 15; // moved to preprocessor define statement
 
+    static uint8_t rx_buffer[DMA_RX_BUFFER_SIZE];
+    static uint8_t tx_buffer[DMA_TX_BUFFER_SIZE];
+    bool flag_receive_to_idle_events_not_yet_triggered = true;
+    bool flag_handshake_success = false;
 
     float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1};
 
@@ -127,11 +133,34 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       return ((float) ((int16_t)lower  + (int16_t)(upper<<8)))/1000;
     }
 
+    // assumes that the checksum_index is the last byte in the message
+    bool checkChecksum(int checksum_index){
+      //uint8_t rx_buffer[60]; // recieving buffer
+      int computed_checksum = 0;
+      for (int i = 0; i < checksum_index; i++){
+        computed_checksum += rx_buffer[i];
+      }
+      if (computed_checksum == rx_buffer[checksum_index]){
+        return true;
+      }
+      else
+      {
+        printf("Checksum failed! Expected %d, but computed %d.", rx_buffer[checksum_index], computed_checksum);
+        return false;
+      }
+    }
+
+    void appendChecksum(int message_length){
+      int computed_checksum = 0;
+      
+      return;
+    }
     // +---------------------------------------------------+
     // | UART DMA Callback functions
     // +---------------------------------------------------+
 
     // UART receive callback
+    /*
     void HAL_UART_RxCallback1() {
       if (rx_buffer[0] == 'p') {              // Change joint position target
         set_joint_pos_data();
@@ -144,7 +173,9 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       }
       HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
     }
+    */
 
+    // TODO: depreciate this!
     void handle_usbc_recieve() {
       if (rx_buffer[0] == 'p') {              // Change joint position target
         set_joint_pos_data();
@@ -155,14 +186,49 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       }  else if (rx_buffer[0] == 's') {
         trigger_mode_change();
       } else {
-        printf("Got bad data\r\n");
+        printf("Got unexpected leading character.\r\n");
       }
-      HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
+      
+      // DMA_RECEIVE_SIZE doesn't have to be a constant. There's probably a better way of
+      HAL_UART_Receive_DMA(&huart1, rx_buffer, DMA_RECEIVE_SIZE);
+    }
+
+    void handle_usbc_recieve_to_idle() {
+      if (rx_buffer[0] == 'p') {              // Change joint position target
+          set_joint_pos_data();
+      } 
+      else if (rx_buffer[0] == 'v') {       // Change joint velocity target
+          set_joint_vel_data();
+      } 
+      else if (rx_buffer[0] == 'o') {       // Change joint sea offset
+          set_sea_offset_data();
+      } 
+      else if (rx_buffer[0] == 's') {      // Change high level mode
+          trigger_mode_change();
+      }
+      else if (rx_buffer[0] == 'z'){
+          update_handshake_status();
+      }
+      else {
+        printf("Got unexpected leading character.\r\n");
+      }
+      
+      // if callbacks haven't been triggered yet, start receiving until they get triggered
+      if (flag_receive_to_idle_events_not_yet_triggered){
+        HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+      }
     }
 
     // UART transmit callback
     void HAL_UART_TxCallback1() {
       inFlight = 0;
+    }
+
+    void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+      flag_receive_to_idle_events_triggered = false;
+      RxDataLen = Size; // RxDataLen is the size of the received data, set by the sender
+      HAL_UART_Transmit(&huart1, rx_buffer, RxDataLen, 100); // echos back the received data (useful for debugging and handshaking)
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE); //UART_RX_BUFFER_SIZE);
     }
 
     /*##### 
@@ -241,6 +307,16 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
         */
       //}
       //return;
+    }
+    
+    void update_handshake_status(){
+      if ((rx_buffer[0] == 'z') && (rx_buffer[1] == 1)) {
+            flag_handshake_success = true;
+          }
+          else{
+            flag_handshake_success = false;
+          }
+      return;
     }
 
     /*##### 
@@ -329,11 +405,11 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     # Output reactions
     #####*/
 
-  reaction(trigger_update) -> set_mode_change{=
-    handle_usbc_recieve();
+  reaction(trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
+    // handle receiving new data from ROS
+    handle_usbc_receive_to_idle();
 
-    //flag_update_set_mode_change = true;
-    //desired_state_char = rx_buffer[1];
+    // handle mode changes if they occurr
     if (flag_update_set_mode_change){
       switch (desired_state_char){
         case '0': // set mode to idle
@@ -348,11 +424,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
         
       flag_update_set_mode_change = false;
     }
-    
-  =}
 
-  // Update our target position from most recently recieved
-  reaction(trigger_update) -> target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
+    // if handshake from handle_usbc_receive_to_idle is good, set the received motor positions
     for (int i=0; i<7; i++) {
       lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
       lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocities
@@ -366,6 +439,9 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
         lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
       }
     }
-      
+    // after we set most recently received commands, reset handshake flag back to false to wait for new handshake
+    flag_handshake_success = false;
+    
   =}
+
 }
