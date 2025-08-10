@@ -29,14 +29,14 @@ typedef enum {
     SET_RUN_VEL = 3
   } MODE_ENUM;
 
-typedef struct mode_status{
+typedef struct {
     MODE_ENUM current_mode_index;
     bool is_homing_finished;
     bool enable_homing_command;
     bool enable_motor_command;
     bool force_disable_motor_pins;
     TARGET_SRC motor_controller_internal_external_target_mode;
-    MOTOR_MODE[7] motor_controller_target_sel;
+    MOTOR_MODE motor_controller_target_sel[7];
   } mode_status;
 #endif /* __SM_CONFIG_H */
 

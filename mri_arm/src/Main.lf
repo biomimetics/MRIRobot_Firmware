@@ -18,7 +18,6 @@ preamble {=
   #include "stm32f4xx_hal.h"
   #include "stm32_startup.h"
 
-  
   =}
 
 // Import and/or declare reactor classes.
@@ -118,8 +117,11 @@ main reactor {
 
   ros_controller.sea_offset -> motor_controller.sea_offset
   ros_controller.sea_lim -> motor_controller.sea_lim
+  
+  
   ros_controller.set_mode_change -> mode_machine.set_mode_change
   
+
   mode_machine.reset_qdec -> qdec.reset_qdec
   mode_machine.enable_motor_command -> motor_controller.enable_motor_command
   mode_machine.enable_homing_command -> home_controller.enable_homing_command
@@ -127,9 +129,9 @@ main reactor {
   mode_machine.motor_controller_target_sel -> motor_controller.target_sel
   mode_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
 
-  home_controller.is_home -> mode_machine.is_homing_finished
+  home_controller.is_home -> mode_machine.is_homing_finished after 0;
   home_controller.motor_speed -> motor_controller.target_vel_int
-
+  
   reaction(startup) {=
     // Prep all GPIO values
     MX_GPIO_Init();

@@ -39,7 +39,6 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
   // outputs for sending state changes
   output set_mode_change: MODE_ENUM
 
-  
 
   // trigger timers
   timer trigger_send(0 ms, send_period)
@@ -79,6 +78,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
 
+    bool flag_update_set_mode_change = false;
+    char desired_state_char = '0';
     // +---------------------------------------------------+
     // | Init functions
     // +---------------------------------------------------+
@@ -152,7 +153,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       } else if (rx_buffer[0] == 'o') {       // Change joint sea offset
         set_sea_offset_data();
       }  else if (rx_buffer[0] == 's') {
-        set_mode_change();
+        trigger_mode_change();
       } else {
         printf("Got bad data\r\n");
       }
@@ -206,10 +207,29 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     }
 
     // this function assumes rx_buffer[1] has a char for '0', '1', '2', or '3' for now. Consider changing this. Also may need to make this a reactor method.
-    void set_mode_change() {
+    void trigger_mode_change() {
       // rx_buffer[0] == 's'
+      if ((rx_buffer[1] == '0') || (rx_buffer[1] == '1') || (rx_buffer[1] == '2') || (rx_buffer[1] == '3')){
+        flag_update_set_mode_change = true;
+        desired_state_char = rx_buffer[1];
+      }
+      else{
+        flag_update_set_mode_change = false;
+        desired_state_char = '0';
+      }
+      
+      /*
       char received_state = rx_buffer[1];
       switch (received_state) {
+        case '0': // set mode to idle
+          lf_set(set_mode_change, 0); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
+        case '1': // set mode to home
+          lf_set(set_mode_change, 1);
+        case '2': // set mode to run
+          lf_set(set_mode_change, 2);
+        case '3': // set mode to run
+          lf_set(set_mode_change, 3);
+        
         case '0': // set mode to idle
           lf_set(set_mode_change, SET_IDLE); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
         case '1': // set mode to home
@@ -218,8 +238,9 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
           lf_set(set_mode_change, SET_RUN_POS);
         case '3': // set mode to run
           lf_set(set_mode_change, SET_RUN_VEL);
-      }
-      return;
+        */
+      //}
+      //return;
     }
 
     /*##### 
@@ -308,8 +329,26 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     # Output reactions
     #####*/
 
-  reaction(trigger_update) {=
+  reaction(trigger_update) -> set_mode_change{=
     handle_usbc_recieve();
+
+    //flag_update_set_mode_change = true;
+    //desired_state_char = rx_buffer[1];
+    if (flag_update_set_mode_change){
+      switch (desired_state_char){
+        case '0': // set mode to idle
+          lf_set(set_mode_change, SET_IDLE); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
+        case '1': // set mode to home
+          lf_set(set_mode_change, SET_HOMING);
+        case '2': // set mode to run
+          lf_set(set_mode_change, SET_RUN_POS);
+        case '3': // set mode to run
+          lf_set(set_mode_change, SET_RUN_VEL);
+      }
+        
+      flag_update_set_mode_change = false;
+    }
+    
   =}
 
   // Update our target position from most recently recieved

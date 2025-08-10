@@ -48,7 +48,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
 
     state _is_homing_finished: bool = false // consider depreciating these
     state _current_mode: MODE_ENUM = 0 // consider depreciating these // initially set to idle
-    state _current_mode_name: string = "STARTUP" // consider depreciating these
+    //state _current_mode_name: string = "STARTUP" // consider depreciating these
 
     state staged_mode_status: mode_status = {0, false, false, false, true, 0, {0, 0, 0, 0, 0, 0, 0}}
     state flag_ready_to_update_mode_status: bool = false
@@ -60,7 +60,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
 
     
     method handleModeSwitch(set_mode_enum: MODE_ENUM): void {=
-      switch (set_mode_enum->value) {
+      switch (set_mode_enum) {
         case SET_IDLE: // set mode to idle
           printf("Starting mode switch to idle...");
           enableIdleMotorSettings();  
@@ -94,7 +94,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     =}
     
     // method for initalizing values when switching into idle mode
-    method enableIdleMotorSettings(force_disable_motor_pins): void {=
+    method enableIdleMotorSettings(): void {=
       // allow motor pins to be enabled by USM.lf
       self->staged_mode_status.force_disable_motor_pins = true;
 
@@ -103,7 +103,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
 
       for (int i=0; i<7; i++) {
         // Set each motor mode to velocity control
-        self->staged_mode_status.motor_controller_target_sel[i] = MODE_VEL
+        self->staged_mode_status.motor_controller_target_sel[i] = MODE_VEL;
         
       }
 
@@ -124,7 +124,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
       // Set the mode as velocity control
       for (int i=0; i<7; i++) {
         //lf_set(motor_controller_target_sel[i], MODE_VEL); 
-        self->staged_mode_status.motor_controller_target_sel[i] = MODE_VEL
+        self->staged_mode_status.motor_controller_target_sel[i] = MODE_VEL;
       }
 
       // Set homing and motor controllers to active
@@ -143,39 +143,40 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
       // Set the mode to either position or velocity control
       for (int i=0; i<7; i++) {
         if (use_position_control){
-          self->staged_mode_status.motor_controller_target_sel[i] = MODE_POS
+          self->staged_mode_status.motor_controller_target_sel[i] = MODE_POS;
         }
         else{
-          self->staged_mode_status.motor_controller_target_sel[i] = MODE_VEL
+          self->staged_mode_status.motor_controller_target_sel[i] = MODE_VEL;
         }
       }
 
       // Disable homing commands and enable motor commands
-      lf_set(enable_homing_command, false);
-      lf_set(enable_motor_command, true);
+      self->staged_mode_status.enable_motor_command = true;
+      self->staged_mode_status.enable_homing_command = false;
       return;
     =}
     
-    /*##### 
-    # Modes
-    #####*/
+    
+    //##### 
+    //# Modes
+    //#####
 
     initial mode STARTUP {
       reaction(system_tick) -> IDLE {=
-      lf_set_mode(IDLE);
-    =}
-      
+        lf_set_mode(IDLE);
+      =}
     }
 
     mode IDLE {
-      reaction(slow_system_tick) -> force_disable_motor_pins{=
+      
+      
+      reaction(slow_system_tick) -> force_disable_motor_pins, HOME, RUN{=
         lf_set(force_disable_motor_pins, true); // keeps motor pins disabled, may be redundant
         set_power_relay(false); // set power relay to off
 
+        // this has to be done in a modal reactor, can't be external...
         if (self->flag_ready_to_change_modes){
           switch (self->staged_mode_status.current_mode_index) {
-            case SET_IDLE: // set mode to idle
-              lf_set_mode(IDLE);
             case SET_HOMING: // set mode to home
               lf_set_mode(HOME);
             case SET_RUN_POS: // set mode to run, use pos control
@@ -186,37 +187,35 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
           self->flag_ready_to_change_modes = false;
         }
       =}
-
-      reaction updateMode (set_mode_change) -> IDLE, HOME, RUN{=
+      
+      reaction updateMode (set_mode_change) {=// -> IDLE  HOME, RUN{=
         handleModeSwitch(set_mode_change->value);
       =}
       
     }
     
-
+    
     mode HOME {
-      reaction(slow_system_tick){=
+      
+      reaction(slow_system_tick) -> IDLE{=
         // this has to be done in a modal reactor, can't be external...
         if (self->flag_ready_to_change_modes){
           switch (self->staged_mode_status.current_mode_index) {
             case SET_IDLE: // set mode to idle
               lf_set_mode(IDLE);
-            case SET_HOMING: // set mode to home
-              lf_set_mode(HOME);
-            case SET_RUN_POS: // set mode to run, use pos control
-              lf_set_mode(RUN);
-            case SET_RUN_VEL: // set mode to run, use vel control
-              lf_set_mode(RUN);
+            default:
+              lf_set_mode(IDLE);
           }
           self->flag_ready_to_change_modes = false;
         }
       =}
-
-      reaction updateMode (set_mode_change) -> IDLE, HOME, RUN{=
+      
+      
+      reaction updateMode (set_mode_change){=
         handleModeSwitch(set_mode_change->value);
       =}
       
-      reaction(is_homing_finished) -> reset_qdec{=
+      reaction (is_homing_finished)  -> reset_qdec{=
         if (is_homing_finished->value){
           self->_is_homing_finished = is_homing_finished->value;
           lf_set(reset_qdec, true);
@@ -224,19 +223,17 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
           handleModeSwitch(SET_IDLE);
         }
       =}
-      
-      
+    
     }
 
     mode RUN {
-      reaction(slow_system_tick){=
+      
+      reaction(slow_system_tick) -> IDLE, RUN{=
         // this has to be done in a modal reactor, can't be external...
         if (self->flag_ready_to_change_modes){
           switch (self->staged_mode_status.current_mode_index) {
             case SET_IDLE: // set mode to idle
               lf_set_mode(IDLE);
-            case SET_HOMING: // set mode to home
-              lf_set_mode(HOME);
             case SET_RUN_POS: // set mode to run, use pos control
               lf_set_mode(RUN);
             case SET_RUN_VEL: // set mode to run, use vel control
@@ -246,19 +243,21 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
         }
       =}
 
-      reaction updateMode (set_mode_change) -> IDLE, HOME, RUN{=
-        handleModeSwitch(set_mode_change);
+      reaction updateMode (set_mode_change){=
+        handleModeSwitch(set_mode_change->value);
         
       =}
+        
     }
+    
 
-    /*##### 
-    # Input reactions
-    #####*/
+    //##### 
+    //# Input reactions
+    //#####
 
-    /*##### 
-    # Output reactions
-    #####*/
+    //##### 
+    //# Output reactions
+    //#####
 
     reaction update_mode_status (slow_system_tick) -> enable_homing_command, enable_motor_command, force_disable_motor_pins,
     motor_controller_internal_external_target_mode, motor_controller_target_sel{=
@@ -267,13 +266,14 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
         lf_set(enable_motor_command, self->staged_mode_status.enable_motor_command);
         lf_set(force_disable_motor_pins, self->staged_mode_status.force_disable_motor_pins);
         lf_set(motor_controller_internal_external_target_mode, self->staged_mode_status.motor_controller_internal_external_target_mode);
-        for (int i=0; i<7, i++){
+        for (int i=0; i<7; i++){
           lf_set(motor_controller_target_sel[i], self->staged_mode_status.motor_controller_target_sel[i]);
         }
         self->flag_ready_to_update_mode_status = false;
       }
     =}
 }
+
 
 /*
 typedef struct mode_status{
@@ -329,3 +329,22 @@ typedef struct mode_status{
       return;
     =}
     */
+
+    /*
+      reaction(slow_system_tick) -> IDLE, HOME, RUN{=
+        // this has to be done in a modal reactor, can't be external...
+        if (self->flag_ready_to_change_modes){
+          switch (self->staged_mode_status.current_mode_index) {
+            case SET_IDLE: // set mode to idle
+              lf_set_mode(IDLE);
+            case SET_HOMING: // set mode to home
+              lf_set_mode(HOME);
+            case SET_RUN_POS: // set mode to run, use pos control
+              lf_set_mode(RUN);
+            case SET_RUN_VEL: // set mode to run, use vel control
+              lf_set_mode(RUN);
+          }
+          self->flag_ready_to_change_modes = false;
+        }
+      =}
+      */
