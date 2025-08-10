@@ -63,7 +63,9 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     //static uint16_t dma_receive_size = 15; // moved to preprocessor define statement
 
     static uint8_t rx_buffer[DMA_RX_BUFFER_SIZE];
+    static uint8_t rx_copy_buffer[DMA_RX_BUFFER_SIZE]; // used for storing internal copy of the rx_buffer during handshake process
     static uint8_t tx_buffer[DMA_TX_BUFFER_SIZE];
+    uint16_t RxDataLen = 0; // received data length set by ReceiveToIdle_IT's callback
     bool flag_receive_to_idle_events_not_yet_triggered = true;
     bool flag_handshake_success = false;
 
@@ -193,8 +195,37 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       HAL_UART_Receive_DMA(&huart1, rx_buffer, DMA_RECEIVE_SIZE);
     }
 
-    void handle_usbc_recieve_to_idle() {
-      if (rx_buffer[0] == 'p') {              // Change joint position target
+    void handle_usbc_receive_to_idle() {
+      
+      // if callbacks haven't been triggered yet, start receiving until they get triggered
+      if (flag_receive_to_idle_events_not_yet_triggered){
+        HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+      }
+
+      // 1. wait for new packet
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+      // make a copy of the received buffer to use later
+      for (int i = 0; i< DMA_RX_BUFFER_SIZE; i++){
+        rx_copy_buffer[i] = rx_buffer[i];
+      }
+
+      // 2. echo it back once we have it
+      HAL_UART_Transmit(&huart1, rx_copy_buffer, RxDataLen, 100); // echos back the received data (useful for debugging and handshaking)
+
+      // 3. wait for handshake 
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+
+      // check if handshake was successful
+      if ((rx_buffer[0] == 'z') && (rx_buffer[1] == 1)) {
+        flag_handshake_success = true;
+      }
+      else{
+        flag_handshake_success = false;
+      }
+
+      // 4. if handshake was good, act on the values from the initial pack in the copy buffer
+      if (flag_handshake_success){
+        if (rx_buffer[0] == 'p') {              // Change joint position target
           set_joint_pos_data();
       } 
       else if (rx_buffer[0] == 'v') {       // Change joint velocity target
@@ -206,17 +237,13 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       else if (rx_buffer[0] == 's') {      // Change high level mode
           trigger_mode_change();
       }
-      else if (rx_buffer[0] == 'z'){
-          update_handshake_status();
-      }
       else {
         printf("Got unexpected leading character.\r\n");
       }
-      
-      // if callbacks haven't been triggered yet, start receiving until they get triggered
-      if (flag_receive_to_idle_events_not_yet_triggered){
-        HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+      } else{
+        printf("Handshake unsuccessful!");
       }
+      
     }
 
     // UART transmit callback
@@ -224,11 +251,11 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       inFlight = 0;
     }
 
+    void HAL_UART_RxCallback1(){} // this needs to be defined to build correctly, check to make sure this is ok
     void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
-      flag_receive_to_idle_events_triggered = false;
       RxDataLen = Size; // RxDataLen is the size of the received data, set by the sender
-      HAL_UART_Transmit(&huart1, rx_buffer, RxDataLen, 100); // echos back the received data (useful for debugging and handshaking)
-      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE); //UART_RX_BUFFER_SIZE);
+      //HAL_UART_Transmit(&huart1, rx_buffer, RxDataLen, 100); // echos back the received data (useful for debugging and handshaking)
+      //HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE); //UART_RX_BUFFER_SIZE);
     }
 
     /*##### 
@@ -308,7 +335,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       //}
       //return;
     }
-    
+
+    /*
     void update_handshake_status(){
       if ((rx_buffer[0] == 'z') && (rx_buffer[1] == 1)) {
             flag_handshake_success = true;
@@ -318,6 +346,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
           }
       return;
     }
+    */
 
     /*##### 
     # helper functions for testing
@@ -328,7 +357,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       for (int i = 1; i < 14; i=i+2){
         rx_buffer[i] = 2; rx_buffer[i+1]=3;
       }
-      HAL_UART_RxCallback1();
+      //HAL_UART_RxCallback1();
     }
 
   =}
@@ -426,6 +455,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     }
 
     // if handshake from handle_usbc_receive_to_idle is good, set the received motor positions
+
+    // set target_poisitons and velocities as well as sea offsets
     for (int i=0; i<7; i++) {
       lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
       lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocities
@@ -439,8 +470,6 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
         lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
       }
     }
-    // after we set most recently received commands, reset handshake flag back to false to wait for new handshake
-    flag_handshake_success = false;
     
   =}
 
