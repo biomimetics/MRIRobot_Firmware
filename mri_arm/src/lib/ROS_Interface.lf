@@ -225,16 +225,16 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
 
       // 4. if handshake was good, act on the values from the initial pack in the copy buffer
       if (flag_handshake_success){
-        if (rx_buffer[0] == 'p') {              // Change joint position target
+        if (rx_copy_buffer[0] == 'p') {              // Change joint position target
           set_joint_pos_data();
       } 
-      else if (rx_buffer[0] == 'v') {       // Change joint velocity target
+      else if (rx_copy_buffer[0] == 'v') {       // Change joint velocity target
           set_joint_vel_data();
       } 
-      else if (rx_buffer[0] == 'o') {       // Change joint sea offset
+      else if (rx_copy_buffer[0] == 'o') {       // Change joint sea offset
           set_sea_offset_data();
       } 
-      else if (rx_buffer[0] == 's') {      // Change high level mode
+      else if (rx_copy_buffer[0] == 's') {      // Change high level mode
           trigger_mode_change();
       }
       else {
