@@ -246,6 +246,62 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       
     }
 
+    // TODO: no handshakes here! Get other safe one working!
+    void handle_usbc_receive_to_idle_unsafe() {
+      
+      // if callbacks haven't been triggered yet, start receiving until they get triggered
+      //if (flag_receive_to_idle_events_not_yet_triggered){
+      //  HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+      //}
+
+      // 1. wait for new packet
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+      // make a copy of the received buffer to use later
+      for (int i = 0; i< DMA_RX_BUFFER_SIZE; i++){
+        rx_copy_buffer[i] = rx_buffer[i];
+      }
+
+      /*
+      // 2. echo it back once we have it
+      HAL_UART_Transmit(&huart1, rx_copy_buffer, RxDataLen, 100); // echos back the received data (useful for debugging and handshaking)
+
+      // 3. wait for handshake 
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+
+      // check if handshake was successful
+      if ((rx_buffer[0] == 'z') && (rx_buffer[1] == 1)) {
+        flag_handshake_success = true;
+      }
+      else{
+        flag_handshake_success = false;
+      }
+
+      // 4. if handshake was good, act on the values from the initial pack in the copy buffer
+      */
+      flag_handshake_success = true;
+      printf(rx_copy_buffer);
+      if (flag_handshake_success){
+        if (rx_copy_buffer[0] == 'p') {              // Change joint position target
+          set_joint_pos_data();
+      } 
+      else if (rx_copy_buffer[0] == 'v') {       // Change joint velocity target
+          set_joint_vel_data();
+      } 
+      else if (rx_copy_buffer[0] == 'o') {       // Change joint sea offset
+          set_sea_offset_data();
+      } 
+      else if (rx_copy_buffer[0] == 's') {      // Change high level mode
+          trigger_mode_change();
+      }
+      else {
+        printf("Got unexpected leading character.\r\n");
+      }
+      } //else{
+        //printf("Handshake unsuccessful!");
+      //}
+      
+    }
+
     void handle_usbc_transmit_encoders(){
       int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
             enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
@@ -285,7 +341,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     // When the rx_buffer command is a [set joint velocity] command
     void set_joint_vel_data() {
       for (int i=0; i<7; i++) {
-        scaled_joint_vel[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
+        scaled_joint_vel[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
       if (print_ros)  {
@@ -301,7 +357,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
           scaled_sea_offset[i] = 0;
           loopback_offset[i] = 0;
         } else {
-          scaled_sea_offset[i] = uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
+          scaled_sea_offset[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
           loopback_offset[i] = (int)(1000 * scaled_sea_offset[i]);
         }
       }
@@ -309,10 +365,10 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
 
     // this function assumes rx_buffer[1] has a char for '0', '1', '2', or '3' for now. Consider changing this. Also may need to make this a reactor method.
     void trigger_mode_change() {
-      // rx_buffer[0] == 's'
-      if ((rx_buffer[1] == '0') || (rx_buffer[1] == '1') || (rx_buffer[1] == '2') || (rx_buffer[1] == '3')){
+      // 
+      if ((rx_copy_buffer[1] == '0') || (rx_copy_buffer[1] == '1') || (rx_copy_buffer[1] == '2') || (rx_copy_buffer[1] == '3')){
         flag_update_set_mode_change = true;
-        desired_state_char = rx_buffer[1];
+        desired_state_char = rx_copy_buffer[1];
       }
       else{
         flag_update_set_mode_change = false;
@@ -446,10 +502,11 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
 
   reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
     // handle receiving new data from ROS
-    handle_usbc_receive_to_idle();
+    //handle_usbc_receive_to_idle();
+    handle_usbc_receive_to_idle_unsafe();
 
     // handle sending back robot's encoder state
-    handle_usbc_transmit_encoders();
+    //handle_usbc_transmit_encoders(); // TODO: Add this back in ASAP. Only commenting it out to test receive_to_idle's handshake
     
     // handle mode changes if they occurr
     if (flag_update_set_mode_change){
