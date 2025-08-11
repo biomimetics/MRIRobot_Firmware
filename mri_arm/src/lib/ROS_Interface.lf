@@ -463,6 +463,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
         case '3': // set mode to run
           lf_set(set_mode_change, SET_RUN_VEL);
       }
+        default:
+          printf("!! Invalid desired_state_char in receive_transmit_update in ROS_Interface.lf !!\n");
         
       flag_update_set_mode_change = false;
     }
