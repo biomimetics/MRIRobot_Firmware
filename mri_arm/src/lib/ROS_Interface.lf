@@ -180,7 +180,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
 
       memmove(rx_copy_buffer, rx_buffer, sizeof(rx_buffer)); // copy over the full size of the buffer
 
-      printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
+      //printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
 
       checksum_valid = checkChecksum(rx_copy_buffer, RxDataLen); // checks if the checksum is valid
 
@@ -188,7 +188,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
         //memmove(rx_command_buffer, rx_copy_buffer, sizeof(rx_copy_buffer)); // copy over the full size of the copy buffer to the command buffer
         memmove(rx_command_buffer, rx_copy_buffer, DMA_RX_BUFFER_SIZE); // copy over the full size of the copy buffer to the command buffer
         flag_new_command_received = true; // flag that there's a new command to be processed by a reaction
-        printf("rx_command_buffer after memmove: %s\r\n", rx_command_buffer);
+        //printf("rx_command_buffer after memmove: %s\r\n", rx_command_buffer);
       }
       
       HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
@@ -208,9 +208,9 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
     bool set_newest_command() {
       // this function seems to work fine
       if (flag_new_command_received){
-        printf("New command of %s received.\r\n", rx_command_buffer);
-        printf("New copy buffer of %s received.\r\n", rx_copy_buffer);
-        printf("New buffer of %s received.\r\n", rx_buffer);
+        //printf("New command of %s received.\r\n", rx_command_buffer);
+        //printf("New copy buffer of %s received.\r\n", rx_copy_buffer);
+        //printf("New buffer of %s received.\r\n", rx_buffer);
         if (rx_command_buffer[0] == 'p') {              // Change joint position target
             set_joint_pos_data();
         } 
