@@ -13,7 +13,7 @@ preamble {=
 =}
 
 reactor QDEC(sample_period: time = 5 ms) {
-  input reset_qdec: bool
+  mutable input reset_qdec: bool
 
   output[7] qdec_out: float
   output[7] sea_out: float
@@ -107,8 +107,11 @@ reactor QDEC(sample_period: time = 5 ms) {
   =}
 
   reaction(reset_qdec) {=
-    HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
-    HAL_UART_Receive_DMA(&huart3, data, 98);
+    if (reset_qdec->value){
+      HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
+      HAL_UART_Receive_DMA(&huart3, data, 98);
+    }
+    reset_qdec->value = false; // should work if reset_qdec is mutable?
   =}
 
   // Update Encoder values

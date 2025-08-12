@@ -20,7 +20,7 @@ preamble {=
   #define DMA_RECEIVE_SIZE 15
 =}
 
-reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, period_offset: time = 5 ms){
+reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
   //input[7] current_pos: float // unused!
   //input[7] joint_pos: float // unused!
   //input[7] sea_pos: float // unused!
@@ -29,8 +29,6 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
   //inputs from motor controller to send back to ROS
   input[7] current_joint: float // position of joints from usm encoders
   input[7] current_joint_sea: float // position of seas from sea encoders
-  
-  
 
   // outputs for sending to motor controller
   output[7] target_pos_ext: float
@@ -45,8 +43,13 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
 
   // trigger timers
   timer trigger_send(0 ms, send_period) // unused!
-  timer trigger_update(period_offset, recieve_period)
+  timer trigger_update(0 ms, recieve_period)
   timer trigger_test(0 ms, 2000 ms)
+
+  timer timer_idle_reset(0 ms, 100 ms)
+  state set_command_failed_counter: int = 0 //
+  state set_command_failed_counter_max: int = 100 // TODO: 100 counts * 10ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
+  state last_mode_change: MODE_ENUM = 0 // idle
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
@@ -63,11 +66,15 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     //static uint16_t dma_receive_size = 15; // moved to preprocessor define statement
 
     static uint8_t rx_buffer[DMA_RX_BUFFER_SIZE];
-    static uint8_t rx_copy_buffer[DMA_RX_BUFFER_SIZE]; // used for storing internal copy of the rx_buffer during handshake process
+    uint8_t rx_copy_buffer[DMA_RX_BUFFER_SIZE]; // used for storing internal copy of the rx_buffer
+    uint8_t rx_command_buffer[DMA_RX_BUFFER_SIZE]; // used for staging a change of command
+
     static uint8_t tx_buffer[DMA_TX_BUFFER_SIZE];
+
     uint16_t RxDataLen = 0; // received data length set by ReceiveToIdle_IT's callback
-    bool flag_receive_to_idle_events_not_yet_triggered = true;
-    bool flag_handshake_success = false;
+    bool flag_receive_to_idle_events_not_yet_triggered = true; // unused!
+    bool flag_handshake_success = false; // unused!
+    bool flag_new_command_received = false;
 
     float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1};
 
@@ -87,7 +94,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     static volatile int inFlight = 0;
 
     bool flag_update_set_mode_change = false;
-    char desired_state_char = '0';
+    int desired_state = 0;
     // +---------------------------------------------------+
     // | Init functions
     // +---------------------------------------------------+
@@ -136,32 +143,322 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     }
 
     // assumes that the checksum_index is the last byte in the message
-    bool checkChecksum(int checksum_index){
+    bool checkChecksum(uint8_t* buffer, int msg_size){
       //uint8_t rx_buffer[60]; // recieving buffer
       int computed_checksum = 0;
-      for (int i = 0; i < checksum_index; i++){
-        computed_checksum += rx_buffer[i];
+      for (int i = 0; i < msg_size-2; i++){
+        computed_checksum += buffer[i];
       }
-      if (computed_checksum == rx_buffer[checksum_index]){
+      if (computed_checksum == buffer[msg_size-1]){
         return true;
       }
-      else
-      {
-        printf("Checksum failed! Expected %d, but computed %d.", rx_buffer[checksum_index], computed_checksum);
+      else {
+        printf("Checksum failed! Expected %d for msg_size %d, but computed %d.", buffer[msg_size-1], msg_size, computed_checksum);
         return false;
       }
     }
 
-    void appendChecksum(int message_length){
-      int computed_checksum = 0;
-      
-      return;
-    }
     // +---------------------------------------------------+
     // | UART DMA Callback functions
     // +---------------------------------------------------+
 
     // UART receive callback
+    void HAL_UART_RxCallback1(){
+      //printf("In HAL_UART_RxCallback1");
+    } // this needs to be defined to build correctly, check to make sure this is ok
+
+    void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+      //printf("In HAL_UARTEx_RxEventCallback\r\n");
+      //printf("rx_buffer before memmove: %s\r\n", rx_buffer);
+      //printf("rx_copy_buffer before memmove %s\r\n", rx_copy_buffer);
+      //printf("rx_buffer after memmove: %s\r\n", rx_buffer);
+      //printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
+
+      bool checksum_valid = false;
+      RxDataLen = Size; // RxDataLen is the size of the received data
+
+      memmove(rx_copy_buffer, rx_buffer, sizeof(rx_buffer)); // copy over the full size of the buffer
+
+      printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
+
+      checksum_valid = checkChecksum(rx_copy_buffer, RxDataLen); // checks if the checksum is valid
+
+      if (checksum_valid){
+        //memmove(rx_command_buffer, rx_copy_buffer, sizeof(rx_copy_buffer)); // copy over the full size of the copy buffer to the command buffer
+        memmove(rx_command_buffer, rx_copy_buffer, DMA_RX_BUFFER_SIZE); // copy over the full size of the copy buffer to the command buffer
+        flag_new_command_received = true; // flag that there's a new command to be processed by a reaction
+        printf("rx_command_buffer after memmove: %s\r\n", rx_command_buffer);
+      }
+      
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+    }
+
+
+    // UART transmit callback
+    void HAL_UART_TxCallback1() {
+      inFlight = 0;
+    }
+
+    /*##### 
+    # helper functions for handling inputs from ROS connection
+    #####*/
+
+    // if new command is avaiable, set the values for it.
+    bool set_newest_command() {
+      // this function seems to work fine
+      if (flag_new_command_received){
+        printf("New command of %s received.\r\n", rx_command_buffer);
+        printf("New copy buffer of %s received.\r\n", rx_copy_buffer);
+        printf("New buffer of %s received.\r\n", rx_buffer);
+        if (rx_command_buffer[0] == 'p') {              // Change joint position target
+            set_joint_pos_data();
+        } 
+        else if (rx_command_buffer[0] == 'v') {       // Change joint velocity target
+            set_joint_vel_data();
+        } 
+        else if (rx_command_buffer[0] == 'o') {       // Change joint sea offset
+            set_sea_offset_data();
+        } 
+        else if (rx_command_buffer[0] == 's') {      // Change high level mode
+            trigger_mode_change();
+        }
+        else {
+          printf("Got unexpected leading character. Got %c, expected p, v, o, or s.\r\n", rx_command_buffer[0]);
+        }
+        flag_new_command_received = false; // set it to false after the new command is used.
+        return true; // if command is set, return true
+      }
+      return false; // if commands are not set (not updated or checksums are failing), return false
+      
+    }
+
+    void handle_usbc_transmit_encoders(){
+      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+            enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
+            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
+            loopback_offset[0], loopback_offset[1], loopback_offset[2], loopback_offset[3], loopback_offset[4], loopback_offset[5], loopback_offset[6]);
+      HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
+    }
+
+    // When the rx_buffer command is a [set joint position] command
+    void set_joint_pos_data() {
+      for (int i=0; i<7; i++) {
+        scaled_joint_pos[i] = joint_dir[i] * uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
+        //scaled_joint_pos[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
+      }
+
+      if (print_ros)  {
+        printf("got [JOINT POS]: \r\n");
+        print_resp(scaled_joint_pos);
+      }
+    }
+
+    // When the rx_buffer command is a [set joint velocity] command
+    void set_joint_vel_data() {
+      for (int i=0; i<7; i++) {
+        scaled_joint_vel[i] = uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
+        //scaled_joint_vel[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
+      }
+
+      if (print_ros)  {
+        printf("got [JOINT VEL]: \r\n");
+        print_resp(scaled_joint_vel);
+      }
+    }
+
+    // Functions for setting relevant info for seas
+    void set_sea_offset_data() {
+      for (int i=0; i<7; i++) {
+        if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
+          scaled_sea_offset[i] = 0;
+          loopback_offset[i] = 0;
+        } else {
+          scaled_sea_offset[i] = uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
+          //scaled_sea_offset[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
+          loopback_offset[i] = (int)(1000 * scaled_sea_offset[i]);
+        }
+      }
+    }
+
+    // this function assumes rx_buffer[1] has a char for '0', '1', '2', or '3' for now. Consider changing this. Also may need to make this a reactor method.
+    void trigger_mode_change() {
+      if (rx_command_buffer[1] == '0') { // set mode to idle
+        desired_state = 0;
+        flag_update_set_mode_change = true;
+      } 
+      else if (rx_command_buffer[1] == '1') { // set mode to home
+        desired_state = 1;
+        flag_update_set_mode_change = true;
+      } 
+      else if (rx_command_buffer[1] == '2') { // set mode to run with position inputs
+        desired_state = 2;
+        flag_update_set_mode_change = true;
+      } 
+      else if (rx_command_buffer[1] == '3') { // set mode to run with velocity inputs
+        desired_state = 3;
+        flag_update_set_mode_change = true;
+      }
+      else {
+        flag_update_set_mode_change = false;
+        desired_state = 0;
+        printf("!! Invalid desired_state in receive_transmit_update in ROS_Interface.lf !!\r\n");
+        printf("trigger_mode_change: Did not receive valid char. Got %c, expected 0, 1, 2, or 3.", rx_command_buffer[1]);
+      }
+  }
+
+    /*##### 
+    # helper functions for testing
+    #####*/
+    // add test data function to simulate ROS interface
+    void RxCallbackTest() {
+      //rx_buffer[0] = 'v';
+      //for (int i = 1; i < 14; i=i+2){
+      //  rx_buffer[i] = 2; rx_buffer[i+1]=3;
+      //}
+      //HAL_UART_RxCallback1();
+    }
+
+  =}
+
+  reaction(startup) {=
+    // Setup UART interfaces
+    MX_DMA_Init();
+    MX_UART1_Init();
+
+    // Prep ROS bridge DMA recieve
+    //HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
+    //printf("ROS_Interface: In startup reaction before HAL_UARTEx_ReceiveToIdle_DMA...\r\n");
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+
+    /* Configure Switch pins : PC1 */
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    __HAL_RCC_GPIOH_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, GPIO_PIN_RESET);
+    GPIO_InitStruct.Pin = GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
+    for (int i=0; i<7; i++) {
+      scaled_sea_lim[i] = joint_configs[i]->lim;
+      scaled_sea_offset[i] = 0;
+    }
+      
+  =}
+
+  /*##### 
+    # Input reactions
+    #####*/
+
+  // Update our current USM position to send to ROS
+  reaction(current_joint) {=
+    for (int i=0; i<7; i++) {
+      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
+    }
+  =}
+
+  // Update our current sea position to send to ROS
+  reaction(current_joint_sea) {=
+    for (int i=0; i<7; i++) {
+      sea_data[i] = (int)(current_joint_sea[i]->value * 1000);
+    }
+  =}
+
+  /*##### 
+    # Output reactions
+    #####*/
+
+  reaction send_transmit_update (trigger_send) {=
+    // handle sending back robot's encoder state
+    //handle_usbc_transmit_encoders();
+    =}
+
+  reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
+
+    // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
+    if (!set_newest_command()){
+      if ((self->last_mode_change == SET_RUN_POS) || (self->last_mode_change == SET_RUN_VEL)){
+        self->set_command_failed_counter += 1;
+      }
+    };
+
+    // if the coutner's too big, assume ROS isn't working and reset to idle.
+    if (self->set_command_failed_counter_max <= self->set_command_failed_counter){
+      if ((self->last_mode_change == SET_RUN_POS) || (self->last_mode_change == SET_RUN_VEL)){
+        printf("ROS_Interface.lf has not received a valid command for a long time (about 1 second)!\r\n Forcing idle mode switch...\r\n");
+        lf_set(set_mode_change, SET_IDLE);
+        self->last_mode_change = SET_IDLE;
+        self->set_command_failed_counter = 0;
+      }
+    }
+
+    // handle sending back robot's encoder state
+    handle_usbc_transmit_encoders(); // TODO: Find out why this has to be done *after* using rx_command_buffer. Very weird. Breaks everything otherwise.
+
+    // handle mode changes if they occur
+    if (flag_update_set_mode_change){
+      if (desired_state == 0) { // set mode to idle
+        lf_set(set_mode_change, SET_IDLE); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
+        self->last_mode_change = SET_IDLE;
+      } 
+      else if (desired_state == 1) { // set mode to home
+        lf_set(set_mode_change, SET_HOMING);
+        self->last_mode_change = SET_HOMING;
+      } 
+      else if (desired_state == 2) { // set mode to run with position inputs
+        lf_set(set_mode_change, SET_RUN_POS);
+        self->last_mode_change = SET_RUN_POS;
+      } 
+      else if (desired_state == 3) { // set mode to run with velocity inputs
+        lf_set(set_mode_change, SET_RUN_VEL);
+        self->last_mode_change = SET_RUN_VEL;
+      }
+      else {
+        printf("Invalid desired_state in receive_transmit_update in ROS_Interface.lf!\r\n");
+          printf("Received %d but expected one of 0, 1, 2, or 3\r\n", desired_state);
+      }
+      flag_update_set_mode_change = false;
+    }
+
+    // set target_poisitons and velocities as well as sea offsets
+    for (int i=0; i<7; i++) {
+      lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
+      lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocities
+      lf_set(sea_lim[i], scaled_sea_lim[i]);      // Update sea offset values
+
+
+      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1));
+      if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
+        lf_set(sea_offset[i], 0);      // Update sea offset values
+      } else {
+        lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
+      }
+    }  
+  =}
+
+}
+
+  // Send current state over the bridge
+  /*
+  reaction(trigger_send) {= // moved to receive_transmit_update reaction
+    if (!inFlight) {
+      inFlight = 1; // Indicate that we are currently sending data
+      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+            enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
+            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
+            loopback_offset[0], loopback_offset[1], loopback_offset[2], loopback_offset[3], loopback_offset[4], loopback_offset[5], loopback_offset[6]);
+      HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
+    }
+  =}
+  */
+
     /*
     void HAL_UART_RxCallback1() {
       if (rx_buffer[0] == 'p') {              // Change joint position target
@@ -177,6 +474,7 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
     }
     */
 
+    /*
     // TODO: depreciate this!
     void handle_usbc_recieve() {
       if (rx_buffer[0] == 'p') {              // Change joint position target
@@ -194,7 +492,9 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       // DMA_RECEIVE_SIZE doesn't have to be a constant. There's probably a better way of
       HAL_UART_Receive_DMA(&huart1, rx_buffer, DMA_RECEIVE_SIZE);
     }
+    */
 
+    /*
     void handle_usbc_receive_to_idle() {
       
       // if callbacks haven't been triggered yet, start receiving until they get triggered
@@ -245,302 +545,4 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms, p
       }
       
     }
-
-    // TODO: no handshakes here! Get other safe one working!
-    void handle_usbc_receive_to_idle_unsafe() {
-      
-      // if callbacks haven't been triggered yet, start receiving until they get triggered
-      //if (flag_receive_to_idle_events_not_yet_triggered){
-      //  HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
-      //}
-
-      // 1. wait for new packet
-      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
-      // make a copy of the received buffer to use later
-      for (int i = 0; i< DMA_RX_BUFFER_SIZE; i++){
-        rx_copy_buffer[i] = rx_buffer[i];
-      }
-
-      /*
-      // 2. echo it back once we have it
-      HAL_UART_Transmit(&huart1, rx_copy_buffer, RxDataLen, 100); // echos back the received data (useful for debugging and handshaking)
-
-      // 3. wait for handshake 
-      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
-
-      // check if handshake was successful
-      if ((rx_buffer[0] == 'z') && (rx_buffer[1] == 1)) {
-        flag_handshake_success = true;
-      }
-      else{
-        flag_handshake_success = false;
-      }
-
-      // 4. if handshake was good, act on the values from the initial pack in the copy buffer
-      */
-      flag_handshake_success = true;
-      printf(rx_copy_buffer);
-      if (flag_handshake_success){
-        if (rx_copy_buffer[0] == 'p') {              // Change joint position target
-          set_joint_pos_data();
-      } 
-      else if (rx_copy_buffer[0] == 'v') {       // Change joint velocity target
-          set_joint_vel_data();
-      } 
-      else if (rx_copy_buffer[0] == 'o') {       // Change joint sea offset
-          set_sea_offset_data();
-      } 
-      else if (rx_copy_buffer[0] == 's') {      // Change high level mode
-          trigger_mode_change();
-      }
-      else {
-        printf("Got unexpected leading character.\r\n");
-      }
-      } //else{
-        //printf("Handshake unsuccessful!");
-      //}
-      
-    }
-
-    void handle_usbc_transmit_encoders(){
-      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
-            enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
-            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
-            loopback_offset[0], loopback_offset[1], loopback_offset[2], loopback_offset[3], loopback_offset[4], loopback_offset[5], loopback_offset[6]);
-      HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
-    }
-
-    // UART transmit callback
-    void HAL_UART_TxCallback1() {
-      inFlight = 0;
-    }
-
-    void HAL_UART_RxCallback1(){} // this needs to be defined to build correctly, check to make sure this is ok
-    void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
-      RxDataLen = Size; // RxDataLen is the size of the received data, set by the sender
-      //HAL_UART_Transmit(&huart1, rx_buffer, RxDataLen, 100); // echos back the received data (useful for debugging and handshaking)
-      //HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE); //UART_RX_BUFFER_SIZE);
-    }
-
-    /*##### 
-    # helper functions for handling inputs from ROS connection
-    #####*/
-
-    // When the rx_buffer command is a [set joint position] command
-    void set_joint_pos_data() {
-      for (int i=0; i<7; i++) {
-        scaled_joint_pos[i] = joint_dir[i] * uncompress_data(rx_buffer[(i*2)+2], rx_buffer[(i*2)+1]);
-      }
-
-      if (print_ros)  {
-        printf("got [JOINT POS]: \r\n");
-        print_resp(scaled_joint_pos);
-      }
-    }
-
-    // When the rx_buffer command is a [set joint velocity] command
-    void set_joint_vel_data() {
-      for (int i=0; i<7; i++) {
-        scaled_joint_vel[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
-      }
-
-      if (print_ros)  {
-        printf("got [JOINT VEL]: \r\n");
-        print_resp(scaled_joint_vel);
-      }
-    }
-
-    // Functions for setting relevant info for seas
-    void set_sea_offset_data() {
-      for (int i=0; i<7; i++) {
-        if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
-          scaled_sea_offset[i] = 0;
-          loopback_offset[i] = 0;
-        } else {
-          scaled_sea_offset[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
-          loopback_offset[i] = (int)(1000 * scaled_sea_offset[i]);
-        }
-      }
-    }
-
-    // this function assumes rx_buffer[1] has a char for '0', '1', '2', or '3' for now. Consider changing this. Also may need to make this a reactor method.
-    void trigger_mode_change() {
-      // 
-      if ((rx_copy_buffer[1] == '0') || (rx_copy_buffer[1] == '1') || (rx_copy_buffer[1] == '2') || (rx_copy_buffer[1] == '3')){
-        flag_update_set_mode_change = true;
-        desired_state_char = rx_copy_buffer[1];
-      }
-      else{
-        flag_update_set_mode_change = false;
-        desired_state_char = '0';
-      }
-      
-      /*
-      char received_state = rx_buffer[1];
-      switch (received_state) {
-        case '0': // set mode to idle
-          lf_set(set_mode_change, 0); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
-        case '1': // set mode to home
-          lf_set(set_mode_change, 1);
-        case '2': // set mode to run
-          lf_set(set_mode_change, 2);
-        case '3': // set mode to run
-          lf_set(set_mode_change, 3);
-        
-        case '0': // set mode to idle
-          lf_set(set_mode_change, SET_IDLE); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
-        case '1': // set mode to home
-          lf_set(set_mode_change, SET_HOMING);
-        case '2': // set mode to run
-          lf_set(set_mode_change, SET_RUN_POS);
-        case '3': // set mode to run
-          lf_set(set_mode_change, SET_RUN_VEL);
-        */
-      //}
-      //return;
-    }
-
-    /*
-    void update_handshake_status(){
-      if ((rx_buffer[0] == 'z') && (rx_buffer[1] == 1)) {
-            flag_handshake_success = true;
-          }
-          else{
-            flag_handshake_success = false;
-          }
-      return;
-    }
     */
-
-    /*##### 
-    # helper functions for testing
-    #####*/
-    // add test data function to simulate ROS interface
-    void RxCallbackTest() {
-      rx_buffer[0] = 'v';
-      for (int i = 1; i < 14; i=i+2){
-        rx_buffer[i] = 2; rx_buffer[i+1]=3;
-      }
-      //HAL_UART_RxCallback1();
-    }
-
-  =}
-
-
-  reaction(startup) {=
-    // Setup UART interfaces
-    MX_DMA_Init();
-    MX_UART1_Init();
-
-    // Prep ROS bridge DMA recieve
-    HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
-
-    /* Configure Switch pins : PC1 */
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    __HAL_RCC_GPIOH_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    GPIO_InitStruct.Pin = GPIO_PIN_1;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, GPIO_PIN_RESET);
-    GPIO_InitStruct.Pin = GPIO_PIN_1;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
-
-    for (int i=0; i<7; i++) {
-      scaled_sea_lim[i] = joint_configs[i]->lim;
-      scaled_sea_offset[i] = 0;
-    }
-      
-  =}
-
-  reaction(trigger_test) {=
-    printf("ROS_Interface trigger_update\r\n");
-    RxCallbackTest();
-   
-  =}
-
-  /*##### 
-    # Input reactions
-    #####*/
-
-  // Update our current USM position to send to ROS
-  reaction(current_joint) {=
-    for (int i=0; i<7; i++) {
-      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
-    }
-  =}
-
-  // Update our current sea position to send to ROS
-  reaction(current_joint_sea) {=
-    for (int i=0; i<7; i++) {
-      sea_data[i] = (int)(current_joint_sea[i]->value * 1000);
-    }
-  =}
-
-  // Send current state over the bridge
-  /*
-  reaction(trigger_send) {= // moved to receive_transmit_update reaction
-    if (!inFlight) {
-      inFlight = 1; // Indicate that we are currently sending data
-      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
-            enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
-            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
-            loopback_offset[0], loopback_offset[1], loopback_offset[2], loopback_offset[3], loopback_offset[4], loopback_offset[5], loopback_offset[6]);
-      HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
-    }
-  =}
-  */
-
-  /*##### 
-    # Output reactions
-    #####*/
-
-  reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
-    // handle receiving new data from ROS
-    //handle_usbc_receive_to_idle();
-    handle_usbc_receive_to_idle_unsafe();
-
-    // handle sending back robot's encoder state
-    //handle_usbc_transmit_encoders(); // TODO: Add this back in ASAP. Only commenting it out to test receive_to_idle's handshake
-    
-    // handle mode changes if they occurr
-    if (flag_update_set_mode_change){
-      switch (desired_state_char){
-        case '0': // set mode to idle
-          lf_set(set_mode_change, SET_IDLE); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
-        case '1': // set mode to home
-          lf_set(set_mode_change, SET_HOMING);
-        case '2': // set mode to run
-          lf_set(set_mode_change, SET_RUN_POS);
-        case '3': // set mode to run
-          lf_set(set_mode_change, SET_RUN_VEL);
-      }
-        default:
-          printf("!! Invalid desired_state_char in receive_transmit_update in ROS_Interface.lf !!\n");
-        
-      flag_update_set_mode_change = false;
-    }
-
-    // set target_poisitons and velocities as well as sea offsets
-    for (int i=0; i<7; i++) {
-      lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
-      lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocities
-      lf_set(sea_lim[i], scaled_sea_lim[i]);      // Update sea offset values
-
-
-      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1));
-      if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
-        lf_set(sea_offset[i], 0);      // Update sea offset values
-      } else {
-        lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
-      }
-    }
-    
-  =}
-
-}

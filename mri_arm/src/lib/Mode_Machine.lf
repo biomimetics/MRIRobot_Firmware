@@ -28,7 +28,7 @@ preamble {=
   */
 =}
 
-reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms){
+reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 500 ms){
     input set_mode_change: MODE_ENUM 
     input is_homing_finished: bool
 
@@ -45,6 +45,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     // timer for sending updates depending on the current mode
     timer system_tick(0 ms, refresh_period)
     timer slow_system_tick(0 ms, slow_refresh_period)
+    timer slow_status_tick(0 ms, status_refresh_period)
 
     state _is_homing_finished: bool = false // consider depreciating these
     state _current_mode: MODE_ENUM = 0 // consider depreciating these // initially set to idle
@@ -58,35 +59,56 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
       void set_power_relay(bool on_or_off){return;}; // TODO: impliment this when we get a working relay.
     =}
 
+    method printModeStatus(): void {=
+      printf("### MODE MACHINE STATUS ###\r\n");
+      printf("# current_mode_index: %d\r\n", self->staged_mode_status.current_mode_index);
+      printf("# is_homing_finished: %d\r\n", self->staged_mode_status.is_homing_finished);
+      printf("# enable_homing_command: %d\r\n", self->staged_mode_status.enable_homing_command);
+      printf("# enable_motor_command: %d\r\n", self->staged_mode_status.enable_motor_command);
+      printf("# force_disable_motor_pins: %d\r\n", self->staged_mode_status.force_disable_motor_pins);
+      printf("# motor_controller_internal_external_target_mode: %d\r\n", self->staged_mode_status.motor_controller_internal_external_target_mode);
+      printf("# motor_controller_target_sel:");
+      for (int i = 0; i<6; i++){
+        printf("%d, ", self->staged_mode_status.motor_controller_target_sel[i]);
+      }
+      printf("%d\r\n", self->staged_mode_status.motor_controller_target_sel[6]);
+      printf("###########################\r\n\r\n");
+      =}
     
     method handleModeSwitch(set_mode_enum: MODE_ENUM): void {=
-      switch (set_mode_enum) {
-        case SET_IDLE: // set mode to idle
-          printf("Starting mode switch to idle...");
-          enableIdleMotorSettings();  
-          self->staged_mode_status.current_mode_index = SET_IDLE;
-          
-        case SET_HOMING: // set mode to home
-          printf("Starting mode switch to homing...");
-          setHomingMotorSettings();
-          self->staged_mode_status.current_mode_index = SET_HOMING;
-        
-        case SET_RUN_POS: // set mode to run, use pos control
-          printf("Starting mode switch to running with position control...");
-          if (self->_is_homing_finished){
-            setRunMotorSettings(true);
-            self->staged_mode_status.current_mode_index = SET_RUN_POS;
-          }
-          else {
-            printf("!!! Homing is not finished! Cannot do position control. Reverting to IDLE mode... !!!");
-            handleModeSwitch(SET_IDLE);
-            return;
-          }
-          
-        case SET_RUN_VEL: // set mode to run, use vel control
-          printf("Starting mode switch to running with velocity control...");
-          setRunMotorSettings(false);
-          self->staged_mode_status.current_mode_index = SET_RUN_VEL;
+      if (set_mode_enum == SET_IDLE){
+        printf("Starting mode switch to idle...\r\n");
+        enableIdleMotorSettings();  
+        self->staged_mode_status.current_mode_index = SET_IDLE;
+      } 
+      else if(set_mode_enum == SET_HOMING){
+        printf("Starting mode switch to homing...\r\n");
+        setHomingMotorSettings();
+        self->staged_mode_status.current_mode_index = SET_HOMING;
+      }
+      else if(set_mode_enum == SET_RUN_POS){
+        printf("Starting mode switch to running with position control...\r\n");
+        if (self->_is_homing_finished){
+          setRunMotorSettings(true);
+          self->staged_mode_status.current_mode_index = SET_RUN_POS;
+        }
+        else {
+          printf("!!! Homing is not finished! Cannot do position control. Reverting to IDLE mode... !!!\r\n");
+          handleModeSwitch(SET_IDLE);
+          return;
+        }
+      }
+      else if(set_mode_enum == SET_RUN_VEL){
+        printf("Starting mode switch to running with velocity control...\r\n");
+        setRunMotorSettings(false);
+        self->staged_mode_status.current_mode_index = SET_RUN_VEL;
+      }
+      else {
+        printf("handleModeSwitch did not receive a valid set_mode_enum input. Got %d, but expected %d, %d, %d, or %d\r\n", 
+          set_mode_enum, SET_IDLE, SET_HOMING, SET_RUN_POS, SET_RUN_VEL);
+        self->flag_ready_to_update_mode_status = false;
+        self->flag_ready_to_change_modes = false;
+        return;
       }
       self->flag_ready_to_update_mode_status = true;
       self->flag_ready_to_change_modes = true;
@@ -156,7 +178,11 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
       return;
     =}
     
-    
+    reaction(slow_status_tick) {=
+      printModeStatus();
+      =}
+
+
     //##### 
     //# Modes
     //#####
@@ -174,7 +200,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
         lf_set(force_disable_motor_pins, true); // keeps motor pins disabled, may be redundant
         set_power_relay(false); // set power relay to off
 
-        // this has to be done in a modal reactor, can't be external...
+        // this has to be done in modal reactors, can't be a single external reactor...
         if (self->flag_ready_to_change_modes){
           switch (self->staged_mode_status.current_mode_index) {
             case SET_HOMING: // set mode to home
