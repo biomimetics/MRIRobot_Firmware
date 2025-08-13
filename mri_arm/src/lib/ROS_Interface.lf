@@ -20,7 +20,7 @@ preamble {=
   #define DMA_RECEIVE_SIZE 15
 =}
 
-reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
+reactor ROSInterface (send_period: time = 50 ms, recieve_period: time = 50 ms){
   //input[7] current_pos: float // unused!
   //input[7] joint_pos: float // unused!
   //input[7] sea_pos: float // unused!
@@ -139,8 +139,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
 
     void print_resp(float* data) {
       printf("      [%d, %d, %d, %d, %d, %d, %d]\r\n", 
-                        (int)(data[0]*100), (int)(data[1]*100), (int)(data[2]*100), (int)(data[3]*100), 
-                        (int)(data[4]*100), (int)(data[5]*100), (int)(data[6]*100));
+                        (int)(data[0]*1000), (int)(data[1]*1000), (int)(data[2]*1000), (int)(data[3]*1000), 
+                        (int)(data[4]*1000), (int)(data[5]*1000), (int)(data[6]*1000));
     }
 
     float uncompress_data(uint8_t lower, uint8_t upper) {
@@ -271,8 +271,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
       }
 
       if (print_ros)  {
-        printf("got [JOINT VEL]: \r\n");
-        print_resp(joint_vel_array);
+        //printf("got [JOINT VEL]: \r\n");
+        //print_resp(joint_vel_array);
       }
     }
 
@@ -442,8 +442,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
     for (int i=0; i<7; i++) {
       lf_set(target_pos_ext[i], self->scaled_joint_pos[i]);   // Update target positions
       lf_set(target_vel_ext[i], self->scaled_joint_vel[i]);   // Update target velocities
-      printf("ROS_Interface: Sending target_vel_ext[%d] = %d (from scaled_joint_vel = %d)\r\n", 
-             i, (int)(self->scaled_joint_vel[i] * 1000), (int)(self->scaled_joint_vel[i] * 1000));
+      //printf("ROS_Interface: Sending target_vel_ext[%d] = %d (from scaled_joint_vel = %d)\r\n", 
+      //       i, (int)(self->scaled_joint_vel[i] * 1000), (int)(self->scaled_joint_vel[i] * 1000));
       lf_set(sea_lim[i], self->scaled_sea_lim[i]);      // Update sea offset values
 
 

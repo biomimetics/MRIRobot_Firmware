@@ -145,10 +145,10 @@ reactor MotorController(refresh_period: time = 10 ms) {
   =}
 
   reaction(target_vel_ext) {=
-    printf("target_vel_ext reaction triggered!\r\n");
+    //printf("target_vel_ext reaction triggered!\r\n");
     for(int i=0; i<7; i++){
         self->speed_spc[i] = target_vel_ext[i]->value;
-        printf("Motor %d: speed_spc being set to %d from input %d\r\n", i, (int)(self->speed_spc[i] * 1000), (int)(target_vel_ext[i]->value * 1000));
+        //printf("Motor %d: speed_spc being set to %d from input %d\r\n", i, (int)(self->speed_spc[i] * 1000), (int)(target_vel_ext[i]->value * 1000));
       }
     //if(self->_target_mode == MODE_EXT) {
     //  
@@ -243,7 +243,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
             lf_set(speed[i], self->speed_posc[i]);
           }
           else if((self->_target_sel[i] == MODE_VEL)){
-            printf("%f,", self->speed_spc[i]);
+            printf("%d,", (int)(self->speed_spc[i] * 1000));
             lf_set(speed[i], self->speed_spc[i]);
           }
           else{
