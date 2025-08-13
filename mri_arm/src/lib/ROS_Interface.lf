@@ -20,7 +20,7 @@ preamble {=
   #define DMA_RECEIVE_SIZE 15
 =}
 
-reactor ROSInterface (send_period: time = 50 ms, recieve_period: time = 50 ms){
+reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   //input[7] current_pos: float // unused!
   //input[7] joint_pos: float // unused!
   //input[7] sea_pos: float // unused!
@@ -48,7 +48,7 @@ reactor ROSInterface (send_period: time = 50 ms, recieve_period: time = 50 ms){
 
   timer timer_idle_reset(0 ms, 100 ms)
   state set_command_failed_counter: int = 0 //
-  state set_command_failed_counter_max: int = 100 // TODO: 100 counts * 10ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
+  state set_command_failed_counter_max: int = 20 // TODO: 20 counts * 20ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
   state last_mode_change: MODE_ENUM = 0 // idle
 
   state scaled_joint_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
@@ -402,7 +402,7 @@ reactor ROSInterface (send_period: time = 50 ms, recieve_period: time = 50 ms){
     // if the coutner's too big, assume ROS isn't working and reset to idle.
     if (self->set_command_failed_counter_max <= self->set_command_failed_counter){
       if ((self->last_mode_change == SET_RUN_POS) || (self->last_mode_change == SET_RUN_VEL)){
-        printf("ROS_Interface.lf has not received a valid command for a long time (about 1 second)!\r\n Forcing idle mode switch...\r\n");
+        printf("ROS_Interface.lf has not received a valid command for a long time (about 400ms)!\r\n Forcing idle mode switch...\r\n");
         lf_set(set_mode_change, SET_IDLE);
         self->last_mode_change = SET_IDLE;
         self->set_command_failed_counter = 0;

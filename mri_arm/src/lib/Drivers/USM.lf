@@ -16,6 +16,8 @@ reactor USM {
   input[7] speed: float
   input force_disable_motor_pins: bool
 
+  state _force_disable_motor_pins: bool = false
+
   //state force_disable_motor_pins
   preamble {=
     TIM_HandleTypeDef htim1;
@@ -27,7 +29,7 @@ reactor USM {
     volatile float USM_LIMIT = 0.06;
     volatile int en_usm;
 
-    static int print_usm = true;
+    static int print_usm = false;
     static int printcnt = 0;
     static int printcnt_lim = 500;
 
@@ -198,6 +200,8 @@ reactor USM {
   =}
 
   reaction(force_disable_motor_pins) {=
+    self->_force_disable_motor_pins = force_disable_motor_pins->value;
+    if (print_usm){printf("Set _force_disable_motor_pins to %d given input %d.\r\n", self->_force_disable_motor_pins, force_disable_motor_pins->value);}
     if (force_disable_motor_pins->value){
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    0); // PB0 is the LED
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    0);
@@ -211,13 +215,13 @@ reactor USM {
     }
   =}
 
-  reaction(speed) force_disable_motor_pins {=
-    bool _force_disable_motor_pins = 0; // TODO: FIX THIS ASAP
+  reaction(speed) {=
+    //bool _force_disable_motor_pins = 0; // TODO: FIX THIS ASAP
     // TODO: get rid of these switches. en_usm is probably "enable_usm", but why is it the result of two seperate pins?
     en_usm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_3) && !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2); 
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, en_usm); // PB0 is the LED
     
-    printf("USM: en_usm=%d, force_disable=%d\r\n", en_usm, _force_disable_motor_pins);
+    if (print_usm) {printf("USM: en_usm=%d, force_disable=%d\r\n", en_usm, self->_force_disable_motor_pins);}
 
     // for writing USM convSpeeds
     if (print_usm && printcnt>=printcnt_lim) {
@@ -226,9 +230,11 @@ reactor USM {
 
     for (int i=0; i<7; i++) {
       _speed[i] = en_usm? speed[i]->value * motor_configs[i]->dir : 0;
-      printf("USM: _speed[%d] = %d (from input %d, en_usm=%d)\r\n",
+      
+      if (print_usm) {printf("USM: _speed[%d] = %d (from input %d, en_usm=%d)\r\n",
              i, (int)(_speed[i] * 1000), (int)(speed[i]->value * 1000), en_usm);
-
+      }
+      
       if (print_usm && printcnt>=printcnt_lim) {
           printf("%d  ", convSpeed(_speed[i], i));
       }
@@ -239,8 +245,8 @@ reactor USM {
 
     // Set USM enable values
     
-    if (_force_disable_motor_pins){
-      printf("USM: Force disabling all motor pins\r\n");
+    if (self->_force_disable_motor_pins){
+      if (print_usm){printf("USM: Force disabling all motor pins\r\n");}
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    0); // PB0 is the LED
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    0);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    0);
@@ -252,7 +258,7 @@ reactor USM {
       HAL_Delay(1);
     }
     else {
-      printf("USM: Setting motor enables: [%d %d %d %d %d %d %d]\r\n",
+      if (print_usm){printf("USM: Setting motor enables: [%d %d %d %d %d %d %d]\r\n",
              (_speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT),
              (_speed[1] > USM_LIMIT || _speed[1] < -USM_LIMIT),
              (_speed[2] > USM_LIMIT || _speed[2] < -USM_LIMIT),
@@ -260,6 +266,7 @@ reactor USM {
              (_speed[4] > USM_LIMIT || _speed[4] < -USM_LIMIT),
              (_speed[5] > USM_LIMIT || _speed[5] < -USM_LIMIT),
              (_speed[6] > USM_LIMIT || _speed[6] < -USM_LIMIT));
+      }
 
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    1); // PB0 is the LED
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    _speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT);

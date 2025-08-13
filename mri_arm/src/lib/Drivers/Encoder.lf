@@ -21,13 +21,15 @@ reactor QDEC(sample_period: time = 5 ms) {
   timer trigger(0, sample_period)
   timer enable(0, 20 ms)
 
+  //state _reset_qdec: bool = false;
+
   preamble {=
     UART_HandleTypeDef huart3;
 
     DMA_HandleTypeDef hdma_usart3_rx;
     DMA_HandleTypeDef hdma_usart3_tx;
 
-    static int print_enc = true;
+    static int print_enc = false;
     static int printcnt = 0;
     static int printcnt_lim = 300;
 
@@ -130,17 +132,17 @@ reactor QDEC(sample_period: time = 5 ms) {
     }
 
     // Get values for SEA encoders
-    if (print_enc && printcnt>=printcnt_lim) 
-    {  printf("Encoder.lf: ");}  
+    //if (print_enc && printcnt>=printcnt_lim) 
+    //{  printf("Encoder.lf: ");}  
     for (int i=0; i<4; i++) {
       // 0.5644 = 25.4/45
       float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr );
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
 
-      if (print_enc && printcnt>=printcnt_lim) {
-        printf("%d  ", (int) (sea_out[i]->value*100));
-      }
+      //if (print_enc && printcnt>=printcnt_lim) {
+      //  printf("%d  ", (int) (sea_out[i]->value*100));
+      //}
     }
 
     for (int i=4; i<7; i++) {

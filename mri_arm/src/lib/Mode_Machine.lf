@@ -43,7 +43,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     output force_disable_motor_pins: bool
 
     // timer for sending updates depending on the current mode
-    timer system_tick(0 ms, refresh_period)
+    //timer system_tick(0 ms, refresh_period) // unused!
     timer slow_system_tick(0 ms, slow_refresh_period)
     timer slow_status_tick(0 ms, status_refresh_period)
 
@@ -188,7 +188,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     //#####
 
     initial mode STARTUP {
-      reaction(system_tick) -> IDLE {=
+      reaction(slow_system_tick) -> IDLE {=
         lf_set_mode(IDLE);
         handleModeSwitch(SET_IDLE);
       =}
@@ -198,8 +198,8 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
       
       
       reaction(slow_system_tick) -> force_disable_motor_pins, HOME, RUN{=
-        lf_set(force_disable_motor_pins, true); // keeps motor pins disabled, may be redundant
-        set_power_relay(false); // set power relay to off
+        //lf_set(force_disable_motor_pins, true); // keeps motor pins disabled, may be redundant -> maybe interfering!
+        //set_power_relay(false); // set power relay to off
 
         // this has to be done in modal reactors, can't be a single external reactor...
         if (self->flag_ready_to_change_modes){
