@@ -44,7 +44,7 @@ preamble {=
 =}
 
 // Import and/or declare reactor classes.
-reactor MotorController(refresh_period: time = 5 ms) {
+reactor MotorController(refresh_period: time = 10 ms) {
   input enable_motor_command: bool
 
   input[7] target_sel: MOTOR_MODE
@@ -146,12 +146,13 @@ reactor MotorController(refresh_period: time = 5 ms) {
 
   reaction(target_vel_ext) {=
     printf("target_vel_ext reaction triggered!\r\n");
-    if(self->_target_mode == MODE_EXT) {
-      for(int i=0; i<7; i++){
+    for(int i=0; i<7; i++){
         self->speed_spc[i] = target_vel_ext[i]->value;
-        printf("Motor %d: speed_spc being set to %f from input %f\r\n", i, self->speed_spc[i], target_vel_ext[i]->value);
+        printf("Motor %d: speed_spc being set to %d from input %d\r\n", i, (int)(self->speed_spc[i] * 1000), (int)(target_vel_ext[i]->value * 1000));
       }
-    }
+    //if(self->_target_mode == MODE_EXT) {
+    //  
+    //}
   =}
 
   reaction(target_pos_int) {=

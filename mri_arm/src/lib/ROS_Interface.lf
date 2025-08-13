@@ -454,10 +454,10 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
         lf_set(sea_offset[i], self->scaled_sea_offset[i]);      // Update sea offset values
       }
     }
-    printf("target_vel_ext: ");
-    print_resp(target_vel_ext);
-    printf("scaled_joint_vel: ");
-    print_resp(self->scaled_joint_vel);  
+    //printf("target_vel_ext: ");
+    //print_resp(target_vel_ext);
+    //printf("scaled_joint_vel: ");
+    //print_resp(self->scaled_joint_vel);  
   =}
 
 }
