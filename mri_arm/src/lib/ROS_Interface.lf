@@ -51,6 +51,11 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
   state set_command_failed_counter_max: int = 100 // TODO: 100 counts * 10ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
   state last_mode_change: MODE_ENUM = 0 // idle
 
+  state scaled_joint_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_joint_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_sea_offset: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_sea_lim: float[7] = {1000, 1000, 1000, 1000, 1000, 1000, 1000}
+
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
   preamble {=
@@ -81,11 +86,11 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
     int enc_data[7];
     int sea_data[7];
 
-    float scaled_joint_pos[7]= {0, 0, 0, 0, 0, 0, 0};
-    float scaled_joint_vel[7]= {0, 0, 0, 0, 0, 0, 0};
+    //float scaled_joint_pos[7]= {0, 0, 0, 0, 0, 0, 0};
+    //float scaled_joint_vel[7]= {0, 0, 0, 0, 0, 0, 0};
 
-    float scaled_sea_offset[7] = {0, 0, 0, 0, 0, 0, 0};
-    float scaled_sea_lim[7]= {1000, 1000, 1000, 1000, 1000, 1000, 1000};
+    //float scaled_sea_offset[7] = {0, 0, 0, 0, 0, 0, 0};
+    //float scaled_sea_lim[7]= {1000, 1000, 1000, 1000, 1000, 1000, 1000};
 
     float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
     int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
@@ -205,20 +210,23 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
     #####*/
 
     // if new command is avaiable, set the values for it.
-    bool set_newest_command() {
+    bool set_newest_command(float* joint_pos_array, float* joint_vel_array, float* sea_offset_array) {
       // this function seems to work fine
       if (flag_new_command_received){
         //printf("New command of %s received.\r\n", rx_command_buffer);
         //printf("New copy buffer of %s received.\r\n", rx_copy_buffer);
         //printf("New buffer of %s received.\r\n", rx_buffer);
         if (rx_command_buffer[0] == 'p') {              // Change joint position target
-            set_joint_pos_data();
+            //set_joint_pos_data();
+            set_joint_pos_data(joint_pos_array);
         } 
         else if (rx_command_buffer[0] == 'v') {       // Change joint velocity target
-            set_joint_vel_data();
+            //set_joint_vel_data();
+            set_joint_vel_data(joint_vel_array);
         } 
         else if (rx_command_buffer[0] == 'o') {       // Change joint sea offset
-            set_sea_offset_data();
+            //set_sea_offset_data();
+            set_sea_offset_data(sea_offset_array);
         } 
         else if (rx_command_buffer[0] == 's') {      // Change high level mode
             trigger_mode_change();
@@ -242,41 +250,42 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
     }
 
     // When the rx_buffer command is a [set joint position] command
-    void set_joint_pos_data() {
+    
+    void set_joint_pos_data(float* joint_pos_array) {
       for (int i=0; i<7; i++) {
-        scaled_joint_pos[i] = joint_dir[i] * uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
-        //scaled_joint_pos[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
+        joint_pos_array[i] = joint_dir[i] * uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
+        //joint_pos_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
       if (print_ros)  {
         printf("got [JOINT POS]: \r\n");
-        print_resp(scaled_joint_pos);
+        print_resp(joint_pos_array);
       }
     }
 
     // When the rx_buffer command is a [set joint velocity] command
-    void set_joint_vel_data() {
+    void set_joint_vel_data(float* joint_vel_array) {
       for (int i=0; i<7; i++) {
-        scaled_joint_vel[i] = uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
-        //scaled_joint_vel[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
+        joint_vel_array[i] = joint_dir[i] * uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
+        //joint_vel_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
       if (print_ros)  {
         printf("got [JOINT VEL]: \r\n");
-        print_resp(scaled_joint_vel);
+        print_resp(joint_vel_array);
       }
     }
 
     // Functions for setting relevant info for seas
-    void set_sea_offset_data() {
+    void set_sea_offset_data(float* sea_offset_array) {
       for (int i=0; i<7; i++) {
         if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
-          scaled_sea_offset[i] = 0;
+          sea_offset_array[i] = 0;
           loopback_offset[i] = 0;
         } else {
-          scaled_sea_offset[i] = uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
-          //scaled_sea_offset[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
-          loopback_offset[i] = (int)(1000 * scaled_sea_offset[i]);
+          sea_offset_array[i] = uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
+          //sea_offset_array[i] = uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
+          loopback_offset[i] = (int)(1000 * sea_offset_array[i]);
         }
       }
     }
@@ -348,8 +357,8 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
     HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
     for (int i=0; i<7; i++) {
-      scaled_sea_lim[i] = joint_configs[i]->lim;
-      scaled_sea_offset[i] = 0;
+      self->scaled_sea_lim[i] = joint_configs[i]->lim;
+      self->scaled_sea_offset[i] = 0;
     }
       
   =}
@@ -384,11 +393,11 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
   reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
 
     // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
-    if (!set_newest_command()){
+    if (!set_newest_command(self->scaled_joint_pos, self->scaled_joint_vel, self->scaled_sea_offset)){
       if ((self->last_mode_change == SET_RUN_POS) || (self->last_mode_change == SET_RUN_VEL)){
         self->set_command_failed_counter += 1;
       }
-    };
+    }
 
     // if the coutner's too big, assume ROS isn't working and reset to idle.
     if (self->set_command_failed_counter_max <= self->set_command_failed_counter){
@@ -429,19 +438,26 @@ reactor ROSInterface (send_period: time = 10 ms, recieve_period: time = 10 ms){
     }
 
     // set target_poisitons and velocities as well as sea offsets
+    
     for (int i=0; i<7; i++) {
-      lf_set(target_pos_ext[i], scaled_joint_pos[i]);   // Update target positions
-      lf_set(target_vel_ext[i], scaled_joint_vel[i]);   // Update target velocities
-      lf_set(sea_lim[i], scaled_sea_lim[i]);      // Update sea offset values
+      lf_set(target_pos_ext[i], self->scaled_joint_pos[i]);   // Update target positions
+      lf_set(target_vel_ext[i], self->scaled_joint_vel[i]);   // Update target velocities
+      printf("ROS_Interface: Sending target_vel_ext[%d] = %d (from scaled_joint_vel = %d)\r\n", 
+             i, (int)(self->scaled_joint_vel[i] * 1000), (int)(self->scaled_joint_vel[i] * 1000));
+      lf_set(sea_lim[i], self->scaled_sea_lim[i]);      // Update sea offset values
 
 
       HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1));
       if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
         lf_set(sea_offset[i], 0);      // Update sea offset values
       } else {
-        lf_set(sea_offset[i], scaled_sea_offset[i]);      // Update sea offset values
+        lf_set(sea_offset[i], self->scaled_sea_offset[i]);      // Update sea offset values
       }
-    }  
+    }
+    printf("target_vel_ext: ");
+    print_resp(target_vel_ext);
+    printf("scaled_joint_vel: ");
+    print_resp(self->scaled_joint_vel);  
   =}
 
 }

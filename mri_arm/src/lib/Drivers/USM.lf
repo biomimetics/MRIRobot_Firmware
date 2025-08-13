@@ -228,7 +228,7 @@ reactor USM {
     }
     if (print_usm && printcnt>=printcnt_lim) {
           printf("\r\n");
-    }  
+    }
 
     // Set USM enable values
     if (force_disable_motor_pins->value){

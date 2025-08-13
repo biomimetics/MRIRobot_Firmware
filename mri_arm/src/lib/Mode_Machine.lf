@@ -190,6 +190,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     initial mode STARTUP {
       reaction(system_tick) -> IDLE {=
         lf_set_mode(IDLE);
+        handleModeSwitch(SET_IDLE);
       =}
     }
 

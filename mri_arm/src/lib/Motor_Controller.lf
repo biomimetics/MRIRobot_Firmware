@@ -73,6 +73,10 @@ reactor MotorController(refresh_period: time = 5 ms) {
   state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
   state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for position control
 
+  state _target_mode: TARGET_SRC = 0
+  state _enable_motor_command: bool = false
+  state _target_sel: MOTOR_MODE[7] = {1, 1, 1, 1, 1, 1, 1}
+
   timer trigger(0, refresh_period)
   control_u0 = new SEAController()
 
@@ -131,25 +135,41 @@ reactor MotorController(refresh_period: time = 5 ms) {
   // +----------------------------------------------------------------+
   // | MUX between the different target modes
   // +----------------------------------------------------------------+
-  reaction(target_vel_int, target_vel_ext, target_mode) {=
-    if (target_mode->value == MODE_INT) {
-      for(int i=0; i<7; i++)
+  reaction(target_vel_int) {=
+    //printf("target_vel_ext reaction triggered!\r\n");
+    if (self->_target_mode == MODE_INT) {
+      for(int i=0; i<7; i++){
         self->speed_spc[i] = target_vel_int[i]->value;
-    } else if(target_mode->value == MODE_EXT) {
-      for(int i=0; i<7; i++)
-        self->speed_spc[i] = target_vel_ext[i]->value;
+      }
     }
   =}
 
-  reaction(target_pos_int, target_pos_ext, target_mode) {=
-    if (target_mode->value == MODE_INT) {
-      for(int i=0; i<7; i++)
-        self->target_pos[i] = target_pos_int[i]->value;
-    } else if(target_mode->value == MODE_EXT) {
-      for(int i=0; i<7; i++)
-        self->target_pos[i] = target_pos_ext[i]->value;
+  reaction(target_vel_ext) {=
+    printf("target_vel_ext reaction triggered!\r\n");
+    if(self->_target_mode == MODE_EXT) {
+      for(int i=0; i<7; i++){
+        self->speed_spc[i] = target_vel_ext[i]->value;
+        printf("Motor %d: speed_spc being set to %f from input %f\r\n", i, self->speed_spc[i], target_vel_ext[i]->value);
+      }
     }
   =}
+
+  reaction(target_pos_int) {=
+    if (self->_target_mode == MODE_INT) {
+      for(int i=0; i<7; i++) {
+        self->target_pos[i] = target_pos_int[i]->value;
+      }
+    }
+  =}
+
+  reaction(target_pos_ext) {=
+    if(self->_target_mode == MODE_EXT) {
+      for(int i=0; i<7; i++){
+        self->target_pos[i] = target_pos_ext[i]->value;
+      }
+    }
+  =}
+
   // +----------------------------------------------------------------+
 
 
@@ -189,16 +209,53 @@ reactor MotorController(refresh_period: time = 5 ms) {
     
   =}
 
-  
+  reaction(enable_motor_command) {=
+    bool old_motor_command_bool = self->_enable_motor_command;
+    self->_enable_motor_command = enable_motor_command->value;
+    printf("enable_motor_command reaction called, setting value to from %d to new value of %d from input %d\r\n", old_motor_command_bool, self->_enable_motor_command, enable_motor_command->value);
+
+  =}
+
+  reaction(target_mode) {=
+    self->_target_mode = target_mode->value;
+    printf("target_mode reaction called, setting value to %d from input %d\r\n",  self->_target_mode, target_mode->value);
+  =}
+
+  reaction(target_sel) {=
+    int old_motor_command = 0;
+    for (int i = 0; i<7; i++){
+      old_motor_command = self->_target_sel[i];
+      self->_target_sel[i] = target_sel[i]->value;
+      printf("target_sel reaction called, setting value to from %d to new value of %d from input %d\r\n", old_motor_command,  self->_target_sel[i], target_sel[i]->value);
+    }
+  =}
+
   // +----------------------------------------------------------------+
   // | Set speed output
   // +----------------------------------------------------------------+
-  reaction(trigger, target_sel) enable_motor_command -> speed{=
-    if (enable_motor_command){
+  reaction(trigger) -> speed{=
+    if (self->_enable_motor_command){
       // We use this to set either the speed or position of the motors
-    for(int i=0; i<7; i++)
-      lf_set(speed[i], (target_sel[i]->value == MODE_POS)? self->speed_posc[i]: self->speed_spc[i]);
-    }
+      printf("Motor_Controller: Setting speeds of: ");
+        for(int i=0; i<7; i++){
+          if ((self->_target_sel[i] == MODE_POS)){
+            lf_set(speed[i], self->speed_posc[i]);
+          }
+          else if((self->_target_sel[i] == MODE_VEL)){
+            printf("%f,", self->speed_spc[i]);
+            lf_set(speed[i], self->speed_spc[i]);
+          }
+          else{
+            printf("Received bad target_sel! Got %d, expected %d or %d. Not sending!", self->_target_sel[i], MODE_POS, MODE_VEL);
+          }
+      // lf_set(speed[i], (target_sel[i]->value == MODE_POS)? self->speed_posc[i]: self->speed_spc[i]);
+      }
+      printf("\r\n");
+  }
+  else{
+    //printf("_enable_motor_command is off!\r\n");
+  }
+  
     // consider adding an else statement to force velocity control and set the target velocities to zero. Mode_Machine should do that anyways.
   =}
 }
