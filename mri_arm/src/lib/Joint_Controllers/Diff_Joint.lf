@@ -24,8 +24,8 @@ reactor Diff_Joint (
     [Differential Gear Driver]
     - motor space: position of the indivial USMs
     - joint space: position of the differential gear modules    
-    
     */
+
     input[2] current_pos: float             // Current position in      [motor space]
     input[2] sea_pos: float                 // Current SEA position     [motor space]
     input[2] target_joint: float            // Target positionin        [joint space]
@@ -85,7 +85,7 @@ reactor Diff_Joint (
 
     // Comvert the motor outputs in [joint space] -> [motor space]
     reaction(control_u0.out, control_u1.out) -> speed_out {=
-        lf_set(speed_out[1], control_u1.out->value - control_u0.out->value);
+        lf_set(speed_out[1], control_u1.out->value - control_u0.out->value); // WHY IS [1] ONE?
         lf_set(speed_out[0], control_u1.out->value + control_u0.out->value);
     =}
 

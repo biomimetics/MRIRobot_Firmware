@@ -13,6 +13,7 @@ target C {
 import SEAController from "Joint_Controllers/SEA.lf"
 import Diff_Motor from "Joint_Controllers/Diff_Motor.lf"
 import Diff_Joint from "Joint_Controllers/Diff_Joint.lf"
+import Diff_Joint_Velocity from "Joint_Controllers/Diff_Joint_Vel.lf"
 
 
 preamble {=
@@ -58,6 +59,8 @@ reactor MotorController(refresh_period: time = 10 ms) {
   input[7] sea_lim: float
 
   input[7] qdec_pos: float
+  input[7] qdec_vel: float
+  
   input[7] qdec_sea: float
 
   input target_mode: TARGET_SRC
@@ -76,6 +79,8 @@ reactor MotorController(refresh_period: time = 10 ms) {
   state _target_mode: TARGET_SRC = 0
   state _enable_motor_command: bool = false
   state _target_sel: MOTOR_MODE[7] = {1, 1, 1, 1, 1, 1, 1}
+
+  state print_motor_controller: bool = true
 
   timer trigger(0, refresh_period)
   control_u0 = new SEAController()
@@ -237,13 +242,13 @@ reactor MotorController(refresh_period: time = 10 ms) {
   reaction(trigger) -> speed{=
     if (self->_enable_motor_command){
       // We use this to set either the speed or position of the motors
-      printf("Motor_Controller: Setting speeds of: ");
+      if (self->print_motor_controller) {printf("Motor_Controller: Setting speeds of: ");}
         for(int i=0; i<7; i++){
           if ((self->_target_sel[i] == MODE_POS)){
             lf_set(speed[i], self->speed_posc[i]);
           }
           else if((self->_target_sel[i] == MODE_VEL)){
-            printf("%d,", (int)(self->speed_spc[i] * 1000));
+            if (self->print_motor_controller) {printf("%d,", (int)(self->speed_spc[i] * 1000));}
             lf_set(speed[i], self->speed_spc[i]);
           }
           else{

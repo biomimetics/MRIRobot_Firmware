@@ -30,6 +30,8 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   input[7] current_joint: float // position of joints from usm encoders
   input[7] current_joint_sea: float // position of seas from sea encoders
 
+  //input[7] current_joint_vel: float // position of joints from usm encoders
+
   // outputs for sending to motor controller
   output[7] target_pos_ext: float
   output[7] target_vel_ext: float

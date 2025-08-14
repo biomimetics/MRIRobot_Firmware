@@ -10,26 +10,48 @@ preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
   #include <../../../motor_config.h>
+
+  #define TWO_PI 6.28318
+  #define NSEC_TO_SEC 0.000000001
+  #define MSEC_TO_SEC 0.001
 =}
 
 reactor QDEC(sample_period: time = 5 ms) {
   mutable input reset_qdec: bool
+  mutable input enable_qdec: bool
 
   output[7] qdec_out: float
   output[7] sea_out: float
 
+  output[7] qdec_vel_out: float
+
   timer trigger(0, sample_period)
   timer enable(0, 20 ms)
 
-  //state _reset_qdec: bool = false;
+  state _reset_qdec: bool = false
+  state _enable_qdec: bool = false
 
+  // internal copies of joint and sea encoder values to use
+  state _qdec_pos: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state _qdec_pos_last: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state _qdec_vel_est: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
+  state _qdec_convert_motor_to_joint: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to joint space
+
+  state _sea_pos: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state _sea_pos_last: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
+  state _sea_vel_est: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
+
+  state prev_time: time = 0
+
+  
   preamble {=
     UART_HandleTypeDef huart3;
 
     DMA_HandleTypeDef hdma_usart3_rx;
     DMA_HandleTypeDef hdma_usart3_tx;
 
-    static int print_enc = false;
+    static int print_encoder = true;
     static int printcnt = 0;
     static int printcnt_lim = 300;
 
@@ -94,6 +116,8 @@ reactor QDEC(sample_period: time = 5 ms) {
     }
 
     static int last_switch = 0;
+    long reference_tick = 0;
+    long current_tick = 0;
   =}
 
   reaction(startup) {=
@@ -101,24 +125,63 @@ reactor QDEC(sample_period: time = 5 ms) {
     MX_UART3_Init();
     MX_GPIO_Init();
 
+    if (print_encoder){printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");}
     HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
 
     HAL_UART_Receive_DMA(&huart3, data, 98);
     HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
+
+    // computing conversions from motor/encoder space to joint space
+    for (int i = 0; i<7; i++){
+      self->_qdec_convert_motor_to_joint[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio);
+    }
+
+    self->prev_time = lf_time_physical_elapsed(); //lf_time_physical();
+    reference_tick = HAL_GetTick(); // gives miliseconds since last reboot
   =}
 
   reaction(reset_qdec) {=
-    if (reset_qdec->value){
+    self->_reset_qdec = reset_qdec->value;
+    if (self->_reset_qdec){
       HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
       HAL_UART_Receive_DMA(&huart3, data, 98);
     }
-    reset_qdec->value = false; // should work if reset_qdec is mutable?
+    self->_reset_qdec = false; 
+    reset_qdec->value = self->_reset_qdec;// should work if reset_qdec is mutable?
+  =}
+
+  reaction(enable_qdec) {=
+    self->_enable_qdec = enable_qdec->value; // sets other reactions/methods know if encoders are active or not
+
+    if (self->_enable_qdec){
+      HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
+      if (print_encoder) {printf("Enabling Encoders\r\n");}
+    } else {
+      HAL_UART_Transmit(&huart3, qdec_disable, 1, HAL_MAX_DELAY);
+      if (print_encoder) {printf("Disabling Encoders\r\n");}
+    }
+
   =}
 
   // Update Encoder values
   // This function should take approximately 1ms to operate
   reaction(trigger) -> qdec_out, sea_out {=
+
+    // from pid controller
+    // instant_t now = lf_time_logical();
+    // interval_t interval = now - self->prev_time;
+
+    //self->last_pos = current_pos->value;
+    
+    //printf("LF: now: %ld, self->prev_time: %ld, diff: %ld\r\n", now, self->prev_time, interval);
+
+    // compute the interval in seconds between loop triggers
+    long now_tick = HAL_GetTick(); // gives miliseconds since last stm32 reset
+    long diff_tick = now_tick - reference_tick;
+    double interval_sec = ((double)(diff_tick)) * MSEC_TO_SEC; // should be loop time in seconds
+    reference_tick = now_tick;
+
     long start = HAL_GetTick();
 
 
@@ -132,15 +195,13 @@ reactor QDEC(sample_period: time = 5 ms) {
     }
 
     // Get values for SEA encoders
-    //if (print_enc && printcnt>=printcnt_lim) 
-    //{  printf("Encoder.lf: ");}  
     for (int i=0; i<4; i++) {
       // 0.5644 = 25.4/45
       float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr );
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
 
-      //if (print_enc && printcnt>=printcnt_lim) {
+      //if (print_encoder && printcnt>=printcnt_lim) {
       //  printf("%d  ", (int) (sea_out[i]->value*100));
       //}
     }
@@ -151,37 +212,57 @@ reactor QDEC(sample_period: time = 5 ms) {
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
 
-      if (print_enc && printcnt>=printcnt_lim) {
+      if (print_encoder && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (sea_out[i]->value*100));
       }
     }
 
 
-
-
-    if (print_enc && printcnt>=printcnt_lim) {
+    if (print_encoder && printcnt>=printcnt_lim) {
       printf(" | ");
     }
 
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
-      float motor_raw = 2*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr);
-      lf_set(qdec_out[i-7],  motor_raw / motor_configs[i-7]->gear_ratio);
-      if (print_enc && printcnt>=printcnt_lim) {
+      self->_qdec_pos_last[i-7] = self->_qdec_pos[i-7];
+      self->_qdec_pos[i-7] = ((float) (count[i])) * self->_qdec_convert_motor_to_joint[i-7];
+      self->_qdec_vel_est[i-7] = (self->_qdec_pos[i-7] - self->_qdec_pos_last[i-7]) / (interval_sec);
+
+      lf_set(qdec_out[i-7],  self->_qdec_pos[i-7]); // should be units of radians
+      lf_set(qdec_vel_out[i-7],  self->_qdec_vel_est[i-7]); // should be units of radians per second
+
+      if (print_encoder && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (qdec_out[i-7]->value*100));
       }
     }
 
-    long end = HAL_GetTick();
-    if (print_enc && printcnt>=printcnt_lim) {
-      printf("[%ld]", end-start);
-      printf("| \r\n");
+    /*
+    // Get values for USM encoders
+    for (int i=7; i<14; i++) {
+      float motor_raw = 2.0*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr);
+      self->_qdec_pos[i-7] = motor_raw / motor_configs[i-7]->gear_ratio;
+      lf_set(qdec_out[i-7],  _qdec_pos[i-7]);
+      if (print_encoder && printcnt>=printcnt_lim) {
+        printf("%d  ", (int) (qdec_out[i-7]->value*100));
+      }
     }
+    */
+
+    if (print_encoder){printf("ms to run: [%ld]\r\n", HAL_GetTick()-start)};
+    //if (print_encoder && printcnt>=printcnt_lim) {
+    //  printf("[%ld]", end-start);
+    //  printf("| \r\n");
+    //}
 
     printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
+
+    // estimate joint velocities
+
+    self->prev_time = now;
   =}
 
 
+  /*
   reaction(enable) {=
     volatile int read_switch = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, read_switch);
@@ -196,4 +277,5 @@ reactor QDEC(sample_period: time = 5 ms) {
     last_switch = read_switch;
 
   =}
+  */
 }

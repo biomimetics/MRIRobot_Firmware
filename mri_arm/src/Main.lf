@@ -102,6 +102,7 @@ main reactor {
 
   // Route encoder information to relevant reactors
   qdec.qdec_out -> motor_controller.qdec_pos
+  qdec.qdec_vel_out -> motor_controller.qdec_vel
   qdec.qdec_out -> ros_controller.current_joint after 0;
   qdec.sea_out -> motor_controller.qdec_sea
   qdec.sea_out -> ros_controller.current_joint_sea after 0;
