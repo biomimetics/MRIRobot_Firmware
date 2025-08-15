@@ -149,15 +149,28 @@ reactor MotorController(refresh_period: time = 10 ms) {
     }
   =}
 
+  /*
+  reaction(target_joint_vel) -> motor_cmd {=
+        // Transform joint space velocities to motor space velocities
+        // For differential: 
+        // motor0 = pitch - roll
+        // motor1 = pitch + roll
+        float pitch = target_joint_vel[0]->value;
+        float roll  = target_joint_vel[1]->value;
+        
+        lf_set(motor_cmd[0], pitch - roll);
+        lf_set(motor_cmd[1], pitch + roll);
+    =}
+  */
   reaction(target_vel_ext) {=
-    //printf("target_vel_ext reaction triggered!\r\n");
-    for(int i=0; i<7; i++){
-        self->speed_spc[i] = target_vel_ext[i]->value;
-        //printf("Motor %d: speed_spc being set to %d from input %d\r\n", i, (int)(self->speed_spc[i] * 1000), (int)(target_vel_ext[i]->value * 1000));
-      }
-    //if(self->_target_mode == MODE_EXT) {
-    //  
-    //}
+    // very simple implimentation for the differential joints, doesn't have other controllers
+    self->speed_spc[0] = target_vel_ext[0]->value;
+    self->speed_spc[1] = target_vel_ext[1]->value - target_vel_ext[2]->value; // pitch - roll
+    self->speed_spc[2] = target_vel_ext[1]->value + target_vel_ext[2]->value; // pitch + roll
+    self->speed_spc[3] = target_vel_ext[3]->value - target_vel_ext[4]->value; // pitch - roll
+    self->speed_spc[4] = target_vel_ext[3]->value + target_vel_ext[4]->value; // pitch + roll
+    self->speed_spc[5] = target_vel_ext[5]->value - target_vel_ext[6]->value; // pitch - roll
+    self->speed_spc[6] = target_vel_ext[5]->value + target_vel_ext[6]->value; // pitch + roll
   =}
 
   reaction(target_pos_int) {=
