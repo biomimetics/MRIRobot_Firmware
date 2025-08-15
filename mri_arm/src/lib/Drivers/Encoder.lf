@@ -51,9 +51,9 @@ reactor QDEC(sample_period: time = 5 ms) {
     DMA_HandleTypeDef hdma_usart3_rx;
     DMA_HandleTypeDef hdma_usart3_tx;
 
-    static int print_encoder = true;
+    static int print_encoder = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;
-    static int printcnt_lim = 300;
+    static int printcnt_lim = 100; // print every nth time
 
 
     // QDEC Commands
@@ -166,7 +166,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
   // Update Encoder values
   // This function should take approximately 1ms to operate
-  reaction(trigger) -> qdec_out, sea_out {=
+  reaction(trigger) -> qdec_out, qdec_vel_out, sea_out {=
 
     // from pid controller
     // instant_t now = lf_time_logical();
@@ -194,6 +194,9 @@ reactor QDEC(sample_period: time = 5 ms) {
                                + (data[4+(i*7)]<<32) + (data[5+(i*7)]<<40) + (data[6+(i*7)]<<48);
     }
 
+    if (print_encoder && printcnt>=printcnt_lim) {
+      printf("sea: ");
+    }
     // Get values for SEA encoders
     for (int i=0; i<4; i++) {
       // 0.5644 = 25.4/45
@@ -201,9 +204,9 @@ reactor QDEC(sample_period: time = 5 ms) {
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
 
-      //if (print_encoder && printcnt>=printcnt_lim) {
-      //  printf("%d  ", (int) (sea_out[i]->value*100));
-      //}
+      if (print_encoder && printcnt>=printcnt_lim) {
+        printf("%d  ", (int) (sea_out[i]->value*100));
+      }
     }
 
     for (int i=4; i<7; i++) {
@@ -219,7 +222,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
 
     if (print_encoder && printcnt>=printcnt_lim) {
-      printf(" | ");
+      printf(". qdec: ");
     }
 
     // Get values for USM encoders
@@ -235,7 +238,9 @@ reactor QDEC(sample_period: time = 5 ms) {
         printf("%d  ", (int) (qdec_out[i-7]->value*100));
       }
     }
-
+    if (print_encoder && printcnt>=printcnt_lim) {
+      printf("\r\n");
+    }
     /*
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
@@ -248,7 +253,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     }
     */
 
-    if (print_encoder){printf("ms to run: [%ld]\r\n", HAL_GetTick()-start)};
+    //if (print_encoder){printf("ms to run: [%ld]\r\n", HAL_GetTick()-start);}
     //if (print_encoder && printcnt>=printcnt_lim) {
     //  printf("[%ld]", end-start);
     //  printf("| \r\n");
@@ -258,7 +263,6 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // estimate joint velocities
 
-    self->prev_time = now;
   =}
 
 
