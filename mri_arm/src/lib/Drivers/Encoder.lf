@@ -20,6 +20,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
   timer trigger(0, sample_period)
   timer enable(0, 20 ms)
+  timer print_timer(0, 5000 ms)
 
   //state _reset_qdec: bool = false;
 
@@ -115,6 +116,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     }
     reset_qdec->value = false; // should work if reset_qdec is mutable?
   =}
+
 
   // Update Encoder values
   // This function should take approximately 1ms to operate

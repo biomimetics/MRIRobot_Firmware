@@ -45,6 +45,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   timer trigger_send(0 ms, send_period) // unused!
   timer trigger_update(0 ms, recieve_period)
   timer trigger_test(0 ms, 2000 ms)
+  timer trigger_print(0 ms, 1000 ms)
 
   timer timer_idle_reset(0 ms, 100 ms)
   state set_command_failed_counter: int = 0 //
@@ -363,6 +364,10 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
       
   =}
 
+  reaction(trigger_print) {=
+    printf("encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
+    printf("sea encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
+  =}
   /*##### 
     # Input reactions
     #####*/
