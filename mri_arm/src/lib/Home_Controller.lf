@@ -8,7 +8,8 @@ target C {
 
 preamble {=
   #include "stm32f4xx_hal.h"
-  #include "stm32_startup.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
   #include <stdio.h>
 
   #ifndef __HOME_MODE_ENUM

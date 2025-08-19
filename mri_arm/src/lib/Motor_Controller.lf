@@ -19,7 +19,8 @@ import Diff_Joint_Velocity from "Joint_Controllers/Diff_Joint_Vel.lf"
 preamble {=
   #include <stdio.h>
   #include "stm32f4xx_hal.h"
-  #include "stm32_startup.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
   #include <../../../sm_config.h>
 
   /*

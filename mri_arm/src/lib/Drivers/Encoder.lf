@@ -46,10 +46,10 @@ reactor QDEC(sample_period: time = 5 ms) {
 
   
   preamble {=
-    UART_HandleTypeDef huart3;
+    extern UART_HandleTypeDef huart3;
 
-    DMA_HandleTypeDef hdma_usart3_rx;
-    DMA_HandleTypeDef hdma_usart3_tx;
+    extern DMA_HandleTypeDef hdma_usart3_rx;
+    extern DMA_HandleTypeDef hdma_usart3_tx;
 
     static int print_encoder = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;

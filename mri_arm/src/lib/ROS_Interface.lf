@@ -8,7 +8,8 @@ target C {
 
 preamble {=
   #include "stm32f4xx_hal.h"
-  #include "stm32_startup.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
   #include <stdio.h>
 
   #include <../../../motor_config.h>
@@ -18,6 +19,7 @@ preamble {=
   #define DMA_TX_BUFFER_SIZE 60
   #define DMA_RX_BUFFER_SIZE 60
   #define DMA_RECEIVE_SIZE 15
+  //#define DMA_UART huart6 // was huart1
 =}
 
 reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
@@ -61,11 +63,13 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
   preamble {=
-    UART_HandleTypeDef huart1;        // usb-c tied uart for computer communication
-    extern UART_HandleTypeDef huart2;
 
-    DMA_HandleTypeDef hdma_usart1_rx;
-    DMA_HandleTypeDef hdma_usart1_tx;
+    extern UART_HandleTypeDef huart1;        // usb-c tied uart for computer communication
+    extern UART_HandleTypeDef huart4; // used for ROS interface
+    extern UART_HandleTypeDef huart6; // used for ROS interface if huart4 is misbehaving
+
+    extern DMA_HandleTypeDef hdma_usart1_rx;
+    extern DMA_HandleTypeDef hdma_usart1_tx;
 
     static int print_ros = true;
 
@@ -106,28 +110,6 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     // | Init functions
     // +---------------------------------------------------+
 
-    // fast usbc, should be /dev/ttyUSB0 on ros side
-    static void MX_UART1_Init(void) {
-      huart1.Instance = USART1;
-      huart1.Init.BaudRate = 921600;
-      // huart1.Init.BaudRate = 230400;
-      huart1.Init.WordLength = UART_WORDLENGTH_8B;
-      huart1.Init.StopBits = UART_STOPBITS_1;
-      huart1.Init.Parity = UART_PARITY_NONE;
-      huart1.Init.Mode = UART_MODE_TX_RX;
-      huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-      huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-      HAL_UART_Init(&huart1);
-    }
-
-    static void MX_DMA_Init(void) {
-      __HAL_RCC_DMA2_CLK_ENABLE();
-      HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
-      HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
-      HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 0, 0);
-      HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
-
-    }
 
     // +---------------------------------------------------+
     // | Helper functions
@@ -198,7 +180,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         //printf("rx_command_buffer after memmove: %s\r\n", rx_command_buffer);
       }
       
-      HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+      HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
     }
 
 
@@ -248,7 +230,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
             enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
             sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
             loopback_offset[0], loopback_offset[1], loopback_offset[2], loopback_offset[3], loopback_offset[4], loopback_offset[5], loopback_offset[6]);
-      HAL_UART_Transmit_DMA(&huart1, tx_buffer, num);
+      HAL_UART_Transmit_DMA(&DMA_UART, tx_buffer, num);
     }
 
     // When the rx_buffer command is a [set joint position] command
@@ -334,13 +316,12 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
 
   reaction(startup) {=
     // Setup UART interfaces
-    MX_DMA_Init();
-    MX_UART1_Init();
+    // should be done in main.lf
 
     // Prep ROS bridge DMA recieve
     //HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
     //printf("ROS_Interface: In startup reaction before HAL_UARTEx_ReceiveToIdle_DMA...\r\n");
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buffer, DMA_RX_BUFFER_SIZE);
+    HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
 
     /* Configure Switch pins : PC1 */
     GPIO_InitTypeDef GPIO_InitStruct = {0};

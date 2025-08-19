@@ -20,10 +20,10 @@ reactor USM {
 
   //state force_disable_motor_pins
   preamble {=
-    TIM_HandleTypeDef htim1;
-    TIM_HandleTypeDef htim2;
-    TIM_HandleTypeDef htim3;
-    TIM_HandleTypeDef htim4;
+    extern TIM_HandleTypeDef htim1; // unused
+    extern TIM_HandleTypeDef htim2; // unused
+    extern TIM_HandleTypeDef htim3; // used for USM PWM
+    extern TIM_HandleTypeDef htim4; // used for USM PWM
 
     volatile float _speed[7] = {0, 0, 0, 0, 0, 0, 0};
     volatile float USM_LIMIT = 0.06;
