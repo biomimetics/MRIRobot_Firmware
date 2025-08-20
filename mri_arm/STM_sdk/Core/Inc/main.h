@@ -66,11 +66,8 @@ int _write(int file, char *ptr, int len);
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 
-/* USER CODE BEGIN Private defines */
-//#define DMA_UART huart6
-#define DMA_UART huart4
-
-/* USER CODE END Private defines */
+// main LF defs and options
+#define DMA_UART huart4 // huart1 or huart6 are other DMA compative UARTs
 
 #ifdef __cplusplus
 }
