@@ -9,7 +9,36 @@ target C {
 preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
+  #include <stdlib.h>
   #include <../../../motor_config.h>
+
+  // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
+  #define ARR_PERIOD 65535 // 16-bit timer period for ARR (auto reload register)
+  #define PWM_RPM_MAX 250.0 // 250 RPM
+  
+  // these two consts aren't needed if we can assume 3.3V is the max pin voltage. Make sure it's not a 5V output!
+  #define PWM_VOLTAGE_MAX 3.3 // voltage at [3.3V] 100% duty cycle
+  #define PWM_RPM_PER_VOLT 75.757576 // 250.0RPM / 3.3V based on tekceleo datasheet for WLG-75-R motors
+
+  // safety const
+  #define USM_MAX_DUTY_CYCLE 1.0 // only 100% for PWM pin testing //0.06 // 6% duty cycle
+
+  // conversion for if inputs are in rad_per_sec
+  #define RAD_PER_SEC_TO_RPM 9.549297
+
+  // note that all of this assumes a max voltage of 3.3V! If it's actually different, these numbers are wrong.
+  int convert_speed_rpm_to_pwm_ccr(float speed_rpm){
+    float duty_cycle = abs(speed_rpm) / ((float) PWM_RPM_MAX);
+    if (duty_cycle > USM_MAX_DUTY_CYCLE){
+      duty_cycle = USM_MAX_DUTY_CYCLE;
+    }
+    return ((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
+  }
+
+  int convert_speed_rad_per_sec_to_pwm_ccr(float speed_rad_per_sec){
+    return convert_speed_rpm_to_pwm_ccr(RAD_PER_SEC_TO_RPM * speed_rad_per_sec);
+  }
+
 =}
 
 reactor USM {
@@ -41,7 +70,7 @@ reactor USM {
       htim3.Instance = TIM3;
       htim3.Init.Prescaler = 0;
       htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-      htim3.Init.Period = 1000;
+      htim3.Init.Period = ARR_PERIOD; //1000;
       htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
       htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
       ;HAL_TIM_Base_Init(&htim3);
@@ -75,7 +104,7 @@ reactor USM {
       htim4.Instance = TIM4;
       htim4.Init.Prescaler = 0;
       htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-      htim4.Init.Period = 1000;
+      htim4.Init.Period = ARR_PERIOD; //1000;
       htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
       htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
       HAL_TIM_Base_Init(&htim4);
@@ -168,6 +197,7 @@ reactor USM {
         return  min((int)((1000 * max(USM_MIN_SPEED, speed) * motor_configs[idx]->speed_ratio)/100), motor_configs[idx]->max_speed);
     }
 
+    void set_motor_pwm_timers()
   =}
 
 
@@ -268,6 +298,7 @@ reactor USM {
              (_speed[6] > USM_LIMIT || _speed[6] < -USM_LIMIT));
       }
 
+      // set enable pins if speeds are within the limits
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    1); // PB0 is the LED
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    _speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    _speed[1] > USM_LIMIT || _speed[1] < -USM_LIMIT);
@@ -278,7 +309,7 @@ reactor USM {
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   _speed[6] > USM_LIMIT || _speed[6] < -USM_LIMIT);
       HAL_Delay(1);
 
-      // Set USM direction values
+      // Set USM direction values based on sign of _speed
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   _speed[0] >= 0);
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    _speed[1] >= 0);
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    _speed[2] >= 0);
@@ -288,6 +319,7 @@ reactor USM {
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   _speed[6] >= 0);
       HAL_Delay(1);
 
+      /*
       // Set USM speed values
       TIM3->CCR1 = convSpeed(_speed[0], 0);  // Set period for USM0
       TIM3->CCR2 = convSpeed(_speed[1], 1);  // Set period for USM1
@@ -296,6 +328,18 @@ reactor USM {
       TIM4->CCR1 = convSpeed(_speed[4], 4);  // Set period for USM4
       TIM4->CCR2 = convSpeed(_speed[5], 5);  // Set period for USM5
       TIM4->CCR3 = convSpeed(_speed[6], 6);  // Set period for USM6
+      */
+        
+      // do a safety check on the _speed values first to make sure they're in the desired range
+
+      // send the safe speeds to the CCR channels for the two timers
+      TIM3->CCR1 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[0]);  // Set period for USM0
+      TIM3->CCR2 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[1]);  // Set period for USM1
+      TIM3->CCR3 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[2]);  // Set period for USM2
+      TIM3->CCR4 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[3]);  // Set period for USM3
+      TIM4->CCR1 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[4]);  // Set period for USM4
+      TIM4->CCR2 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[5]);  // Set period for USM5
+      TIM4->CCR3 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[6]);  // Set period for USM6
 
       printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
     }

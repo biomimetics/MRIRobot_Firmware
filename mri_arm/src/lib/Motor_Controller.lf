@@ -129,6 +129,11 @@ reactor MotorController(refresh_period: time = 10 ms) {
     control_j1.sea_lim,
     control_j2.sea_lim
 
+  preamble{=
+    bool use_diff_vel_ext = true; // move this to an input/state
+    bool use_motor_configs = false; // get rid of this asap, just for testings
+    =}
+    
   reaction(startup) -> control_u0.constants{=
     // Control Constants [Kp, Kd, Ki]
     lf_set(control_u0.constants[0], joint_configs[0]-> Kp);
@@ -154,8 +159,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
   // jacobian for motors -> joints is [[0.5, -0.5], [0.5, 0.5]], inv for joints -> motors (this case) is [[1, 1], [-1, 1]]. assumes counterclockwise positive for both motors pointing in towards the center.
   reaction(target_vel_ext) {=
     // very simple implimentation for the differential joints, doesn't have other controllers
-    bool use_diff_vel_ext = true; // move this to an input/state
-    bool use_motor_configs = false; // get rid of this asap, just for testing
+    
     if (self->_target_mode == MODE_EXT) {
       if (use_diff_vel_ext){
         if (use_motor_configs){
