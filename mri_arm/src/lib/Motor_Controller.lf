@@ -13,7 +13,6 @@ target C {
 import SEAController from "Joint_Controllers/SEA.lf"
 import Diff_Motor from "Joint_Controllers/Diff_Motor.lf"
 import Diff_Joint from "Joint_Controllers/Diff_Joint.lf"
-import Diff_Joint_Velocity from "Joint_Controllers/Diff_Joint_Vel.lf"
 
 
 preamble {=
