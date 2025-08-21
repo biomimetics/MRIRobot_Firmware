@@ -41,7 +41,7 @@ reactor USM {
       htim3.Instance = TIM3;
       htim3.Init.Prescaler = 0;
       htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-      htim3.Init.Period = 1000;
+      htim3.Init.Period = 10000; //1000;
       htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
       htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
       ;HAL_TIM_Base_Init(&htim3);
@@ -75,7 +75,7 @@ reactor USM {
       htim4.Instance = TIM4;
       htim4.Init.Prescaler = 0;
       htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-      htim4.Init.Period = 1000;
+      htim4.Init.Period = 10000; //1000;
       htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
       htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
       HAL_TIM_Base_Init(&htim4);
@@ -160,12 +160,25 @@ reactor USM {
       return a>b? a: b;
     }
 
-    static int convSpeed(float speed, int idx) {
-      float USM_MIN_SPEED = 3;
+    static int _OLD_convSpeed(float speed, int idx) {
+      float USM_MIN_SPEED = 0.0; //3.0;
       if (speed < 0)
         return  min((int)((1000 * max(USM_MIN_SPEED, -speed) * motor_configs[idx]->speed_ratio)/100), motor_configs[idx]->max_speed);
       else
         return  min((int)((1000 * max(USM_MIN_SPEED, speed) * motor_configs[idx]->speed_ratio)/100), motor_configs[idx]->max_speed);
+    }
+
+    static int convSpeed(float speed, int idx) {
+      //float USM_MAX_SPEED = 3.0; //3.0;
+      int USM_MAX_SPEED = 40;
+      float _speed = speed;
+      if (_speed < 0){
+        _speed = -1 * _speed;
+      }
+      //return  min((int)((10 * min(USM_MAX_SPEED, _speed) * motor_configs[idx]->speed_ratio)), motor_configs[idx]->max_speed);
+      //return (int)(10 * min(USM_MAX_SPEED, _speed));
+      return min(USM_MAX_SPEED, (int)(1000.0 * _speed));
+
     }
 
   =}
@@ -297,6 +310,7 @@ reactor USM {
       TIM4->CCR2 = convSpeed(_speed[5], 5);  // Set period for USM5
       TIM4->CCR3 = convSpeed(_speed[6], 6);  // Set period for USM6
 
+      printf("convSpeed for _speed[0] of %d: %d\r\n", (int)(1000 * _speed[0]), convSpeed(_speed[0], 0));
       printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
     }
   
