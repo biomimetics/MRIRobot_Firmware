@@ -87,26 +87,19 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     bool flag_handshake_success = false; // unused!
     bool flag_new_command_received = false;
 
-    float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1};
+    float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1}; // why are both of these defined and used in different functions?
+    float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
+    int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
 
     int enc_data[7];
     int sea_data[7];
-
-    //float scaled_joint_pos[7]= {0, 0, 0, 0, 0, 0, 0};
-    //float scaled_joint_vel[7]= {0, 0, 0, 0, 0, 0, 0};
-
-    //float scaled_sea_offset[7] = {0, 0, 0, 0, 0, 0, 0};
-    //float scaled_sea_lim[7]= {1000, 1000, 1000, 1000, 1000, 1000, 1000};
-
-    float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
-    int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
 
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
 
     bool flag_update_set_mode_change = false;
     int desired_state = 0;
-    
+
     // +---------------------------------------------------+
     // | Init functions
     // +---------------------------------------------------+

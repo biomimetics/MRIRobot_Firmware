@@ -36,7 +36,7 @@ reactor QDEC(sample_period: time = 5 ms) {
   state _qdec_pos_last: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
   state _qdec_vel_est: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
-  state _qdec_convert_motor_to_joint: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to joint space
+  state _qdec_convert_motor_to_joint_rad: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to joint space
 
   state _sea_pos: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
   state _sea_pos_last: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
@@ -134,7 +134,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
-      self->_qdec_convert_motor_to_joint[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio);
+      self->_qdec_convert_motor_to_joint_rad[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio);
     }
 
     self->prev_time = lf_time_physical_elapsed(); //lf_time_physical();
@@ -179,7 +179,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     // compute the interval in seconds between loop triggers
     long now_tick = HAL_GetTick(); // gives miliseconds since last stm32 reset
     long diff_tick = now_tick - reference_tick;
-    double interval_sec = ((double)(diff_tick)) * MSEC_TO_SEC; // should be loop time in seconds
+    float interval_sec = ((float)(diff_tick)) * MSEC_TO_SEC; // should be loop time in seconds
     reference_tick = now_tick;
 
     long start = HAL_GetTick();
@@ -228,7 +228,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
       self->_qdec_pos_last[i-7] = self->_qdec_pos[i-7];
-      self->_qdec_pos[i-7] = ((float) (count[i])) * self->_qdec_convert_motor_to_joint[i-7];
+      self->_qdec_pos[i-7] = ((float) (count[i])) * self->_qdec_convert_motor_to_joint_rad[i-7];
       self->_qdec_vel_est[i-7] = (self->_qdec_pos[i-7] - self->_qdec_pos_last[i-7]) / (interval_sec);
 
       lf_set(qdec_out[i-7],  self->_qdec_pos[i-7]); // should be units of radians
