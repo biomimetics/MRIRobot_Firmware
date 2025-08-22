@@ -13,10 +13,10 @@ preamble {=
   #include <math.h> // need for floating point abs, or fabsf()
   #include <../../../motor_config.h>
 
-  #define PRINT_USM 0
+  #define PRINT_USM 1
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
-  #define ARR_PERIOD 1000 //10000 //65535 // 16-bit timer period for ARR (auto reload register)
+  #define ARR_PERIOD 2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
   #define PWM_RPM_MAX 250.0 // 250 RPM
 
   // safety const
@@ -45,6 +45,7 @@ reactor USM {
       float duty_cycle = 0.0;
       duty_cycle = fabsf(speed_rpm) / ((float) PWM_RPM_MAX);
       if (duty_cycle > USM_MAX_DUTY_CYCLE){
+        if (PRINT_USM)printf("Hit max duty cycle! Setting to %d%", ((int)USM_MAX_DUTY_CYCLE*100));
         duty_cycle = USM_MAX_DUTY_CYCLE;
       }
       return ((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
@@ -193,10 +194,13 @@ reactor USM {
     void enforce_speed_bounds(){
       for (int i = 0; i<7; i++){
         if (_speed[i] < -motor_configs[i]->max_speed){
+          if (PRINT_USM) printf("Speed of _speed[%d]*1000 (%d) is less than --motor_configs[%d]->max_speed*1000 (%d)!\r\n", i, ((int)_speed[i]*1000), i, ((int)-motor_configs[i]->max_speed*1000));
           _speed[i] = -motor_configs[i]->max_speed;
+          
         }
         else if (motor_configs[i]->max_speed < _speed[i]){
           _speed[i] = motor_configs[i]->max_speed;
+          if (PRINT_USM)printf("Speed of _speed[%d]*1000 (%d) is greater than motor_configs[%d]->max_speed*1000 (%d)!\r\n", i, ((int)_speed[i]*1000), i, ((int)motor_configs[i]->max_speed*1000));
         }
         else{
           // _speed[i] is in expected range.
@@ -230,7 +234,7 @@ reactor USM {
     }
 
     float apply_motor_direction_change(float speed, int index){
-      return speed * ((float) motor_config[index]->dir);
+      return speed * ((float) motor_configs[index]->dir);
     }
   =}
 
@@ -268,9 +272,10 @@ reactor USM {
   reaction(speed) {=
     
     // save internal _speed values
-    for (int = 0; i<7; i++){
-      _speed[i] = apply_motor_direction_change(speed[i], i);
+    for (int i = 0; i<7; i++){
+      _speed[i] = apply_motor_direction_change(speed[i]->value, i);
     }
+    
 
     // Set USM values if we're not in the safey idle mode
     if (self->_force_disable_motor_pins){
@@ -298,7 +303,9 @@ reactor USM {
       //}
 
       if (PRINT_USM){
-        printf("Motor %d: Commanding %d milli rads/sec or %d RPM, CCR of %d.\r\n", 0, (int)(1000 * _speed[0]), (int)(RAD_PER_SEC_TO_RPM * _speed[0]), convert_speed_rad_per_sec_to_pwm_ccr(_speed[0]));
+        for (int i = 0; i<7;i++){
+          printf("Motor %d: Commanding %d milli rads/sec or %d mRPM, CCR of %d.\r\n", i, (int)(1000 * _speed[i]), (int)(RAD_PER_SEC_TO_RPM * _speed[i] * 1000), convert_speed_rad_per_sec_to_pwm_ccr(_speed[i]));
+        }
       }
       // Set USM speed values
       set_motor_pwm_registers();

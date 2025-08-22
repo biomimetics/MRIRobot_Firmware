@@ -227,9 +227,9 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
-      self->_qdec_pos_last[i-7] = self->_qdec_pos[i-7];
-      self->_qdec_pos[i-7] = ((float) (count[i])) * self->_qdec_convert_motor_to_joint_rad[i-7];
-      self->_qdec_vel_est[i-7] = (self->_qdec_pos[i-7] - self->_qdec_pos_last[i-7]) / (interval_sec);
+      self->_qdec_pos_last[i-7] = self->_qdec_pos[i-7]; // save last position
+      self->_qdec_pos[i-7] = ((float) (count[i])) * self->_qdec_convert_motor_to_joint_rad[i-7]; // update the new position
+      self->_qdec_vel_est[i-7] = (self->_qdec_pos[i-7] - self->_qdec_pos_last[i-7]) / (interval_sec); // estimate velocity from different of positions over the time between positions
 
       lf_set(qdec_out[i-7],  self->_qdec_pos[i-7]); // should be units of radians
       lf_set(qdec_vel_out[i-7],  self->_qdec_vel_est[i-7]); // should be units of radians per second
@@ -241,17 +241,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     if (print_encoder && printcnt>=printcnt_lim) {
       printf("\r\n");
     }
-    /*
-    // Get values for USM encoders
-    for (int i=7; i<14; i++) {
-      float motor_raw = 2.0*pi* ((float) (count[i]) / motor_configs[i-7]->qdec_cpr);
-      self->_qdec_pos[i-7] = motor_raw / motor_configs[i-7]->gear_ratio;
-      lf_set(qdec_out[i-7],  _qdec_pos[i-7]);
-      if (print_encoder && printcnt>=printcnt_lim) {
-        printf("%d  ", (int) (qdec_out[i-7]->value*100));
-      }
-    }
-    */
+
 
     //if (print_encoder){printf("ms to run: [%ld]\r\n", HAL_GetTick()-start);}
     //if (print_encoder && printcnt>=printcnt_lim) {

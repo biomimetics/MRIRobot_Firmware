@@ -5,7 +5,7 @@
 typedef struct { /* __MOTOR_CONFIG_H */
     // Base Info
     int dir;                // Motor direction
-    int max_speed;          // max motor speed
+    float max_speed;          // max motor speed in rad/s
 
     // Encoder Into
     float qdec_cpr;         // motor encoder count per rotation
