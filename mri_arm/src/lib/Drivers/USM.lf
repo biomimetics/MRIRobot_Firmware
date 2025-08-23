@@ -14,20 +14,23 @@ preamble {=
   #include <../../../motor_config.h>
 
   #define PRINT_USM 1
+  #define DO_DEBUG_PWM_SWEEP 0
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
   #define ARR_PERIOD 2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
   #define PWM_RPM_MAX 250.0 // 250 RPM
+  #define MSEC_TO_SEC 0.001
 
   // safety const
   #define USM_MAX_DUTY_CYCLE 0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
+  //#define USM_MIN_DUTY_CYCLE 0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
 
   // conversion for if inputs are in rad_per_sec
   #define RAD_PER_SEC_TO_RPM 9.549297
 
   // these two consts aren't needed if we can assume 3.3V is the max pin voltage. Make sure it's not a 5V output!
-  #define PWM_VOLTAGE_MAX 3.3 // voltage at [3.3V] 100% duty cycle
-  #define PWM_RPM_PER_VOLT 75.757576 // 250.0RPM / 3.3V based on tekceleo datasheet for WLG-75-R motors
+  //#define PWM_VOLTAGE_MAX 3.3 // voltage at [3.3V] 100% duty cycle
+  //#define PWM_RPM_PER_VOLT 75.757576 // 250.0RPM / 3.3V based on tekceleo datasheet for WLG-75-R motors
 
 =}
 
@@ -40,19 +43,56 @@ reactor USM {
   //state force_disable_motor_pins
   preamble {=
 
+    // for debugging
+    long reference_tick_usm = 0; //HAL_GetTick();
+    float debug_duty_cycle_sweep_time_interval = 2.0;
+    float debug_duty_cycle_sweep_increment = 0.0001;
+    float debug_duty_cycle = 0.00;
+
+
+    // PWM AND DUTY CYCLE FUNCTIONS
     // note that all of this assumes a max voltage of 3.3V! If it's actually different, these numbers are wrong.
-    int convert_speed_rpm_to_pwm_ccr(float speed_rpm){
-      float duty_cycle = 0.0;
-      duty_cycle = fabsf(speed_rpm) / ((float) PWM_RPM_MAX);
-      if (duty_cycle > USM_MAX_DUTY_CYCLE){
-        if (PRINT_USM)printf("Hit max duty cycle! Setting to %d%", ((int)USM_MAX_DUTY_CYCLE*100));
+    int convert_duty_cycle_to_pwm_ccr(float duty_cycle){
+      duty_cycle = fabsf(duty_cycle); // force it positive
+
+      if (duty_cycle > USM_MAX_DUTY_CYCLE){ // limit it to the max value
+        if (PRINT_USM)printf("Hit max duty cycle! Setting to %d%", ((int)USM_MAX_DUTY_CYCLE*1000));
         duty_cycle = USM_MAX_DUTY_CYCLE;
       }
-      return ((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
+
+      int ccr = ((int) (((float) ARR_PERIOD) * duty_cycle));
+      return ccr; //((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
+    }
+
+    int convert_speed_rpm_to_pwm_ccr(float speed_rpm){
+      return convert_duty_cycle_to_pwm_ccr(speed_rpm / ((float) PWM_RPM_MAX)); // duty cycle is normalized by it's max value.
+      
     }
 
     int convert_speed_rad_per_sec_to_pwm_ccr(float speed_rad_per_sec){
       return convert_speed_rpm_to_pwm_ccr(RAD_PER_SEC_TO_RPM * speed_rad_per_sec);
+    }
+
+    // debugging behavior for motors
+    void debug_duty_cycle_sweep(){
+      //long now_tick = HAL_GetTick(); // gives miliseconds since last stm32 reset
+      float interval_sec = (((float) (HAL_GetTick() - reference_tick_usm)) * MSEC_TO_SEC);
+      //printf("interval_sec (int): %d\r\n", ((int) interval_sec * 1000));
+
+      if (debug_duty_cycle_sweep_time_interval < interval_sec){
+        reference_tick_usm = HAL_GetTick();
+        
+        //debug_duty_cycle = fmodf(debug_duty_cycle + debug_duty_cycle_sweep_increment, USM_MAX_DUTY_CYCLE);
+        debug_duty_cycle += debug_duty_cycle_sweep_increment;
+        if (USM_MAX_DUTY_CYCLE < debug_duty_cycle){
+          debug_duty_cycle = 0.0;
+        }
+
+        printf("New debug_duty_cycle: (%d / 100)percent, (%d CCR / %d ARR) \r\n", ((int)(debug_duty_cycle * 10000.0)),
+        convert_duty_cycle_to_pwm_ccr(debug_duty_cycle), ARR_PERIOD);//_conv_float(debug_duty_cycle));
+        
+      }
+      TIM3->CCR1 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM0
     }
 
     extern TIM_HandleTypeDef htim3; // used for USM PWM
@@ -240,6 +280,10 @@ reactor USM {
 
 
   reaction(startup) {=
+    // for debugging
+    reference_tick_usm = HAL_GetTick();
+
+    //
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -308,7 +352,12 @@ reactor USM {
         }
       }
       // Set USM speed values
-      set_motor_pwm_registers();
+      if (DO_DEBUG_PWM_SWEEP){
+        debug_duty_cycle_sweep();
+      } else{
+        set_motor_pwm_registers();
+      }
+      
       
     }
   

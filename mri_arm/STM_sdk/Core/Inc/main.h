@@ -52,6 +52,9 @@ extern "C" {
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 int _write(int file, char *ptr, int len);
+
+int _conv_float(float val);
+
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */

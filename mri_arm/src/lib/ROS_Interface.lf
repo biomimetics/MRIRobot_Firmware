@@ -52,7 +52,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
 
   timer timer_idle_reset(0 ms, 100 ms)
   state set_command_failed_counter: int = 0 //
-  state set_command_failed_counter_max: int = 20 // TODO: 20 counts * 20ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
+  state set_command_failed_counter_max: int = 1000 //20 // TODO: 20 counts * 20ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
   state last_mode_change: MODE_ENUM = 0 // idle
 
   state scaled_joint_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}

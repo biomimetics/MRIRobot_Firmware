@@ -11,6 +11,8 @@ preamble {=
   #include <stdio.h>
   #include <../../../motor_config.h>
 
+  #define PRINT_ENCODER 0
+
   #define TWO_PI 6.28318
   #define NSEC_TO_SEC 0.000000001
   #define MSEC_TO_SEC 0.001
@@ -51,7 +53,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     extern DMA_HandleTypeDef hdma_usart3_rx;
     extern DMA_HandleTypeDef hdma_usart3_tx;
 
-    static int print_encoder = true; // move all of these to define statements in a central location. annoying to track them down.
+    //static int PRINT_ENCODER = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;
     static int printcnt_lim = 100; // print every nth time
 
@@ -125,7 +127,7 @@ reactor QDEC(sample_period: time = 5 ms) {
     MX_UART3_Init();
     MX_GPIO_Init();
 
-    if (print_encoder){printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");}
+    if (PRINT_ENCODER){printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");}
     HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
 
@@ -156,10 +158,10 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     if (self->_enable_qdec){
       HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
-      if (print_encoder) {printf("Enabling Encoders\r\n");}
+      if (PRINT_ENCODER) {printf("Enabling Encoders\r\n");}
     } else {
       HAL_UART_Transmit(&huart3, qdec_disable, 1, HAL_MAX_DELAY);
-      if (print_encoder) {printf("Disabling Encoders\r\n");}
+      if (PRINT_ENCODER) {printf("Disabling Encoders\r\n");}
     }
 
   =}
@@ -194,7 +196,7 @@ reactor QDEC(sample_period: time = 5 ms) {
                                + (data[4+(i*7)]<<32) + (data[5+(i*7)]<<40) + (data[6+(i*7)]<<48);
     }
 
-    if (print_encoder && printcnt>=printcnt_lim) {
+    if (PRINT_ENCODER && printcnt>=printcnt_lim) {
       printf("sea: ");
     }
     // Get values for SEA encoders
@@ -204,7 +206,7 @@ reactor QDEC(sample_period: time = 5 ms) {
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
 
-      if (print_encoder && printcnt>=printcnt_lim) {
+      if (PRINT_ENCODER && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (sea_out[i]->value*100));
       }
     }
@@ -215,13 +217,13 @@ reactor QDEC(sample_period: time = 5 ms) {
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
 
-      if (print_encoder && printcnt>=printcnt_lim) {
+      if (PRINT_ENCODER && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (sea_out[i]->value*100));
       }
     }
 
 
-    if (print_encoder && printcnt>=printcnt_lim) {
+    if (PRINT_ENCODER && printcnt>=printcnt_lim) {
       printf(". qdec: ");
     }
 
@@ -234,17 +236,17 @@ reactor QDEC(sample_period: time = 5 ms) {
       lf_set(qdec_out[i-7],  self->_qdec_pos[i-7]); // should be units of radians
       lf_set(qdec_vel_out[i-7],  self->_qdec_vel_est[i-7]); // should be units of radians per second
 
-      if (print_encoder && printcnt>=printcnt_lim) {
+      if (PRINT_ENCODER && printcnt>=printcnt_lim) {
         printf("%d  ", (int) (qdec_out[i-7]->value*100));
       }
     }
-    if (print_encoder && printcnt>=printcnt_lim) {
+    if (PRINT_ENCODER && printcnt>=printcnt_lim) {
       printf("\r\n");
     }
 
 
-    //if (print_encoder){printf("ms to run: [%ld]\r\n", HAL_GetTick()-start);}
-    //if (print_encoder && printcnt>=printcnt_lim) {
+    //if (PRINT_ENCODER){printf("ms to run: [%ld]\r\n", HAL_GetTick()-start);}
+    //if (PRINT_ENCODER && printcnt>=printcnt_lim) {
     //  printf("[%ld]", end-start);
     //  printf("| \r\n");
     //}
