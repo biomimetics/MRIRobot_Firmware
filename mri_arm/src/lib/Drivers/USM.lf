@@ -13,7 +13,7 @@ preamble {=
   #include <math.h> // need for floating point abs, or fabsf()
   #include <../../../motor_config.h>
 
-  #define PRINT_USM 1
+  #define PRINT_USM 0
   #define DO_DEBUG_PWM_SWEEP 0
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
