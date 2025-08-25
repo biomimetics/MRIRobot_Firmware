@@ -8,13 +8,15 @@ target C {
 
 preamble {=
   #include "stm32f4xx_hal.h"
-  #include "stm32_startup.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
   #include <stdio.h>
 
   #include <../../../motor_config.h>
   #include <../../../joint_config.h>
   #include <../../../sm_config.h>
 
+  #define PRINT_MODE 0
   /*
   typedef struct mode_status{
     MODE_ENUM current_mode_index;
@@ -28,7 +30,7 @@ preamble {=
   */
 =}
 
-reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 1000 ms){
+reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 2000 ms){
     input set_mode_change: MODE_ENUM 
     input is_homing_finished: bool
 

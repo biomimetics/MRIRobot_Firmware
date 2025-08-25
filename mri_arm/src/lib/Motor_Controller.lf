@@ -13,14 +13,17 @@ target C {
 import SEAController from "Joint_Controllers/SEA.lf"
 import Diff_Motor from "Joint_Controllers/Diff_Motor.lf"
 import Diff_Joint from "Joint_Controllers/Diff_Joint.lf"
-import Diff_Joint_Velocity from "Joint_Controllers/Diff_Joint_Vel.lf"
-
+import PIDControllerGeneric from "Joint_Controllers/PID_Generic.lf"
 
 preamble {=
   #include <stdio.h>
   #include "stm32f4xx_hal.h"
-  #include "stm32_startup.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
   #include <../../../sm_config.h>
+
+  #define PRINT_MOTOR_CONTROLLER 0
+  //state print_motor_controller: bool = true
 
   /*
   #ifndef __MOTOR_MODE_ENUM
@@ -73,6 +76,10 @@ reactor MotorController(refresh_period: time = 10 ms) {
   state target_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
   state target_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
 
+  state target_joint_speeds: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
+  //state controller_joint_speeds: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
+  state target_motor_speeds: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
+
   state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
   state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for position control
 
@@ -80,16 +87,17 @@ reactor MotorController(refresh_period: time = 10 ms) {
   state _enable_motor_command: bool = false
   state _target_sel: MOTOR_MODE[7] = {1, 1, 1, 1, 1, 1, 1}
 
-  state print_motor_controller: bool = true
+  
 
   timer trigger(0, refresh_period)
+
+  // define reactors 
   control_u0 = new SEAController()
 
   control_j0 = new Diff_Joint(motor_ID0=1, motor_ID1=2)
   control_j1 = new Diff_Joint(motor_ID0=3, motor_ID1=4)
   control_j2 = new Diff_Joint(motor_ID0=5, motor_ID1=6)
     
-
   // Feed in the current positions
   qdec_pos ->
     control_u0.current_pos,
@@ -128,6 +136,30 @@ reactor MotorController(refresh_period: time = 10 ms) {
     control_j1.sea_lim,
     control_j2.sea_lim
 
+  preamble{=
+    bool use_diff_vel_ext = true; // move this to an input/state
+    bool use_motor_configs = false; // get rid of this asap, just for testings
+    =}
+    
+  method convertJointToMotorSpeeds(): void {=
+    // apply jacobian
+    self->target_motor_speeds[0] = self->target_joint_speeds[0];
+    // for diff motors, w0 = pitch + roll, w1 = -pitch + roll
+    self->target_motor_speeds[1] =  (self->target_joint_speeds[1] + self->target_joint_speeds[2]); // pitch + roll
+    self->target_motor_speeds[2] = (-self->target_joint_speeds[1] + self->target_joint_speeds[2]); // -pitch + roll
+
+    self->target_motor_speeds[3] =  (self->target_joint_speeds[3] + self->target_joint_speeds[4]); // pitch + roll
+    self->target_motor_speeds[4] = (-self->target_joint_speeds[3] + self->target_joint_speeds[4]); // -pitch + roll
+
+    self->target_motor_speeds[5] =  (self->target_joint_speeds[5] + self->target_joint_speeds[6]); // pitch + roll
+    self->target_motor_speeds[6] = (-self->target_joint_speeds[5] + self->target_joint_speeds[6]); // -pitch + roll
+
+    // apply gear reductions
+    for (int i = 0; i<7; i++){
+      self->target_motor_speeds[i] = self->target_motor_speeds[i] * motor_configs[i]->gear_ratio * motor_configs[i]->dir;
+    }
+  =}
+
   reaction(startup) -> control_u0.constants{=
     // Control Constants [Kp, Kd, Ki]
     lf_set(control_u0.constants[0], joint_configs[0]-> Kp);
@@ -152,10 +184,19 @@ reactor MotorController(refresh_period: time = 10 ms) {
   // inputs are the targets for the joints, outputs are the motor commands based on the differential joint kinematics
   // jacobian for motors -> joints is [[0.5, -0.5], [0.5, 0.5]], inv for joints -> motors (this case) is [[1, 1], [-1, 1]]. assumes counterclockwise positive for both motors pointing in towards the center.
   reaction(target_vel_ext) {=
-    // very simple implimentation for the differential joints, doesn't have other controllers
-    bool use_diff_vel_ext = true; // move this to an input/state
-    bool use_motor_configs = false; // get rid of this asap, just for testing
+    // save target_joint_speeds from the input
     if (self->_target_mode == MODE_EXT) {
+      for (int i = 0; i<7; i++)
+        self->target_joint_speeds[i] = target_vel_ext[i]->value;
+      }
+
+      // TODO: Replace the rest of this method when the PID controller is implimented for external velocity commands.
+      convertJointToMotorSpeeds();
+
+      for (int i = 0; i<7; i++){
+        self->speed_spc[i] = self->target_motor_speeds[i];
+      }
+      /*
       if (use_diff_vel_ext){
         if (use_motor_configs){
           self->speed_spc[0] = target_vel_ext[0]->value * (motor_configs[0]->dir);
@@ -179,19 +220,17 @@ reactor MotorController(refresh_period: time = 10 ms) {
           self->speed_spc[5] =  (target_vel_ext[5]->value + target_vel_ext[6]->value); // pitch + roll
           self->speed_spc[6] = (-target_vel_ext[5]->value + target_vel_ext[6]->value); // -pitch + roll
         }
-        
+          else {
+        for(int i=0; i<7; i++){
+            self->speed_spc[i] = target_vel_ext[i]->value;
+          }
+      }
+      */
         /* // for reference
         for (int i=1; i<7; i=i+2){
             self->speed_spc[i] = (target_vel_ext[i+1]->value + target_vel_ext[i]->value) * (motor_configs[i]->dir);
             self->speed_spc[i] = (-target_vel_ext[i+1]->value + target_vel_ext[i+1]->value) * (motor_configs[i+1]->dir);
         }*/
-      }
-      else {
-        for(int i=0; i<7; i++){
-            self->speed_spc[i] = target_vel_ext[i]->value;
-          }
-      }
-    } 
   =}
 
   reaction(target_pos_int) {=
@@ -249,16 +288,31 @@ reactor MotorController(refresh_period: time = 10 ms) {
     
   =}
 
+  reaction(
+      control_u0.out,
+      control_j0.speed_out,
+      control_j1.speed_out,
+      control_j2.speed_out) {=
+    self -> speed_posc[0] = control_u0.out->value;
+    self -> speed_posc[1] = control_j0.speed_out[0]->value;
+    self -> speed_posc[2] = control_j0.speed_out[1]->value;
+    self -> speed_posc[3] = control_j1.speed_out[0]->value;
+    self -> speed_posc[4] = control_j1.speed_out[1]->value;
+    self -> speed_posc[5] = control_j2.speed_out[0]->value;
+    self -> speed_posc[6] = control_j2.speed_out[1]->value;
+    
+  =}
+
   reaction(enable_motor_command) {=
     bool old_motor_command_bool = self->_enable_motor_command;
     self->_enable_motor_command = enable_motor_command->value;
-    printf("enable_motor_command reaction called, setting value to from %d to new value of %d from input %d\r\n", old_motor_command_bool, self->_enable_motor_command, enable_motor_command->value);
+    if (PRINT_MOTOR_CONTROLLER) printf("enable_motor_command reaction called, setting value to from %d to new value of %d from input %d\r\n", old_motor_command_bool, self->_enable_motor_command, enable_motor_command->value);
 
   =}
 
   reaction(target_mode) {=
     self->_target_mode = target_mode->value;
-    printf("target_mode reaction called, setting value to %d from input %d\r\n",  self->_target_mode, target_mode->value);
+    if (PRINT_MOTOR_CONTROLLER) printf("target_mode reaction called, setting value to %d from input %d\r\n",  self->_target_mode, target_mode->value);
   =}
 
   reaction(target_sel) {=
@@ -266,7 +320,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
     for (int i = 0; i<7; i++){
       old_motor_command = self->_target_sel[i];
       self->_target_sel[i] = target_sel[i]->value;
-      printf("target_sel reaction called, setting value to from %d to new value of %d from input %d\r\n", old_motor_command,  self->_target_sel[i], target_sel[i]->value);
+      if (PRINT_MOTOR_CONTROLLER) printf("target_sel reaction called, setting value to from %d to new value of %d from input %d\r\n", old_motor_command,  self->_target_sel[i], target_sel[i]->value);
     }
   =}
 
@@ -276,13 +330,13 @@ reactor MotorController(refresh_period: time = 10 ms) {
   reaction(trigger) -> speed{=
     if (self->_enable_motor_command){
       // We use this to set either the speed or position of the motors
-      if (self->print_motor_controller) {printf("Motor_Controller: Setting speeds of: ");}
+      if (PRINT_MOTOR_CONTROLLER) {printf("Motor_Controller: Setting speeds of: ");}
         for(int i=0; i<7; i++){
           if ((self->_target_sel[i] == MODE_POS)){
             lf_set(speed[i], self->speed_posc[i]);
           }
           else if((self->_target_sel[i] == MODE_VEL)){
-            if (self->print_motor_controller) {printf("%d,", (int)(self->speed_spc[i] * 1000));}
+            if (PRINT_MOTOR_CONTROLLER) {printf("%d,", (int)(self->speed_spc[i] * 1000));}
             lf_set(speed[i], self->speed_spc[i]);
           }
           else{
@@ -290,7 +344,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
           }
       // lf_set(speed[i], (target_sel[i]->value == MODE_POS)? self->speed_posc[i]: self->speed_spc[i]);
       }
-      printf("\r\n");
+      if (PRINT_MOTOR_CONTROLLER) printf("\r\n");
   }
   else{
     //printf("_enable_motor_command is off!\r\n");

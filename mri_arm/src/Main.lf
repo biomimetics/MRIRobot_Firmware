@@ -16,17 +16,30 @@ import ModeMachine from "lib/Mode_Machine.lf"
 preamble {=
   #include <stdio.h>
   #include "stm32f4xx_hal.h"
-  #include "stm32_startup.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
 
+  extern UART_HandleTypeDef huart2;
   =}
 
 // Import and/or declare reactor classes.
 main reactor {
   preamble {=
-    extern UART_HandleTypeDef huart2;
-    UART_HandleTypeDef huart4;
-    UART_HandleTypeDef huart5;
-    UART_HandleTypeDef huart6;
+  
+    /*
+    int _write(int file, char *ptr, int len){
+        HAL_UART_Transmit(&PRINT_UART, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+        //HAL_UART_Transmit(&huart6, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+
+        // HAL_UART_Transmit_IT(&huart2, (uint8_t *)ptr, len);
+        return len;
+    }
+    */
+    extern UART_HandleTypeDef huart1; // make sure these need to be defined here or not
+    extern UART_HandleTypeDef huart3;
+    extern UART_HandleTypeDef huart4;
+    extern UART_HandleTypeDef huart5;
+    //UART_HandleTypeDef huart6; // def in ROS_Interface.lf
 
 
     // Target positions
@@ -35,36 +48,33 @@ main reactor {
     bool target_sel[7] =    {0, 0, 0, 0, 0, 0, 0};
     static int at_home = 0; // unused
 
-    static void MX_GPIO_Init(void) {
-      GPIO_InitTypeDef GPIO_InitStruct = {0};
-      __HAL_RCC_GPIOA_CLK_ENABLE();
-      __HAL_RCC_GPIOB_CLK_ENABLE();
-      __HAL_RCC_GPIOH_CLK_ENABLE();
+    
+    int stm32_init(void){
+      HAL_Init();
 
-      /* Configure output LED pins: PH0, PH1, PB*/
-      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_0, GPIO_PIN_RESET);
-      GPIO_InitStruct.Pin = GPIO_PIN_0;
-      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-      GPIO_InitStruct.Pull = GPIO_NOPULL;
-      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-      HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+      SystemClock_Config();
 
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
-      GPIO_InitStruct.Pin = GPIO_PIN_15;
-      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-      GPIO_InitStruct.Pull = GPIO_NOPULL;
-      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+      MX_GPIO_Init();
+      MX_DMA_Init();
+      MX_UART4_Init();
+      MX_USART1_UART_Init();
+      MX_USART3_UART_Init();
+      MX_USART6_UART_Init();
+      MX_TIM3_Init();
+      MX_TIM4_Init();
+      MX_RTC_Init();
+      MX_USART2_UART_Init();
 
-      /* Configure Switch pins : PC0, PC1 */
-      GPIO_InitStruct.Pin = GPIO_PIN_0;
-      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-      GPIO_InitStruct.Pull = GPIO_NOPULL;
-      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+      printf("\r\n");
+      printf("~~~ STM32 START ~~~ \r\n");
+      printf("\r\n");
+
+      //HAL_START_DMA(); // not sure if needed
+      //main();
+      return 0;
     }
 
-    extern UART_HandleTypeDef huart3;
-    extern UART_HandleTypeDef huart1;
+
 
     // Define empty function handlers for UART callbacks
     void HAL_UART_RxCallback3();
@@ -135,8 +145,10 @@ main reactor {
   
   reaction(startup) {=
     // Prep all GPIO values
-    MX_GPIO_Init();
+    //MX_GPIO_Init();
 
+    // Initialize the STM32 peripherals
+    stm32_init();
   =}
 
 }

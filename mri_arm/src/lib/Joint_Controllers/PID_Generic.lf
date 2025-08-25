@@ -1,0 +1,95 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include <stdio.h>
+
+  #define PRINT_PID_GENERIC 0
+=}
+
+reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0) {
+  input current_state: float
+  input target_state: float
+  output control_signal: float
+
+  // to help with state variables
+  state _last_error: float = 0.0  
+  state _prev_time: time = 0
+
+  // error and control signal components
+  state _error: float = 0.0
+  state _signal_p: float = 0.0
+  state _signal_d: float = 0.0
+  state _signal_i: float = 0.0
+  state _control_signal: float = 0.0
+
+  // gains for control signal components
+  state _Kp: float = Kp
+  state _Kd: float = Kd
+  state _Ki: float = Ki
+
+  // limits for integral and total control signals
+  state _signal_i_max: float = INTEGRAL_CLAMPING_MAX
+  state _control_signal_max: float = CONTROL_LIMIT
+
+  method doIntegralClamping(): void {=
+    // do integral term clamping
+    if ((self->_signal_i_max) < (self->_signal_i)){
+      self->_signal_i = self->_signal_i_max;
+    } 
+    else if ((self->_signal_i) < (-self->_signal_i_max)){
+      self->_signal_i = -self->_signal_i_max;
+    }
+    else {
+      // nothing needs to be done.
+    }
+  =}
+
+  method doControlSignalClamping(): void {=
+    // do integral term clamping
+    if ((self->_control_signal) < (self->_signal_i)){
+      self->_control_signal = self->_control_signal_max;
+    } 
+    else if ((self->_control_signal) < (-self->_control_signal_max)){
+      self->_control_signal = -self->_control_signal_max;
+    }
+    else {
+      // nothing needs to be done.
+    }
+  =}
+
+  reaction(current_state, target_state) -> control_signal {=
+    instant_t now = lf_time_logical();
+    interval_t interval = now - self->prev_time;
+
+    self->_last_error = self->_error;
+    self->_error = (target_state->value) - (current_state->value);
+
+    self->_signal_p = self->_Kp * (self->_error); // Kp * (error)
+    self->_signal_d = self->_Kd * ((self->_error - self->_last_error) / interval); // Kd * d(error)/dt
+    self->_signal_i = self->_signal_i + (self->_Ki * (self->_error * interval)); // ~  Ki * \sum_{t=0}^{t} (error) dt 
+
+    doIntegralClamping();
+
+    self->_control_signal = self->_signal_p + self->_signal_d + self->_signal_i; // sum all clamped components
+
+    doControlSignalClamping();
+    
+    lf_set(control_signal, self->_control_signal);
+
+    if (PRINT_PID_GENERIC){
+      printf("target_state->value as int: %d\r\n", (int)(target_state->value*1000));
+      printf("current_state->value as int: %d\r\n", (int)(current_state->value*1000));
+      printf("self->_control_signal as int: %d\r\n", (int)(self->_control_signal*1000));
+      printf("interval: %ld\r\n", interval);
+    }
+
+    self->prev_time = now;
+  =}
+}
