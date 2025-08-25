@@ -17,7 +17,7 @@ preamble {=
   #define DO_DEBUG_PWM_SWEEP 0
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
-  #define ARR_PERIOD 2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
+  #define ARR_PERIOD 1000 //2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
   #define PWM_RPM_MAX 250.0 // 250 RPM
   #define MSEC_TO_SEC 0.001
 
@@ -111,7 +111,7 @@ reactor USM {
       htim3.Init.Period = ARR_PERIOD; //1000;
       htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
       htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-      ;HAL_TIM_Base_Init(&htim3);
+      HAL_TIM_Base_Init(&htim3);
 
       sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
       HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig);
