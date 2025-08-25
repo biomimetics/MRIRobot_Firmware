@@ -9,7 +9,29 @@ target C {
 preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
+  #include <stdlib.h>
+  #include <math.h> // need for floating point abs, or fabsf()
   #include <../../../motor_config.h>
+
+  #define PRINT_USM 0
+  #define DO_DEBUG_PWM_SWEEP 0
+
+  // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
+  #define ARR_PERIOD 1000 //2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
+  #define PWM_RPM_MAX 250.0 // 250 RPM
+  #define MSEC_TO_SEC 0.001
+
+  // safety const
+  #define USM_MAX_DUTY_CYCLE 0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
+  //#define USM_MIN_DUTY_CYCLE 0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
+
+  // conversion for if inputs are in rad_per_sec
+  #define RAD_PER_SEC_TO_RPM 9.549297
+
+  // these two consts aren't needed if we can assume 3.3V is the max pin voltage. Make sure it's not a 5V output!
+  //#define PWM_VOLTAGE_MAX 3.3 // voltage at [3.3V] 100% duty cycle
+  //#define PWM_RPM_PER_VOLT 75.757576 // 250.0RPM / 3.3V based on tekceleo datasheet for WLG-75-R motors
+
 =}
 
 reactor USM {
@@ -20,18 +42,63 @@ reactor USM {
 
   //state force_disable_motor_pins
   preamble {=
-    extern TIM_HandleTypeDef htim1; // unused
-    extern TIM_HandleTypeDef htim2; // unused
+
+    // for debugging
+    long reference_tick_usm = 0; //HAL_GetTick();
+    float debug_duty_cycle_sweep_time_interval = 2.0;
+    float debug_duty_cycle_sweep_increment = 0.0001;
+    float debug_duty_cycle = 0.00;
+
+
+    // PWM AND DUTY CYCLE FUNCTIONS
+    // note that all of this assumes a max voltage of 3.3V! If it's actually different, these numbers are wrong.
+    int convert_duty_cycle_to_pwm_ccr(float duty_cycle){
+      duty_cycle = fabsf(duty_cycle); // force it positive
+
+      if (duty_cycle > USM_MAX_DUTY_CYCLE){ // limit it to the max value
+        if (PRINT_USM)printf("Hit max duty cycle! Setting to %d%", ((int)USM_MAX_DUTY_CYCLE*1000));
+        duty_cycle = USM_MAX_DUTY_CYCLE;
+      }
+
+      int ccr = ((int) (((float) ARR_PERIOD) * duty_cycle));
+      return ccr; //((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
+    }
+
+    int convert_speed_rpm_to_pwm_ccr(float speed_rpm){
+      return convert_duty_cycle_to_pwm_ccr(speed_rpm / ((float) PWM_RPM_MAX)); // duty cycle is normalized by it's max value.
+      
+    }
+
+    int convert_speed_rad_per_sec_to_pwm_ccr(float speed_rad_per_sec){
+      return convert_speed_rpm_to_pwm_ccr(RAD_PER_SEC_TO_RPM * speed_rad_per_sec);
+    }
+
+    // debugging behavior for motors
+    void debug_duty_cycle_sweep(){
+      //long now_tick = HAL_GetTick(); // gives miliseconds since last stm32 reset
+      float interval_sec = (((float) (HAL_GetTick() - reference_tick_usm)) * MSEC_TO_SEC);
+      //printf("interval_sec (int): %d\r\n", ((int) interval_sec * 1000));
+
+      if (debug_duty_cycle_sweep_time_interval < interval_sec){
+        reference_tick_usm = HAL_GetTick();
+        
+        //debug_duty_cycle = fmodf(debug_duty_cycle + debug_duty_cycle_sweep_increment, USM_MAX_DUTY_CYCLE);
+        debug_duty_cycle += debug_duty_cycle_sweep_increment;
+        if (USM_MAX_DUTY_CYCLE < debug_duty_cycle){
+          debug_duty_cycle = 0.0;
+        }
+
+        printf("New debug_duty_cycle: (%d / 100)percent, (%d CCR / %d ARR) \r\n", ((int)(debug_duty_cycle * 10000.0)),
+        convert_duty_cycle_to_pwm_ccr(debug_duty_cycle), ARR_PERIOD);//_conv_float(debug_duty_cycle));
+        
+      }
+      TIM3->CCR1 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM0
+    }
+
     extern TIM_HandleTypeDef htim3; // used for USM PWM
     extern TIM_HandleTypeDef htim4; // used for USM PWM
 
-    volatile float _speed[7] = {0, 0, 0, 0, 0, 0, 0};
-    volatile float USM_LIMIT = 0.06;
-    volatile int en_usm;
-
-    static int print_usm = false;
-    static int printcnt = 0;
-    static int printcnt_lim = 500;
+    volatile float _speed[7] = {0, 0, 0, 0, 0, 0, 0}; // internal copy of speed, not a reactor state because is changed inplace with preamble functions
 
     static void MX_TIM3_Init(void) {
       TIM_ClockConfigTypeDef sClockSourceConfig = {0};
@@ -41,10 +108,10 @@ reactor USM {
       htim3.Instance = TIM3;
       htim3.Init.Prescaler = 0;
       htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-      htim3.Init.Period = 10000; //1000;
+      htim3.Init.Period = ARR_PERIOD; //1000;
       htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
       htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-      ;HAL_TIM_Base_Init(&htim3);
+      HAL_TIM_Base_Init(&htim3);
 
       sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
       HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig);
@@ -75,7 +142,7 @@ reactor USM {
       htim4.Instance = TIM4;
       htim4.Init.Prescaler = 0;
       htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-      htim4.Init.Period = 10000; //1000;
+      htim4.Init.Period = ARR_PERIOD; //1000
       htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
       htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
       HAL_TIM_Base_Init(&htim4);
@@ -152,39 +219,70 @@ reactor USM {
       HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
     }
 
-    static int min(int a, int b) {
-      return a<b? a: b;
+    void set_motor_enable_pins(bool set_value){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    set_value); // PB0 is the LED
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   set_value);
+      HAL_Delay(1);
     }
 
-    static int max(int a, int b) {
-      return a>b? a: b;
-    }
-
-    static int _OLD_convSpeed(float speed, int idx) {
-      float USM_MIN_SPEED = 0.0; //3.0;
-      if (speed < 0)
-        return  min((int)((1000 * max(USM_MIN_SPEED, -speed) * motor_configs[idx]->speed_ratio)/100), motor_configs[idx]->max_speed);
-      else
-        return  min((int)((1000 * max(USM_MIN_SPEED, speed) * motor_configs[idx]->speed_ratio)/100), motor_configs[idx]->max_speed);
-    }
-
-    static int convSpeed(float speed, int idx) {
-      //float USM_MAX_SPEED = 3.0; //3.0;
-      int USM_MAX_SPEED = 40;
-      float _speed = speed;
-      if (_speed < 0){
-        _speed = -1 * _speed;
+    void enforce_speed_bounds(){
+      for (int i = 0; i<7; i++){
+        if (_speed[i] < -motor_configs[i]->max_speed){
+          if (PRINT_USM) printf("Speed of _speed[%d]*1000 (%d) is less than --motor_configs[%d]->max_speed*1000 (%d)!\r\n", i, ((int)_speed[i]*1000), i, ((int)-motor_configs[i]->max_speed*1000));
+          _speed[i] = -motor_configs[i]->max_speed;
+          
+        }
+        else if (motor_configs[i]->max_speed < _speed[i]){
+          _speed[i] = motor_configs[i]->max_speed;
+          if (PRINT_USM)printf("Speed of _speed[%d]*1000 (%d) is greater than motor_configs[%d]->max_speed*1000 (%d)!\r\n", i, ((int)_speed[i]*1000), i, ((int)motor_configs[i]->max_speed*1000));
+        }
+        else{
+          // _speed[i] is in expected range.
+        }
       }
-      //return  min((int)((10 * min(USM_MAX_SPEED, _speed) * motor_configs[idx]->speed_ratio)), motor_configs[idx]->max_speed);
-      //return (int)(10 * min(USM_MAX_SPEED, _speed));
-      return min(USM_MAX_SPEED, (int)(1000.0 * _speed));
-
+      return;
+    }
+    
+    void set_direction_pins(){
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   _speed[0] >= 0); // 1 if non-negative, 0 if negative
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    _speed[1] >= 0);
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    _speed[2] >= 0);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    _speed[3] >= 0);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    _speed[4] >= 0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   _speed[5] >= 0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   _speed[6] >= 0);
+      HAL_Delay(1);
+      return;
     }
 
+    void set_motor_pwm_registers(){
+      TIM3->CCR1 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[0]);  // Set period for USM0
+      TIM3->CCR2 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[1]);  // Set period for USM1
+      TIM3->CCR3 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[2]);  // Set period for USM2
+      TIM3->CCR4 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[3]);  // Set period for USM3
+      TIM4->CCR1 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[4]);  // Set period for USM4
+      TIM4->CCR2 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[5]);  // Set period for USM5
+      TIM4->CCR3 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[6]);  // Set period for USM6
+      HAL_Delay(1);
+    }
+
+    float apply_motor_direction_change(float speed, int index){
+      return speed * ((float) motor_configs[index]->dir);
+    }
   =}
 
 
   reaction(startup) {=
+    // for debugging
+    reference_tick_usm = HAL_GetTick();
+
+    //
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -195,13 +293,7 @@ reactor USM {
     USM_GPIO_Init();
 
     // Initially set all enable values to 0
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, 0);    // for USM0
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, 0);    // for USM1
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, 0);    // for USM2
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, 0);    // for USM3
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, 0);   // for USM4
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 0);   // for USM5
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13, 0);   // for USM5
+    set_motor_enable_pins(false);
 
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);   // USM_0, PB4
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);   // USM_1, PB5
@@ -214,73 +306,92 @@ reactor USM {
 
   reaction(force_disable_motor_pins) {=
     self->_force_disable_motor_pins = force_disable_motor_pins->value;
-    if (print_usm){printf("Set _force_disable_motor_pins to %d given input %d.\r\n", self->_force_disable_motor_pins, force_disable_motor_pins->value);}
+    if (PRINT_USM){printf("Set _force_disable_motor_pins to %d given input %d.\r\n", self->_force_disable_motor_pins, force_disable_motor_pins->value);}
     if (force_disable_motor_pins->value){
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    0); // PB0 is the LED
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   0);
-      HAL_Delay(1);
+      set_motor_enable_pins(false);
     }
   =}
 
   reaction(speed) {=
-    //bool _force_disable_motor_pins = 0; // TODO: FIX THIS ASAP
-    // TODO: get rid of these switches. en_usm is probably "enable_usm", but why is it the result of two seperate pins?
+    
+    // save internal _speed values
+    for (int i = 0; i<7; i++){
+      _speed[i] = apply_motor_direction_change(speed[i]->value, i);
+    }
+    
+
+    // Set USM values if we're not in the safey idle mode
+    if (self->_force_disable_motor_pins){
+      if (PRINT_USM){printf("USM: Force disabling all motor pins\r\n");}
+      set_motor_enable_pins(false);
+    }
+    else {
+
+      // ensures all motor pins are enabled
+      set_motor_enable_pins(true);
+
+      // enforces all set speed bounds from motor_config.h
+      enforce_speed_bounds();
+
+      // Set USM direction values based on sign of _speed
+      set_direction_pins();
+      
+      
+      // ONLY FOR DEBUGGING PWMs
+      //if (PRINT_USM){
+      //  printf("(int)(_speed[0]*1000.0): %d, convert_speed_rad_per_sec_to_pwm_ccr(_speed[0]): %d, convSpeed(_speed[0], 0): %d\r\n", (int)(_speed[0]*1000.0), convert_speed_rad_per_sec_to_pwm_ccr(_speed[0]), convSpeed(_speed[0], 0));
+      //}
+      //for (int i = 0; i<7; i++){
+      //  _speed[i] = (_speed[i] / 0.087266) * 26.179938749999998; // speed/5[deg/s] * 250[rpm] -> puts it in normalized units to test out full range of pwm
+      //}
+
+      if (PRINT_USM){
+        for (int i = 0; i<7;i++){
+          printf("Motor %d: Commanding %d milli rads/sec or %d mRPM, CCR of %d.\r\n", i, (int)(1000 * _speed[i]), (int)(RAD_PER_SEC_TO_RPM * _speed[i] * 1000), convert_speed_rad_per_sec_to_pwm_ccr(_speed[i]));
+        }
+      }
+      // Set USM speed values
+      if (DO_DEBUG_PWM_SWEEP){
+        debug_duty_cycle_sweep();
+      } else{
+        set_motor_pwm_registers();
+      }
+      
+      
+    }
+  
+  =}
+
+}
+
+/* // was at top of reaction(speed)
     en_usm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_3) && !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2); 
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, en_usm); // PB0 is the LED
     
-    if (print_usm) {printf("USM: en_usm=%d, force_disable=%d\r\n", en_usm, self->_force_disable_motor_pins);}
+    if (PRINT_USM) {printf("USM: en_usm=%d, force_disable=%d\r\n", en_usm, self->_force_disable_motor_pins);}
 
     // for writing USM convSpeeds
-    if (print_usm && printcnt>=printcnt_lim) {
+    if (PRINT_USM && printcnt>=printcnt_lim) {
         printf("USM convSpeed: ");
     }
 
     for (int i=0; i<7; i++) {
       _speed[i] = en_usm? speed[i]->value * motor_configs[i]->dir : 0;
       
-      if (print_usm) {printf("USM: _speed[%d] = %d (from input %d, en_usm=%d)\r\n",
+      if (PRINT_USM) {printf("USM: _speed[%d] = %d (from input %d, en_usm=%d)\r\n",
              i, (int)(_speed[i] * 1000), (int)(speed[i]->value * 1000), en_usm);
       }
       
-      if (print_usm && printcnt>=printcnt_lim) {
+      if (PRINT_USM && printcnt>=printcnt_lim) {
           printf("%d  ", convSpeed(_speed[i], i));
       }
     }
-    if (print_usm && printcnt>=printcnt_lim) {
+    if (PRINT_USM && printcnt>=printcnt_lim) {
           printf("\r\n");
     }
-
-    // Set USM enable values
-    
-    if (self->_force_disable_motor_pins){
-      if (print_usm){printf("USM: Force disabling all motor pins\r\n");}
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    0); // PB0 is the LED
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   0);
-      HAL_Delay(1);
-    }
-    else {
-      if (print_usm){printf("USM: Setting motor enables: [%d %d %d %d %d %d %d]\r\n",
-             (_speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT),
-             (_speed[1] > USM_LIMIT || _speed[1] < -USM_LIMIT),
-             (_speed[2] > USM_LIMIT || _speed[2] < -USM_LIMIT),
-             (_speed[3] > USM_LIMIT || _speed[3] < -USM_LIMIT),
-             (_speed[4] > USM_LIMIT || _speed[4] < -USM_LIMIT),
-             (_speed[5] > USM_LIMIT || _speed[5] < -USM_LIMIT),
-             (_speed[6] > USM_LIMIT || _speed[6] < -USM_LIMIT));
-      }
-
+    */
+/* // fix these limits!
+      // set enable pins if speeds are within the limits
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    1); // PB0 is the LED
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    _speed[0] > USM_LIMIT || _speed[0] < -USM_LIMIT);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    _speed[1] > USM_LIMIT || _speed[1] < -USM_LIMIT);
@@ -290,8 +401,9 @@ reactor USM {
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   _speed[5] > USM_LIMIT || _speed[5] < -USM_LIMIT);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   _speed[6] > USM_LIMIT || _speed[6] < -USM_LIMIT);
       HAL_Delay(1);
+      */
 
-      // Set USM direction values
+/*
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   _speed[0] >= 0);
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    _speed[1] >= 0);
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    _speed[2] >= 0);
@@ -300,20 +412,17 @@ reactor USM {
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   _speed[5] >= 0);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   _speed[6] >= 0);
       HAL_Delay(1);
+      */
+      
 
       // Set USM speed values
-      TIM3->CCR1 = convSpeed(_speed[0], 0);  // Set period for USM0
+      /*
+      TIM3->CCR1 = _speed[0];//convSpeed(_speed[0], 0);  // Set period for USM0
       TIM3->CCR2 = convSpeed(_speed[1], 1);  // Set period for USM1
       TIM3->CCR3 = convSpeed(_speed[2], 2);  // Set period for USM2
       TIM3->CCR4 = convSpeed(_speed[3], 3);  // Set period for USM3
       TIM4->CCR1 = convSpeed(_speed[4], 4);  // Set period for USM4
       TIM4->CCR2 = convSpeed(_speed[5], 5);  // Set period for USM5
       TIM4->CCR3 = convSpeed(_speed[6], 6);  // Set period for USM6
-
-      printf("convSpeed for _speed[0] of %d: %d\r\n", (int)(1000 * _speed[0]), convSpeed(_speed[0], 0));
-      printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
-    }
-  
-  =}
-
-}
+      HAL_Delay(1);
+      */

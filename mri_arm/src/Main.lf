@@ -19,8 +19,6 @@ preamble {=
   //#include "stm32_startup.h"
   #include "main.h"
 
-  
-
   extern UART_HandleTypeDef huart2;
   =}
 
@@ -37,6 +35,8 @@ main reactor {
         return len;
     }
     */
+    extern UART_HandleTypeDef huart1; // make sure these need to be defined here or not
+    extern UART_HandleTypeDef huart3;
     extern UART_HandleTypeDef huart4;
     extern UART_HandleTypeDef huart5;
     //UART_HandleTypeDef huart6; // def in ROS_Interface.lf
@@ -75,8 +75,6 @@ main reactor {
     }
 
 
-    extern UART_HandleTypeDef huart3;
-    extern UART_HandleTypeDef huart1;
 
     // Define empty function handlers for UART callbacks
     void HAL_UART_RxCallback3();
