@@ -142,7 +142,7 @@ reactor USM {
       htim4.Instance = TIM4;
       htim4.Init.Prescaler = 0;
       htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-      htim4.Init.Period = ARR_PERIOD; //1000;
+      htim4.Init.Period = ARR_PERIOD; //1000
       htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
       htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
       HAL_TIM_Base_Init(&htim4);
@@ -248,7 +248,6 @@ reactor USM {
       }
       return;
     }
-
     
     void set_direction_pins(){
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   _speed[0] >= 0); // 1 if non-negative, 0 if negative
