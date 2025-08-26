@@ -196,41 +196,6 @@ reactor MotorController(refresh_period: time = 10 ms) {
       for (int i = 0; i<7; i++){
         self->speed_spc[i] = self->target_motor_speeds[i];
       }
-      /*
-      if (use_diff_vel_ext){
-        if (use_motor_configs){
-          self->speed_spc[0] = target_vel_ext[0]->value * (motor_configs[0]->dir);
-          // for diff motors, w0 = pitch + roll, w1 = -pitch + roll
-          self->speed_spc[1] =  (target_vel_ext[1]->value + target_vel_ext[2]->value) * (motor_configs[1]->dir); // pitch + roll
-          self->speed_spc[2] = (-target_vel_ext[1]->value + target_vel_ext[2]->value) * (motor_configs[2]->dir); // -pitch + roll
-
-          self->speed_spc[3] =  (target_vel_ext[3]->value + target_vel_ext[4]->value) * (motor_configs[3]->dir); // pitch + roll
-          self->speed_spc[4] = (-target_vel_ext[3]->value + target_vel_ext[4]->value) * (motor_configs[4]->dir); // -pitch + roll
-
-          self->speed_spc[5] =  (target_vel_ext[5]->value + target_vel_ext[6]->value) * (motor_configs[5]->dir); // pitch + roll
-          self->speed_spc[6] = (-target_vel_ext[5]->value + target_vel_ext[6]->value) * (motor_configs[6]->dir); // -pitch + roll
-        } else{
-          self->speed_spc[0] = target_vel_ext[0]->value;
-          self->speed_spc[1] =  (target_vel_ext[1]->value + target_vel_ext[2]->value); // pitch + roll
-          self->speed_spc[2] = (-target_vel_ext[1]->value + target_vel_ext[2]->value); // -pitch + roll
-
-          self->speed_spc[3] =  (target_vel_ext[3]->value + target_vel_ext[4]->value); // pitch + roll
-          self->speed_spc[4] = (-target_vel_ext[3]->value + target_vel_ext[4]->value); // -pitch + roll
-
-          self->speed_spc[5] =  (target_vel_ext[5]->value + target_vel_ext[6]->value); // pitch + roll
-          self->speed_spc[6] = (-target_vel_ext[5]->value + target_vel_ext[6]->value); // -pitch + roll
-        }
-          else {
-        for(int i=0; i<7; i++){
-            self->speed_spc[i] = target_vel_ext[i]->value;
-          }
-      }
-      */
-        /* // for reference
-        for (int i=1; i<7; i=i+2){
-            self->speed_spc[i] = (target_vel_ext[i+1]->value + target_vel_ext[i]->value) * (motor_configs[i]->dir);
-            self->speed_spc[i] = (-target_vel_ext[i+1]->value + target_vel_ext[i+1]->value) * (motor_configs[i+1]->dir);
-        }*/
   =}
 
   reaction(target_pos_int) {=

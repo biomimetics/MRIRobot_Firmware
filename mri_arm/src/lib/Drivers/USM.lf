@@ -17,7 +17,7 @@ preamble {=
   #define DO_DEBUG_PWM_SWEEP 0
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
-  #define ARR_PERIOD 1000 //2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
+  #define ARR_PERIOD 2000 //2000 //2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
   #define PWM_RPM_MAX 250.0 // 250 RPM
   #define MSEC_TO_SEC 0.001
 
@@ -46,7 +46,7 @@ reactor USM {
     // for debugging
     long reference_tick_usm = 0; //HAL_GetTick();
     float debug_duty_cycle_sweep_time_interval = 2.0;
-    float debug_duty_cycle_sweep_increment = 0.0001;
+    float debug_duty_cycle_sweep_increment = 0.01; //0.0001;
     float debug_duty_cycle = 0.00;
 
 
@@ -93,6 +93,12 @@ reactor USM {
         
       }
       TIM3->CCR1 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM0
+      TIM3->CCR2 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM1
+      TIM3->CCR3 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM2
+      TIM3->CCR4 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM3
+      TIM4->CCR1 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM4
+      TIM4->CCR2 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM5
+      TIM4->CCR3 = convert_duty_cycle_to_pwm_ccr(debug_duty_cycle);  // Set period for USM6
     }
 
     extern TIM_HandleTypeDef htim3; // used for USM PWM
