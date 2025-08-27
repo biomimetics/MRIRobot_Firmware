@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
   #include <../../../motor_config.h>
 
-  #define PRINT_ENCODER 0
+  #define PRINT_ENCODER 1
 
   #define TWO_PI 6.28318
   #define NSEC_TO_SEC 0.000000001
@@ -55,7 +55,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     //static int PRINT_ENCODER = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;
-    static int printcnt_lim = 100; // print every nth time
+    static int printcnt_lim = 50; // print every nth time
 
 
     // QDEC Commands
@@ -136,7 +136,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
-      self->_qdec_convert_motor_to_joint_rad[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio);
+      self->_qdec_convert_motor_to_joint_rad[i] = 1.0; //(TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio); // set to 1 to verify the encoder counts are as expected
     }
 
     self->prev_time = lf_time_physical_elapsed(); //lf_time_physical();
