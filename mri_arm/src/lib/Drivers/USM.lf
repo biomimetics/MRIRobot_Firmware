@@ -13,7 +13,7 @@ preamble {=
   #include <math.h> // need for floating point abs, or fabsf()
   #include <../../../motor_config.h>
 
-  #define PRINT_USM 1
+  #define PRINT_USM 0
   #define DO_DEBUG_PWM_SWEEP 0
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
@@ -293,6 +293,10 @@ reactor USM {
     float apply_motor_direction_change(float speed, int index){
       return speed * ((float) motor_configs[index]->dir);
     }
+
+    float apply_gear_ratio(float speed, int index){
+      return speed * ((float) motor_configs[index]->gear_ratio);
+    }
   =}
 
 
@@ -334,9 +338,8 @@ reactor USM {
     
     // save internal _speed values
     for (int i = 0; i<7; i++){
-      _speed[i] = apply_motor_direction_change(speed[i]->value, i);
+      _speed[i] = apply_gear_ratio(apply_motor_direction_change(speed[i]->value, i), i);
     }
-    
 
     // Set USM values if we're not in the safey idle mode
     if (self->_force_disable_motor_pins){

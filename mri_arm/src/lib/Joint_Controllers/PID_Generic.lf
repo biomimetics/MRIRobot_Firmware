@@ -10,16 +10,21 @@ preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
 
-  #define PRINT_PID_GENERIC 0
+  #define PRINT_PID_GENERIC 1
 
   #define NSEC_TO_SEC 0.000000001
   #define MSEC_TO_SEC 0.001
 =}
 
-reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0) {
+reactor PIDControllerGeneric(rate:time = 5ms, Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0) {
   input current_state: float
   input target_state: float
   output control_signal: float
+
+  // internal copies of IO
+  state current_state_: float = 0.0
+  state target_state_: float = 0.0
+  state control_signal_: float = 0.0
 
   // to help with state variables
   state last_error: float = 0.0  
@@ -30,12 +35,13 @@ reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_L
   state signal_p: float = 0.0
   state signal_d: float = 0.0
   state signal_i: float = 0.0
-  state control_signal_: float = 0.0
+
+  timer update_tick(0, rate)
 
   // gains for control signal components
-  state Kp: float = Kp
-  state Kd: float = Kd
-  state Ki: float = Ki
+  //state Kp_: float = Kp
+  //state Kd_: float = Kd
+  //state Ki_: float = Ki
 
   // limits for integral and total control signals
   state signal_i_max: float = INTEGRAL_CLAMPING_MAX
@@ -53,6 +59,8 @@ reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_L
     long diff_tick = 0;
     float interval_sec = 0.0f;
     */
+   int printcnt = 0;
+   int printcnt_lim = 10;
     =}
 
   method doIntegralClamping(): void {=
@@ -85,6 +93,7 @@ reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_L
     self->reference_tick = HAL_GetTick();
     =}
 
+  //reaction(update_tick) -> control_signal {=
   reaction(current_state, target_state) -> control_signal {=
     //instant_t now = lf_time_logical();
     //interval_t interval = now - self->prev_time;
@@ -93,11 +102,10 @@ reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_L
     self->now_tick = HAL_GetTick(); // gives miliseconds since last stm32 reset
     self->interval_sec = ((float)(self->now_tick - self->reference_tick)) * MSEC_TO_SEC; // diff_tick
     self->reference_tick = self->now_tick;
-
-    //interval_sec = ((float)(diff_tick)) * MSEC_TO_SEC; // should be loop time in seconds
     
 
     self->last_error = self->error;
+    //self->error = (self->target_state_) - (self->current_state_);
     self->error = (target_state->value) - (current_state->value);
 
     self->signal_p = (self->error); // Kp * (error)
@@ -112,12 +120,14 @@ reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_L
     
     lf_set(control_signal, self->control_signal_);
 
-    if (PRINT_PID_GENERIC){
-      printf("target_state->value as int: %d\r\n", (int)(target_state->value*1000));
-      printf("current_state->value as int: %d\r\n", (int)(current_state->value*1000));
-      printf("self->_control_signal as int: %d\r\n", (int)(self->control_signal_*1000));
-      printf("interval: %ld\r\n", interval);
+    if (PRINT_PID_GENERIC && printcnt>=printcnt_lim){
+      float print_mult = 10000.0;
+      printf("target_state->value as int: %d\r\n", (int)(target_state->value * print_mult));
+      printf("current_state->value as int: %d\r\n", (int)(current_state->value * print_mult));
+      printf("self->_control_signal as int: %d\r\n", (int)(self->control_signal_ * print_mult));
+      printf("interval: %ld ms\r\n", (int)(self->interval_sec * 1000));
     }
 
+    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
   =}
 }

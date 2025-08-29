@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
   #include <../../../motor_config.h>
 
-  #define PRINT_ENCODER 1
+  #define PRINT_ENCODER 0
 
   #define TWO_PI 6.28318
   #define NSEC_TO_SEC 0.000000001
@@ -183,7 +183,7 @@ reactor QDEC(sample_period: time = 5 ms){
     long diff_tick = now_tick - reference_tick;
     float interval_sec = ((float)(diff_tick)) * MSEC_TO_SEC; // should be loop time in seconds
     reference_tick = now_tick;
-    if (PRINT_ENCODER) printf("encoder interval_sec: Got %d ms, expected %d ms from trigger.\r\n", ((int)(interval_sec * 1000.0)), 5); //self->sample_period);
+    if (PRINT_ENCODER && printcnt>=printcnt_lim) printf("encoder interval_sec: Got %d ms, expected %d ms from trigger.\r\n", ((int)(interval_sec * 1000.0)), 5); //self->sample_period);
 
     long start = HAL_GetTick();
 
