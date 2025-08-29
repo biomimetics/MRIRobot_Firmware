@@ -16,9 +16,10 @@ preamble {=
   #define TWO_PI 6.28318
   #define NSEC_TO_SEC 0.000000001
   #define MSEC_TO_SEC 0.001
+  
 =}
 
-reactor QDEC(sample_period: time = 5 ms) {
+reactor QDEC(sample_period: time = 5 ms){
   mutable input reset_qdec: bool
   mutable input enable_qdec: bool
 
@@ -136,10 +137,10 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
-      self->_qdec_convert_motor_to_joint_rad[i] = 1.0; //(TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio); // set to 1 to verify the encoder counts are as expected
+      self->_qdec_convert_motor_to_joint_rad[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio);
     }
 
-    self->prev_time = lf_time_physical_elapsed(); //lf_time_physical();
+    self->prev_time = lf_time_physical(); //lf_time_physical(); //lf_time_physical_elapsed
     reference_tick = HAL_GetTick(); // gives miliseconds since last reboot
   =}
 
@@ -171,18 +172,18 @@ reactor QDEC(sample_period: time = 5 ms) {
   reaction(trigger) -> qdec_out, qdec_vel_out, sea_out {=
 
     // from pid controller
-    // instant_t now = lf_time_logical();
-    // interval_t interval = now - self->prev_time;
-
+    //instant_t now = lf_time_physical();
+    //interval_t interval = now - self->prev_time;
+    //self->prev_time = now;
     //self->last_pos = current_pos->value;
-    
-    //printf("LF: now: %ld, self->prev_time: %ld, diff: %ld\r\n", now, self->prev_time, interval);
+    //printf("LF: now: %ld, self->prev_time: %ld, diff: %ld \r\n", now, self->prev_time, ((int)(interval)));
 
     // compute the interval in seconds between loop triggers
     long now_tick = HAL_GetTick(); // gives miliseconds since last stm32 reset
     long diff_tick = now_tick - reference_tick;
     float interval_sec = ((float)(diff_tick)) * MSEC_TO_SEC; // should be loop time in seconds
     reference_tick = now_tick;
+    if (PRINT_ENCODER) printf("encoder interval_sec: Got %d ms, expected %d ms from trigger.\r\n", ((int)(interval_sec * 1000.0)), 5); //self->sample_period);
 
     long start = HAL_GetTick();
 
@@ -255,6 +256,7 @@ reactor QDEC(sample_period: time = 5 ms) {
 
     // estimate joint velocities
 
+    
   =}
 
 
