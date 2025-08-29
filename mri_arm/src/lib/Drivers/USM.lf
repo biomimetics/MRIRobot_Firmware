@@ -280,13 +280,6 @@ reactor USM {
     }
 
     void set_motor_pwm_registers(){
-      //if (PRINT_USM){
-      //  printf("Setting duty cycles of: \r\n");
-      //  for (int i = 0; i < 7; i++){
-      //    printf("Motor %d: %d%\r\n", i, (int)(convert_speed_rad_per_sec_to_duty_cycle(_speed[i])*100.0));
-      //  }
-      //  printf("\r\n");
-      //}
       TIM3->CCR1 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[0]);  // Set period for USM0
       TIM3->CCR2 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[1]);  // Set period for USM1
       TIM3->CCR3 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[2]);  // Set period for USM2

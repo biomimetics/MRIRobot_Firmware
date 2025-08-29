@@ -23,7 +23,7 @@ typedef struct { /* __MOTOR_CONFIG_H */
 // --------------------------------------- Base joint --------------------------------------- 
 static Motor_Config motor0_config = {
     1,          // dir              - Motor direction
-    0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
+    0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s // APPLY THESE BEFORE GEAR REDUCTION
     23040,      // qdec_cpr         - motor encoder count per rotation
     8000,       // qdec_cpr         - motor encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
