@@ -10,7 +10,7 @@ preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
 
-  #define PRINT_PID_GENERIC 1
+  #define PRINT_PID_GENERIC 0
 
   #define NSEC_TO_SEC 0.000000001
   #define MSEC_TO_SEC 0.001

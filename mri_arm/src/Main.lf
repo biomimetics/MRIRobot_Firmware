@@ -39,6 +39,9 @@ main reactor {
     extern UART_HandleTypeDef huart3;
     extern UART_HandleTypeDef huart4;
     extern UART_HandleTypeDef huart5;
+
+    extern TIM_HandleTypeDef htim6; // used for timing loops
+
     //UART_HandleTypeDef huart6; // def in ROS_Interface.lf
 
 
@@ -62,6 +65,8 @@ main reactor {
       MX_USART6_UART_Init();
       MX_TIM3_Init();
       MX_TIM4_Init();
+      MX_TIM6_Init();
+      HAL_TIM_Base_Start(&htim6); // added!
       MX_RTC_Init();
       MX_USART2_UART_Init();
 
@@ -100,18 +105,18 @@ main reactor {
 
     // ############
     // ### for debugging the new timing code, replace and remove when we can
-    uint32_t start, stop, elapsed;
-    double elapsedtime;
+    int timer_start, timer_stop, timer_elapsed;
+    double timer_elapsed_time;
 
-    start = TIM2->CNT;
+    //timer_start = TIM6->CNT;
 
     // Stuff to time
 
-    stop = TIM2->CNT;
+    //timer_stop = TIM6->CNT;
 
-    elapsed = stop - start;
+    //timer_elapsed = timer_stop - timer_start;
 
-    elapsedtime = (1.0 / (double)SystemCoreClock) * (double)elapsed; // time in seconds
+    //timer_elapsed_time = (double)(1.0 / (double)SystemCoreClock) * (double)timer_elapsed; // time in seconds
 
     // ### for debugging the new timing code, replace and remove when we can
     // ############
@@ -166,14 +171,17 @@ main reactor {
   timer heartbeat_timer(0, 10 ms)
 
   reaction(heartbeat_timer){=
-    stop = TIM2->CNT;
+    timer_stop = TIM6->CNT;
 
-    elapsed = stop - start;
-    start = TIM2->CNT;
+    timer_elapsed = timer_stop - timer_start;
+    timer_start = TIM6->CNT;
 
-    elapsedtime = (1.0 / (double)SystemCoreClock) * (double)elapsed; // time in seconds
+    //printf("timer_start: %d\r\n", timer_start);
+    //printf("TIM6->CNT: %d\r\n", TIM6->CNT);
+    timer_elapsed_time = (double)(1.0 / (double)SystemCoreClock) * (double)timer_elapsed; // time in seconds
 
-    printf("Main Timer: Elapsed time in microseconds: %d us. Expected 10000 us or 10 ms.", ((int)(elapsedtime * 1000000)));
+    int sec_to_usec = 1000000;
+    printf("Main Timer: timer_elapsed: %d. Elapsed time in microseconds: %d us. Expected 10 ms.\r\n", timer_elapsed, ((int)(timer_elapsed_time * sec_to_usec)));
     
     =}
   
@@ -186,6 +194,8 @@ main reactor {
 
     // Initialize the STM32 peripherals
     stm32_init();
+
+    timer_start = TIM6->CNT;
 
     
   =}
