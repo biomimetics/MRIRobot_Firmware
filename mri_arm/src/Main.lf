@@ -97,6 +97,24 @@ main reactor {
         HAL_UART_TxCallback1();
       }
     }
+
+    // ############
+    // ### for debugging the new timing code, replace and remove when we can
+    uint32_t start, stop, elapsed;
+    double elapsedtime;
+
+    start = TIM2->CNT;
+
+    // Stuff to time
+
+    stop = TIM2->CNT;
+
+    elapsed = stop - start;
+
+    elapsedtime = (1.0 / (double)SystemCoreClock) * (double)elapsed; // time in seconds
+
+    // ### for debugging the new timing code, replace and remove when we can
+    // ############
   =}
   
   timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
@@ -143,12 +161,33 @@ main reactor {
   home_controller.is_home -> mode_machine.is_homing_finished after 0;
   home_controller.motor_speed -> motor_controller.target_vel_int
   
+  // ############
+  // ### for debugging the new timing code, replace and remove when we can
+  timer heartbeat_timer(0, 10 ms)
+
+  reaction(heartbeat_timer){=
+    stop = TIM2->CNT;
+
+    elapsed = stop - start;
+    start = TIM2->CNT;
+
+    elapsedtime = (1.0 / (double)SystemCoreClock) * (double)elapsed; // time in seconds
+
+    printf("Main Timer: Elapsed time in microseconds: %d us. Expected 10000 us or 10 ms.", ((int)(elapsedtime * 1000000)));
+    
+    =}
+  
+  // ### for debugging the new timing code, replace and remove when we can
+  // ############
+
   reaction(startup) {=
     // Prep all GPIO values
     //MX_GPIO_Init();
 
     // Initialize the STM32 peripherals
     stm32_init();
+
+    
   =}
 
 }
