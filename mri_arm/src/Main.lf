@@ -108,16 +108,6 @@ main reactor {
     int timer_start, timer_stop, timer_elapsed;
     double timer_elapsed_time;
 
-    //timer_start = TIM6->CNT;
-
-    // Stuff to time
-
-    //timer_stop = TIM6->CNT;
-
-    //timer_elapsed = timer_stop - timer_start;
-
-    //timer_elapsed_time = (double)(1.0 / (double)SystemCoreClock) * (double)timer_elapsed; // time in seconds
-
     // ### for debugging the new timing code, replace and remove when we can
     // ############
   =}
@@ -172,18 +162,18 @@ main reactor {
 
   reaction(heartbeat_timer){=
     timer_stop = TIM6->CNT;
-
     timer_elapsed = timer_stop - timer_start;
     timer_start = TIM6->CNT;
 
-    //printf("timer_start: %d\r\n", timer_start);
-    //printf("TIM6->CNT: %d\r\n", TIM6->CNT);
-    timer_elapsed_time = (double)(1.0 / (double)SystemCoreClock) * (double)timer_elapsed; // time in seconds
+    // Incorporate prescaler
+    uint32_t prescaler = TIM6->PSC; // Timer prescaler register
+    timer_elapsed_time = (double)(timer_elapsed) * (double)(prescaler + 1) / (double)SystemCoreClock; // time in seconds
 
     int sec_to_usec = 1000000;
-    printf("Main Timer: timer_elapsed: %d. Elapsed time in microseconds: %d us. Expected 10 ms.\r\n", timer_elapsed, ((int)(timer_elapsed_time * sec_to_usec)));
-    
-    =}
+    printf("SystemCoreClock: %d\r\n", SystemCoreClock);
+    printf("TIM6->PSC (prescaler): %lu\r\n", prescaler);
+    printf("Main Timer: Elapsed time: %d us. Expected 10000 us.\r\n", ((int)(timer_elapsed_time * sec_to_usec)));
+=}
   
   // ### for debugging the new timing code, replace and remove when we can
   // ############
