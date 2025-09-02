@@ -164,3 +164,57 @@ int _write(int file, char *ptr, int len){
   // HAL_UART_Transmit_IT(&huart2, (uint8_t *)ptr, len);
   return len;
 }
+
+double timer_get_elapsed_time(uint32_t *timer_start){
+  uint32_t timer_stop = LOOP_TIMER->CNT;
+  uint32_t timer_elapsed = 0;
+
+  if (timer_stop < *timer_start){
+    //printf("Timer overflow!\r\n");
+    timer_elapsed = ((uint32_t)65535 - *timer_start) + timer_stop;
+  }
+  else{
+    timer_elapsed = timer_stop - *timer_start;
+  }
+  //timer_elapsed = timer_stop - *timer_start;
+  *timer_start = LOOP_TIMER->CNT;
+
+  // Incorporate prescaler
+  //uint32_t prescaler = TIM6->PSC; // Timer prescaler register
+  double timer_elapsed_time = (double)(timer_elapsed) * (double)(TIM6->PSC + 1) / (double)SystemCoreClock; // time in seconds
+
+  
+  //printf("SystemCoreClock: %d\r\n", SystemCoreClock);
+  //printf("TIM6->PSC (prescaler): %lu\r\n", TIM6->PSC); // prescaler);
+  
+  printf("timer_elapsed: %d, timer_elapsed_time: %d us\r\n", timer_elapsed, ((int)(timer_elapsed_time * 1000000)));
+  return timer_elapsed_time;
+  //return (double)(timer_elapsed) * (double)(LOOP_TIMER->PSC + 1) / (double)SystemCoreClock; //timer_elapsed_time;
+}
+
+// this function works great! maybe update the whole thing with its own struct later.
+void timer_updated_elapsed_time(uint32_t *timer_start, double *timer_elapsed_sec){
+  uint32_t timer_stop = LOOP_TIMER->CNT;
+  uint32_t timer_elapsed = 0;
+
+  if (timer_stop < *timer_start){
+    //printf("Timer overflow!\r\n");
+    timer_elapsed = ((uint32_t)65535 - *timer_start) + timer_stop;
+  }
+  else{
+    timer_elapsed = timer_stop - *timer_start;
+  }
+  //timer_elapsed = timer_stop - *timer_start;
+  *timer_start = LOOP_TIMER->CNT;
+
+  // Incorporate prescaler
+  //uint32_t prescaler = TIM6->PSC; // Timer prescaler register
+  *timer_elapsed_sec = (double)(timer_elapsed) * (double)(TIM6->PSC + 1) / (double)SystemCoreClock; // time in seconds
+
+  
+  //printf("SystemCoreClock: %d\r\n", SystemCoreClock);
+  //printf("TIM6->PSC (prescaler): %lu\r\n", TIM6->PSC); // prescaler);
+  
+  //printf("timer_elapsed: %d, timer_elapsed_time: %d us\r\n", timer_elapsed, ((int)(*timer_elapsed_sec * 1000000)));
+  return;
+}

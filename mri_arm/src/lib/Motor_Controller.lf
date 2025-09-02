@@ -77,7 +77,11 @@ reactor MotorController(refresh_period: time = 10 ms) {
   output[7] current_joint: float
   output[7] current_joint_sea: float
   
-
+  preamble{=
+    bool use_diff_vel_ext = true; // move this to an input/state
+    //static Timer_State timer_st_u5 = {0, 0.005};
+    =}
+    
   state target_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
   state target_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
 
@@ -92,6 +96,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
   state _enable_motor_command: bool = false
   state _target_sel: MOTOR_MODE[7] = {1, 1, 1, 1, 1, 1, 1}
 
+  //state timer_st_u5: Timer_Struct = {0, 0.005}
   
 
   timer trigger(0, refresh_period)
@@ -144,14 +149,16 @@ reactor MotorController(refresh_period: time = 10 ms) {
   // ######
   // ### VELOCITY CONTROLLERS
 
+  
+  
   // reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0)
-  vcontrol_u0 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.001, Ki = 0.0, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u1 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.001, Ki = 0.0, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u2 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.001, Ki = 0.0, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u3 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.001, Ki = 0.0, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u4 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.001, Ki = 0.0, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u5 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.001, Ki = 0.0, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u6 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.001, Ki = 0.0, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
+  vcontrol_u0 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
+  vcontrol_u1 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
+  vcontrol_u2 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
+  vcontrol_u3 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
+  vcontrol_u4 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
+  vcontrol_u5 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
+  vcontrol_u6 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
 
   
   qdec_vel ->
@@ -164,9 +171,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
     vcontrol_u6.current_state
   
 
-  preamble{=
-    bool use_diff_vel_ext = true; // move this to an input/state
-    =}
+  
     
   method convertJointToMotorSpeeds(): void {=
     // apply jacobian
@@ -235,25 +240,6 @@ reactor MotorController(refresh_period: time = 10 ms) {
         */
       
   =}
-
-  /*
-  reaction(qdec_vel) ->
-    vcontrol_u0.current_state,
-    vcontrol_u1.current_state,
-    vcontrol_u2.current_state,
-    vcontrol_u3.current_state,
-    vcontrol_u4.current_state,
-    vcontrol_u5.current_state,
-    vcontrol_u6.current_state{=
-      lf_set(vcontrol_u0.current_state, qdec_vel[0]->value);
-      lf_set(vcontrol_u1.current_state, qdec_vel[1]->value);
-      lf_set(vcontrol_u2.current_state, qdec_vel[2]->value);
-      lf_set(vcontrol_u3.current_state, qdec_vel[3]->value);
-      lf_set(vcontrol_u4.current_state, qdec_vel[4]->value);
-      lf_set(vcontrol_u5.current_state, qdec_vel[5]->value);
-      lf_set(vcontrol_u6.current_state, qdec_vel[6]->value);
-    =}
-  */
 
   // +----------------------------------------------------------------+
   // | Use targets to get desired speeds

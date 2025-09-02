@@ -20,6 +20,7 @@ preamble {=
   #include "main.h"
 
   extern UART_HandleTypeDef huart2;
+
   =}
 
 // Import and/or declare reactor classes.
@@ -103,21 +104,14 @@ main reactor {
       }
     }
 
-    // ############
-    // ### for debugging the new timing code, replace and remove when we can
-    int timer_start, timer_stop, timer_elapsed;
-    double timer_elapsed_time;
-
-    // ### for debugging the new timing code, replace and remove when we can
-    // ############
   =}
   
   timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
   timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
   state count: int = 1
 
-  qdec = new QDEC()                           // FPGA-based QDEC Encoders
-  usm = new USM()                             // Ultrasonic motor controllers
+  qdec = new QDEC(sample_period = 5 ms)     // FPGA-based QDEC Encoders
+  usm = new USM()                            // Ultrasonic motor controllers
   ros_controller = new ROSInterface()        // ROS UART Interface
   motor_controller = new MotorController()    // Main Motor driver + controller
   home_controller = new HomeController()      // Used to home the motors
@@ -155,28 +149,6 @@ main reactor {
 
   home_controller.is_home -> mode_machine.is_homing_finished after 0;
   home_controller.motor_speed -> motor_controller.target_vel_int
-  
-  // ############
-  // ### for debugging the new timing code, replace and remove when we can
-  timer heartbeat_timer(0, 10 ms)
-
-  reaction(heartbeat_timer){=
-    timer_stop = TIM6->CNT;
-    timer_elapsed = timer_stop - timer_start;
-    timer_start = TIM6->CNT;
-
-    // Incorporate prescaler
-    uint32_t prescaler = TIM6->PSC; // Timer prescaler register
-    timer_elapsed_time = (double)(timer_elapsed) * (double)(prescaler + 1) / (double)SystemCoreClock; // time in seconds
-
-    int sec_to_usec = 1000000;
-    printf("SystemCoreClock: %d\r\n", SystemCoreClock);
-    printf("TIM6->PSC (prescaler): %lu\r\n", prescaler);
-    printf("Main Timer: Elapsed time: %d us. Expected 10000 us.\r\n", ((int)(timer_elapsed_time * sec_to_usec)));
-=}
-  
-  // ### for debugging the new timing code, replace and remove when we can
-  // ############
 
   reaction(startup) {=
     // Prep all GPIO values
@@ -185,9 +157,6 @@ main reactor {
     // Initialize the STM32 peripherals
     stm32_init();
 
-    timer_start = TIM6->CNT;
-
-    
   =}
 
 }
