@@ -1,0 +1,145 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include <stdio.h>
+
+  #define PRINT_PID_GENERIC 0
+  #define USE_REAL_TIME 1
+
+=}
+
+reactor PIDControllerGeneric(expected_period:float = 0.005, Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, error_deadband: float=0.000001, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0) {
+  input current_state: float
+  input target_state: float
+  output control_signal: float
+
+  // internal copies of IO
+  state current_state_: float = 0.0
+  state target_state_: float = 0.0
+  state control_signal_: float = 0.0
+
+  // to help with state variables
+  state last_error: float = 0.0  
+  state prev_time: time = 0
+
+  // error and control signal components
+  state error: float = 0.0
+  state signal_p: float = 0.0
+  state signal_d: float = 0.0
+  state signal_i: float = 0.0
+
+
+  timer update_tick(0, 5 ms)
+  state loop_period: float = expected_period
+
+  // limits for integral and total control signals
+  state signal_i_max: float = INTEGRAL_CLAMPING_MAX
+  state control_signal_max: float = CONTROL_LIMIT
+
+  // timer_states
+  state timer_start_: uint32_t = 0
+  state timer_elapsed_time_sec_: double = 0.0
+  state interval_sec: float = 0.0
+
+
+  preamble {=
+
+   int printcnt = 0;
+   int printcnt_lim = 200;
+    =}
+
+  method doIntegralClamping(): void {=
+    // do integral term clamping
+    if ((self->signal_i_max) < (self->signal_i)){
+      self->signal_i = self->signal_i_max;
+    } 
+    else if ((self->signal_i) < (-self->signal_i_max)){
+      self->signal_i = -self->signal_i_max;
+    }
+    else {
+      // nothing needs to be done.
+    }
+  =}
+
+  method doControlSignalClamping(): void {=
+    if (self->error < self->error_deadband){
+      self->control_signal_ = 0.0;
+    }
+
+    // do integral term clamping
+    if ((self->control_signal_max) < (self->control_signal_)){
+      self->control_signal_ = self->control_signal_max;
+    } 
+    else if ((self->control_signal_) < (-self->control_signal_max)){
+      self->control_signal_ = -self->control_signal_max;
+    }
+    else {
+      // nothing needs to be done.
+    }
+  =}
+
+  reaction(startup){=
+    //self->reference_tick = HAL_GetTick();
+    =}
+
+  reaction(current_state){=
+    self->current_state_ = current_state->value;
+  =}
+
+  reaction(target_state){=
+    self->target_state_ = target_state->value;
+  =}
+
+  //reaction(update_tick) -> control_signal {=
+  reaction(current_state, target_state) -> control_signal {=
+    
+    if (USE_REAL_TIME){
+      timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
+      self->interval_sec = (float) self->timer_elapsed_time_sec_;
+    }
+    else{
+      self->interval_sec = self->loop_period;
+    }
+    
+    self->last_error = self->error;
+    //self->error = (self->target_state_) - (self->current_state_);
+    self->error = (target_state->value) - (current_state->value);
+
+    self->signal_p = (self->error); // Kp * (error)
+    self->signal_d = ((self->error - self->last_error) / self->interval_sec); // Kd * d(error)/dt
+    self->signal_i = self->signal_i + (self->error * self->interval_sec); // ~  Ki * \sum_{t=0}^{t} (error) dt 
+
+    doIntegralClamping();
+
+    self->control_signal_ = self->Kp * self->signal_p + self->Kd * self->signal_d + self->Ki * self->signal_i; // sum all clamped components
+
+    doControlSignalClamping();
+  
+
+    lf_set(control_signal, self->control_signal_);
+
+    if (PRINT_PID_GENERIC && printcnt>=printcnt_lim){
+      float print_mult = 1000.0;
+      printf("interval: %ld us\r\n", (int)(self->interval_sec * 1000000));
+      printf("self->signal_p as int: %d\r\n", (int)(self->signal_p * print_mult));
+      printf("self->signal_d as int: %d\r\n", (int)(self->signal_d * print_mult));
+      printf("self->signal_i as int: %d\r\n", (int)(self->signal_i * print_mult));
+
+      printf("target_state->value as int: %d\r\n", (int)(target_state->value * print_mult));
+      printf("current_state->value as int: %d\r\n", (int)(current_state->value * print_mult));
+      printf("self->target_state_ as int: %d\r\n", (int)(self->target_state_ * print_mult));
+      printf("self->current_state_ as int: %d\r\n", (int)(self->current_state_ * print_mult));
+      printf("self->_control_signal as int: %d\r\n", (int)(self->control_signal_ * print_mult));
+      
+    }
+
+    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
+  =}
+}

@@ -8,13 +8,15 @@ target C {
 
 preamble {=
   #include "stm32f4xx_hal.h"
-  #include "stm32_startup.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
   #include <stdio.h>
 
   #include <../../../motor_config.h>
   #include <../../../joint_config.h>
   #include <../../../sm_config.h>
 
+  #define PRINT_MODE 0
   /*
   typedef struct mode_status{
     MODE_ENUM current_mode_index;
@@ -28,7 +30,7 @@ preamble {=
   */
 =}
 
-reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 500 ms){
+reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 2000 ms){
     input set_mode_change: MODE_ENUM 
     input is_homing_finished: bool
 
@@ -55,9 +57,45 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     state flag_ready_to_update_mode_status: bool = false
     state flag_ready_to_change_modes: bool = false
 
+    state status_led_on: bool = false
+    state status_led_counter: int = 0s
+    state status_led_counter_limit: int = 50 // number of slow ticks to wait
+
     preamble {= 
-      void set_power_relay(bool on_or_off){return;}; // TODO: impliment this when we get a working relay.
+      void set_power_relay(bool on_or_off){return;}; // TODO: impliment this when we get a working relay.HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    0);
+
+      /*
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOB_CLK_ENABLE();
+      HAL_GPIO_WritePin(GPIOA,  GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    0);
+      */
     =}
+
+    /*
+    method toggleStatusLED(): void {=
+      if (self->status_led_counter >= self->status_led_counter_limit){
+        self->status_led_counter = 0;
+        self->status_led_on = !self->status_led_on;
+        if (self->status_led_on){
+          HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    1); // turn on
+        }
+        else {
+          HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    0); // turn off
+        }
+      }
+      else {
+        self->status_led_counter = self->status_led_counter + 1;
+      }
+      return;
+    =}
+    */
 
     method printModeStatus(): void {=
       printf("### MODE MACHINE STATUS ###\r\n");
@@ -180,6 +218,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     
     reaction(slow_status_tick) {=
       printModeStatus();
+      //toggleStatusLED();
       =}
 
 

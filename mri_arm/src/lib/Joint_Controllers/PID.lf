@@ -9,6 +9,8 @@ target C {
 preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
+
+  #define PRINT_PID 0
 =}
 
 reactor PIDController(LIM:float=0.1) {
@@ -34,6 +36,12 @@ reactor PIDController(LIM:float=0.1) {
     float error_d = ((current_pos->value) - self->last_pos) / interval;
 
     float pid_out = constants[0]->value * error_p + constants[1]->value * error_d;
+
+    if (PRINT_PID){
+      printf("interval: %ld\r\n", interval);
+      printf("error_p as int: %d\r\n", (int)(error_p*1000));
+      printf("error_d as int: %d\r\n", (int)(error_d*1000));
+    }
 
     if(pid_out > 30) {
       pid_out = 30;

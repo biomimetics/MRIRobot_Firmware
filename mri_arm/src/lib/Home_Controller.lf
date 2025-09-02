@@ -8,7 +8,8 @@ target C {
 
 preamble {=
   #include "stm32f4xx_hal.h"
-  #include "stm32_startup.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
   #include <stdio.h>
 
   #ifndef __HOME_MODE_ENUM
@@ -61,6 +62,8 @@ reactor HomeController(sample_period: time = 20 ms) {
   state diffzero_cnt: int[7] = {0, 0, 0, 0, 0, 0, 0}
 
   state update_cnt: int = 0
+
+  state _enable_homing_command: bool = false;
 
   timer switch_update(0 ms, 40 ms)
 
@@ -135,9 +138,12 @@ reactor HomeController(sample_period: time = 20 ms) {
 
   =}
 
+  reaction(enable_homing_command){=
+    self->_enable_homing_command = enable_homing_command->value;  
+  =}
   //reaction(current_pos, sea_pos) -> motor_speed, is_home {=
-  reaction(trigger) current_pos, sea_pos, enable_homing_command -> motor_speed, is_home {=
-    if (enable_homing_command){
+  reaction(trigger) current_pos, sea_pos -> motor_speed, is_home {=
+    if (self->_enable_homing_command){
 
       bool home_stage[3] = {1, 1, 1};
         //+----------------------------------------------------------------+

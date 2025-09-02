@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2024 STMicroelectronics.
+  * Copyright (c) 2025 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -22,7 +22,7 @@
 #define __STM32F4xx_IT_H
 
 #ifdef __cplusplus
- extern "C" {
+extern "C" {
 #endif
 
 /* Private includes ----------------------------------------------------------*/
@@ -55,16 +55,16 @@ void SVC_Handler(void);
 void DebugMon_Handler(void);
 void PendSV_Handler(void);
 void SysTick_Handler(void);
-void USART1_IRQHandler(void);
-void USART2_IRQHandler(void);
-void USART3_IRQHandler(void);
-void UART4_IRQHandler(void);
-void UART5_IRQHandler(void);
 void DMA1_Stream1_IRQHandler(void);
-void DMA1_Stream3_IRQHandler(void);
+void DMA1_Stream2_IRQHandler(void);
+void DMA1_Stream4_IRQHandler(void);
+void UART4_IRQHandler(void);
+void DMA2_Stream1_IRQHandler(void);
 void DMA2_Stream2_IRQHandler(void);
+void DMA2_Stream5_IRQHandler(void);
+void DMA2_Stream6_IRQHandler(void);
 void DMA2_Stream7_IRQHandler(void);
-
+void USART6_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */
