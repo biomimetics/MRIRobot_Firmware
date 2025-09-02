@@ -54,7 +54,8 @@ void Error_Handler(void);
 int _write(int file, char *ptr, int len);
 
 int _conv_float(float val);
-
+double timer_get_elapsed_time(uint32_t *timer_start); // timer function for computing intervals relative to timer_start
+void timer_updated_elapsed_time(uint32_t *timer_start, double *timer_elapsed_sec);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */
@@ -71,6 +72,7 @@ int _conv_float(float val);
 
 // main LF defs and options
 #define DMA_UART huart4 // huart1 or huart6 are other DMA compative UARTs
+#define LOOP_TIMER TIM6 // timer used for measuing loop times and intervals
 
 #ifdef __cplusplus
 }

@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
   #include <../../../motor_config.h>
 
-  #define PRINT_ENCODER 1
+  #define PRINT_ENCODER 0
 
   #define TWO_PI 6.28318
   #define NSEC_TO_SEC 0.000000001
@@ -31,22 +31,26 @@ reactor QDEC(sample_period: time = 5 ms){
   timer trigger(0, sample_period)
   timer enable(0, 20 ms)
 
-  state _reset_qdec: bool = false
-  state _enable_qdec: bool = false
+  state reset_qdec_: bool = false
+  state enable_qdec_: bool = false
 
   // internal copies of joint and sea encoder values to use
-  state _qdec_pos: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-  state _qdec_pos_last: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-  state _qdec_vel_est: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state qdec_pos_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state qdec_pos_last_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state qdec_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
-  state _qdec_convert_motor_to_joint_rad: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to joint space
+  state qdec_convert_motor_to_joint_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to joint space
 
-  state _sea_pos: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-  state _sea_pos_last: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
-  state _sea_vel_est: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
+  state sea_pos_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state sea_pos_last_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
+  state sea_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
 
   state prev_time: time = 0
 
+  // timer_states
+  state timer_start_: uint32_t = 0
+  state timer_elapsed_time_sec_: double = 0.0
+  state interval_sec: float = 0.0
   
   preamble {=
     extern UART_HandleTypeDef huart3;
@@ -56,7 +60,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     //static int PRINT_ENCODER = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;
-    static int printcnt_lim = 50; // print every nth time
+    static int printcnt_lim = 100; // print every nth time
 
 
     // QDEC Commands
@@ -121,6 +125,9 @@ reactor QDEC(sample_period: time = 5 ms){
     static int last_switch = 0;
     long reference_tick = 0;
     long current_tick = 0;
+
+    uint32_t timer_start_enc_ = 0;
+    double timer_elapsed_time_sec_enc_ = 0;
   =}
 
   reaction(startup) {=
@@ -137,7 +144,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
-      self->_qdec_convert_motor_to_joint_rad[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio);
+      self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio);
     }
 
     self->prev_time = lf_time_physical(); //lf_time_physical(); //lf_time_physical_elapsed
@@ -145,19 +152,19 @@ reactor QDEC(sample_period: time = 5 ms){
   =}
 
   reaction(reset_qdec) {=
-    self->_reset_qdec = reset_qdec->value;
-    if (self->_reset_qdec){
+    self->reset_qdec_ = reset_qdec->value;
+    if (self->reset_qdec_){
       HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
       HAL_UART_Receive_DMA(&huart3, data, 98);
     }
-    self->_reset_qdec = false; 
-    reset_qdec->value = self->_reset_qdec;// should work if reset_qdec is mutable?
+    self->reset_qdec_ = false; 
+    reset_qdec->value = self->reset_qdec_;// should work if reset_qdec is mutable?
   =}
 
   reaction(enable_qdec) {=
-    self->_enable_qdec = enable_qdec->value; // sets other reactions/methods know if encoders are active or not
+    self->enable_qdec_ = enable_qdec->value; // sets other reactions/methods know if encoders are active or not
 
-    if (self->_enable_qdec){
+    if (self->enable_qdec_){
       HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
       if (PRINT_ENCODER) {printf("Enabling Encoders\r\n");}
     } else {
@@ -171,22 +178,8 @@ reactor QDEC(sample_period: time = 5 ms){
   // This function should take approximately 1ms to operate
   reaction(trigger) -> qdec_out, qdec_vel_out, sea_out {=
 
-    // from pid controller
-    //instant_t now = lf_time_physical();
-    //interval_t interval = now - self->prev_time;
-    //self->prev_time = now;
-    //self->last_pos = current_pos->value;
-    //printf("LF: now: %ld, self->prev_time: %ld, diff: %ld \r\n", now, self->prev_time, ((int)(interval)));
-
-    // compute the interval in seconds between loop triggers
-    long now_tick = HAL_GetTick(); // gives miliseconds since last stm32 reset
-    long diff_tick = now_tick - reference_tick;
-    float interval_sec = ((float)(diff_tick)) * MSEC_TO_SEC; // should be loop time in seconds
-    reference_tick = now_tick;
-    if (PRINT_ENCODER) printf("encoder interval_sec: Got %d ms, expected %d ms from trigger.\r\n", ((int)(interval_sec * 1000.0)), 5); //self->sample_period);
-
-    long start = HAL_GetTick();
-
+    timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
+    self->interval_sec = (float) self->timer_elapsed_time_sec_;
 
     // Prep the next request
     HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
@@ -197,19 +190,15 @@ reactor QDEC(sample_period: time = 5 ms){
                                + (data[4+(i*7)]<<32) + (data[5+(i*7)]<<40) + (data[6+(i*7)]<<48);
     }
 
-    if (PRINT_ENCODER && printcnt>=printcnt_lim) {
-      printf("sea: ");
-    }
+    //float magic_sea_count_conv[] = {0.5644, 0.5644, 0.5644, 0.5644, 0.3624, 0.3624, 0.3624};
+    // OLD GET SEA VALUE CODE, KEEP THIS!
     // Get values for SEA encoders
     for (int i=0; i<4; i++) {
       // 0.5644 = 25.4/45
-      float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr );
+      float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr ); // verify this code is correct, count[6-i] and motor_configs[i] is suspicious when used together.
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
 
-      if (PRINT_ENCODER && printcnt>=printcnt_lim) {
-        printf("%d  ", (int) (sea_out[i]->value*100));
-      }
     }
 
     for (int i=4; i<7; i++) {
@@ -217,46 +206,42 @@ reactor QDEC(sample_period: time = 5 ms){
       float sea_raw = ((float) (count[6-i])) * 0.3624 * (1 / motor_configs[i]->sea_cpr );
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
-
-      if (PRINT_ENCODER && printcnt>=printcnt_lim) {
-        printf("%d  ", (int) (sea_out[i]->value*100));
-      }
     }
-
-
-    if (PRINT_ENCODER && printcnt>=printcnt_lim) {
-      printf(". qdec: ");
-    }
+    
 
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
-      self->_qdec_pos_last[i-7] = self->_qdec_pos[i-7]; // save last position
-      self->_qdec_pos[i-7] = ((float) (count[i])) * self->_qdec_convert_motor_to_joint_rad[i-7]; // update the new position
-      self->_qdec_vel_est[i-7] = (self->_qdec_pos[i-7] - self->_qdec_pos_last[i-7]) / (interval_sec); // estimate velocity from different of positions over the time between positions
+      self->qdec_pos_last_[i-7] = self->qdec_pos_[i-7]; // save last position
+      self->qdec_pos_[i-7] = ((float) (count[i])) * self->qdec_convert_motor_to_joint_rad_[i-7]; // update the new position
+      self->qdec_vel_est_[i-7] = (self->qdec_pos_[i-7] - self->qdec_pos_last_[i-7]) / (self->interval_sec); //(interval_sec); // estimate velocity from different of positions over the time between positions
 
-      lf_set(qdec_out[i-7],  self->_qdec_pos[i-7]); // should be units of radians
-      lf_set(qdec_vel_out[i-7],  self->_qdec_vel_est[i-7]); // should be units of radians per second
-
-      if (PRINT_ENCODER && printcnt>=printcnt_lim) {
-        printf("%d  ", (int) (qdec_out[i-7]->value*100));
-      }
+      lf_set(qdec_out[i-7],  self->qdec_pos_[i-7]); // should be units of radians
+      lf_set(qdec_vel_out[i-7],  self->qdec_vel_est_[i-7]); // should be units of radians per second
     }
-    if (PRINT_ENCODER && printcnt>=printcnt_lim) {
+
+    if (PRINT_ENCODER && printcnt>=printcnt_lim){
+      printf("encoder interval_sec: Got %d us.\r\n", ((int)(self->interval_sec * 1000000.0))); //self->sample_period);
+
+      printf("sea: ");
+      for (int i = 0; i<7; i++){
+        printf("%d  ", (int) (sea_out[i]->value*1000));
+      }
+      printf(". qdec [mRad]: ");
+      for (int i = 0; i<7; i++){
+        printf("%d  ", (int) (qdec_out[i]->value*1000));
+      }
+      //printf(". qdec_vel [mRad/s]: ");
+      //for (int i = 0; i<7; i++){
+      //  printf("%d  ", (int) (qdec_vel_out[i]->value*1000));
+      //}
+      printf(". qdec_vel [uRad/s]: ");
+      for (int i = 0; i<7; i++){
+        printf("%d  ", (int) (qdec_vel_out[i]->value*1000000));
+      }
       printf("\r\n");
     }
-
-
-    //if (PRINT_ENCODER){printf("ms to run: [%ld]\r\n", HAL_GetTick()-start);}
-    //if (PRINT_ENCODER && printcnt>=printcnt_lim) {
-    //  printf("[%ld]", end-start);
-    //  printf("| \r\n");
-    //}
-
     printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
 
-    // estimate joint velocities
-
-    
   =}
 
 

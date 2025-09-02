@@ -20,6 +20,7 @@ preamble {=
   #include "main.h"
 
   extern UART_HandleTypeDef huart2;
+
   =}
 
 // Import and/or declare reactor classes.
@@ -39,6 +40,9 @@ main reactor {
     extern UART_HandleTypeDef huart3;
     extern UART_HandleTypeDef huart4;
     extern UART_HandleTypeDef huart5;
+
+    extern TIM_HandleTypeDef htim6; // used for timing loops
+
     //UART_HandleTypeDef huart6; // def in ROS_Interface.lf
 
 
@@ -62,6 +66,8 @@ main reactor {
       MX_USART6_UART_Init();
       MX_TIM3_Init();
       MX_TIM4_Init();
+      MX_TIM6_Init();
+      HAL_TIM_Base_Start(&htim6); // added!
       MX_RTC_Init();
       MX_USART2_UART_Init();
 
@@ -97,14 +103,15 @@ main reactor {
         HAL_UART_TxCallback1();
       }
     }
+
   =}
   
   timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
   timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
   state count: int = 1
 
-  qdec = new QDEC()                           // FPGA-based QDEC Encoders
-  usm = new USM()                             // Ultrasonic motor controllers
+  qdec = new QDEC(sample_period = 5 ms)     // FPGA-based QDEC Encoders
+  usm = new USM()                            // Ultrasonic motor controllers
   ros_controller = new ROSInterface()        // ROS UART Interface
   motor_controller = new MotorController()    // Main Motor driver + controller
   home_controller = new HomeController()      // Used to home the motors
@@ -142,13 +149,14 @@ main reactor {
 
   home_controller.is_home -> mode_machine.is_homing_finished after 0;
   home_controller.motor_speed -> motor_controller.target_vel_int
-  
+
   reaction(startup) {=
     // Prep all GPIO values
     //MX_GPIO_Init();
 
     // Initialize the STM32 peripherals
     stm32_init();
+
   =}
 
 }

@@ -13,7 +13,7 @@ preamble {=
   #include <math.h> // need for floating point abs, or fabsf()
   #include <../../../motor_config.h>
 
-  #define PRINT_USM 1
+  #define PRINT_USM 0
   #define DO_DEBUG_PWM_SWEEP 0
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
@@ -25,6 +25,7 @@ preamble {=
 
   // safety const
   #define USM_MAX_DUTY_CYCLE 0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
+  #define USM_MIN_DUTY_CYCLE 0.0 // deadband to limit amount of jerky motion at small angular velocities
   //#define USM_MIN_DUTY_CYCLE 0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
 
   // conversion for if inputs are in rad_per_sec
@@ -62,9 +63,15 @@ reactor USM {
       duty_cycle = fabsf(duty_cycle); // force it positive
 
       if (PRINT_USM)printf("Got duty cycle of %d%, or %d deg/s\r\n", ((int)(duty_cycle*100)), ((int) (duty_cycle * PWM_RPM_MAX * RPM_TO_DEG_PER_SEC)));
+      
       if (duty_cycle > USM_MAX_DUTY_CYCLE){ // limit it to the max value
         if (PRINT_USM)printf("Hit max duty cycle! Setting to %d%\r\n", ((int)(USM_MAX_DUTY_CYCLE*100)));
         duty_cycle = USM_MAX_DUTY_CYCLE;
+      }
+
+      if (USM_MAX_DUTY_CYCLE < duty_cycle){ // limit it to the max value
+        if (PRINT_USM)printf("Hit min duty cycle! Setting to %d%\r\n", 0);
+        duty_cycle = 0.0;
       }
 
       int ccr = ((int) (((float) ARR_PERIOD) * duty_cycle));
@@ -81,9 +88,9 @@ reactor USM {
       return convert_speed_rpm_to_pwm_ccr(RAD_PER_SEC_TO_RPM * speed_rad_per_sec);
     }
 
-    int convert_speed_rad_per_sec_to_duty_cycle(float speed_rad_per_sec){
-      return speed_rad_per_sec / PWM_RAD_PER_SEC_MAX;
-    }
+    //int convert_speed_rad_per_sec_to_duty_cycle(float speed_rad_per_sec){
+    //  return speed_rad_per_sec / PWM_RAD_PER_SEC_MAX;
+    //}
 
     // debugging behavior for motors
     void debug_duty_cycle_sweep(){
@@ -293,6 +300,10 @@ reactor USM {
     float apply_motor_direction_change(float speed, int index){
       return speed * ((float) motor_configs[index]->dir);
     }
+
+    float apply_gear_ratio(float speed, int index){
+      return speed * ((float) motor_configs[index]->gear_ratio);
+    }
   =}
 
 
@@ -334,9 +345,8 @@ reactor USM {
     
     // save internal _speed values
     for (int i = 0; i<7; i++){
-      _speed[i] = apply_motor_direction_change(speed[i]->value, i);
+      _speed[i] = apply_gear_ratio(apply_motor_direction_change(speed[i]->value, i), i);
     }
-    
 
     // Set USM values if we're not in the safey idle mode
     if (self->_force_disable_motor_pins){
