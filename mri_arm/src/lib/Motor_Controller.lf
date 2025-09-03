@@ -25,7 +25,7 @@ preamble {=
   #define PRINT_MOTOR_CONTROLLER 0
   //state print_motor_controller: bool = true
 
-  #define USE_CLOSED_LOOP_VELOCITY 1
+  #define USE_CLOSED_LOOP_VELOCITY 0
   #define USE_FEEDFORWARD_VELOCITY 1
 
   #ifndef __CONTROLLER_CONFIG
@@ -205,7 +205,9 @@ reactor MotorController(refresh_period: time = 10 ms) {
     //printf("target_vel_ext reaction triggered!\r\n");
     if (self->_target_mode == MODE_INT) {
       for(int i=0; i<7; i++){
-        self->speed_spc[i] = target_vel_int[i]->value;
+        //self->speed_spc[i] = target_vel_int[i]->value;
+        self->target_motor_speeds[i] = target_vel_int[i]->value; // sets them directly here, motor by motor, no joint
+        //printf("%d ", ((int)(self->target_motor_speeds[i] * 1000.0))); this is happening and these values are being set...
       }
     }
   =}
@@ -215,29 +217,14 @@ reactor MotorController(refresh_period: time = 10 ms) {
   reaction(target_vel_ext) {=
     // save target_joint_speeds from the input
     if (self->_target_mode == MODE_EXT) {
-      for (int i = 0; i<7; i++)
+      for (int i = 0; i<7; i++){
         self->target_joint_speeds[i] = target_vel_ext[i]->value;
       }
+      convertJointToMotorSpeeds(); // putting this here allows for homing to work...
+    }
+    //convertJointToMotorSpeeds(); // sets target_motor_speeds internally
 
-      // TODO: Replace the rest of this method when the PID controller is implimented for external velocity commands.
-      convertJointToMotorSpeeds();
-
-      /*
-      if (USE_CLOSED_LOOP_VELOCITY){
-        lf_set(vcontrol_u0.target_state, self->target_joint_speeds[0]);
-        lf_set(vcontrol_u1.target_state, self->target_joint_speeds[1]);
-        lf_set(vcontrol_u2.target_state, self->target_joint_speeds[2]);
-        lf_set(vcontrol_u3.target_state, self->target_joint_speeds[3]);
-        lf_set(vcontrol_u4.target_state, self->target_joint_speeds[4]);
-        lf_set(vcontrol_u5.target_state, self->target_joint_speeds[5]);
-        lf_set(vcontrol_u6.target_state, self->target_joint_speeds[6]);
-      }
-      else {
-        for (int i = 0; i<7; i++){
-          self->speed_spc[i] = self->target_motor_speeds[i];
-        }
-      }
-        */
+      
       
   =}
 
@@ -267,6 +254,14 @@ reactor MotorController(refresh_period: time = 10 ms) {
     lf_set(control_j2.target_joint[1], self->target_pos[6]);
 
     if (USE_CLOSED_LOOP_VELOCITY){
+        lf_set(vcontrol_u0.target_state, self->target_motor_speeds[0]);
+        lf_set(vcontrol_u1.target_state, self->target_motor_speeds[1]);
+        lf_set(vcontrol_u2.target_state, self->target_motor_speeds[2]);
+        lf_set(vcontrol_u3.target_state, self->target_motor_speeds[3]);
+        lf_set(vcontrol_u4.target_state, self->target_motor_speeds[4]);
+        lf_set(vcontrol_u5.target_state, self->target_motor_speeds[5]);
+        lf_set(vcontrol_u6.target_state, self->target_motor_speeds[6]);
+        /*
         lf_set(vcontrol_u0.target_state, self->target_joint_speeds[0]);
         lf_set(vcontrol_u1.target_state, self->target_joint_speeds[1]);
         lf_set(vcontrol_u2.target_state, self->target_joint_speeds[2]);
@@ -274,6 +269,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
         lf_set(vcontrol_u4.target_state, self->target_joint_speeds[4]);
         lf_set(vcontrol_u5.target_state, self->target_joint_speeds[5]);
         lf_set(vcontrol_u6.target_state, self->target_joint_speeds[6]);
+        */
       }
       else {
         for (int i = 0; i<7; i++){
@@ -391,7 +387,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
             lf_set(speed[i], self->speed_posc[i]);
           }
           else if((self->_target_sel[i] == MODE_VEL)){
-            if (PRINT_MOTOR_CONTROLLER) {printf("%d,", (int)(self->speed_spc[i] * 1000));}
+            if (PRINT_MOTOR_CONTROLLER) {printf("v%d, ", (int)(self->speed_spc[i] * 1000));}
             lf_set(speed[i], self->speed_spc[i]);
           }
           else{
