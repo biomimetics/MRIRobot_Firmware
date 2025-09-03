@@ -193,14 +193,13 @@ reactor QDEC(sample_period: time = 5 ms){
     }
 
     //float magic_sea_count_conv[] = {0.5644, 0.5644, 0.5644, 0.5644, 0.3624, 0.3624, 0.3624};
-    // OLD GET SEA VALUE CODE, KEEP THIS!
+    // OLD GET SEA VALUE CODE, KEEP THIS! // verify this code is correct, count[6-i] and motor_configs[i] is suspicious when used together.
     // Get values for SEA encoders
     for (int i=0; i<4; i++) {
       // 0.5644 = 25.4/45
-      float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr ); // verify this code is correct, count[6-i] and motor_configs[i] is suspicious when used together.
+      float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr ); 
       float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
-
     }
 
     for (int i=4; i<7; i++) {

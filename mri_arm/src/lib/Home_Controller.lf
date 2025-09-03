@@ -84,12 +84,12 @@ reactor HomeController(sample_period: time = 20 ms) {
     static int printcnt_lim = 50;
 
     volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
-    static float SEA_limits[7] = {3.0, 1.2, 1.2, 2.0, 2.0, 0.6, 0.6};
+    static float SEA_limits[7] = {3.0, 1.2, 1.2, 2.0, 2.0, 0.6, 0.6}; // what units are these in?
     static int SEA_trig[7] = {0, 0, 0, 0, 0, 0, 0};
     static float ref[7] = {0, 0, 0, 0, 0, 0, 0};
     static float rpos[7] = {0, 0, 0, 0, 0, 0, 0};
 
-    static HOME_STATE home_state = WRIST0; // ELBOW0 // WRIST0
+    static HOME_STATE home_state = WRIST0; // WRIST0; // ELBOW0 // WRIST0
     static int _is_home = 0;
 
     static void MX_GPIO_Init(void) {
@@ -200,7 +200,7 @@ reactor HomeController(sample_period: time = 20 ms) {
             home_state = home_stage[0]? WRIST1:ELBOW0;
             break;
           case WRIST1:           //
-            self->home_speed[5] = -self->default_home_speed;  // this is just hardcoded differentail movements.
+            self->home_speed[5] = -self->default_home_speed;  // this is just hardcoded differential movements.
             self->home_speed[6] = self->default_home_speed;
             if (SEA_trig[5] == 1 && SEA_trig[6] == -1 ) {
               printf("    [WRIST] Home step 1 done\r\n");

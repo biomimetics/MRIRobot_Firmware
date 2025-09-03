@@ -13,7 +13,7 @@ preamble {=
   #include <math.h> // need for floating point abs, or fabsf()
   #include <../../../motor_config.h>
 
-  #define PRINT_USM 1
+  #define PRINT_USM 0
   #define DO_DEBUG_PWM_SWEEP 0
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
@@ -24,7 +24,7 @@ preamble {=
   #define MSEC_TO_SEC 0.001
 
   // safety const
-  #define USM_MAX_DUTY_CYCLE 0.06 //0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
+  #define USM_MAX_DUTY_CYCLE 0.20 //0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
   #define USM_MIN_DUTY_CYCLE 0.0 // deadband to limit amount of jerky motion at small angular velocities
   //#define USM_MIN_DUTY_CYCLE 0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
 

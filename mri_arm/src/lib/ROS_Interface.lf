@@ -325,29 +325,11 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     // should be done in main.lf
 
     // Prep ROS bridge DMA recieve
-    //HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
-    //printf("ROS_Interface: In startup reaction before HAL_UARTEx_ReceiveToIdle_DMA...\r\n");
     HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
 
     
 
     configure_gpio_switch_pins();
-    /* //Configure Switch pins : PC1 
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    __HAL_RCC_GPIOH_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    GPIO_InitStruct.Pin = GPIO_PIN_1;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, GPIO_PIN_RESET);
-    GPIO_InitStruct.Pin = GPIO_PIN_1;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
-    */
 
     for (int i=0; i<7; i++) {
       self->scaled_sea_lim[i] = joint_configs[i]->lim;

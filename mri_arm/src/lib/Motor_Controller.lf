@@ -25,7 +25,7 @@ preamble {=
   #define PRINT_MOTOR_CONTROLLER 0
   //state print_motor_controller: bool = true
 
-  #define USE_CLOSED_LOOP_VELOCITY 0
+  #define USE_CLOSED_LOOP_VELOCITY 1
   #define USE_FEEDFORWARD_VELOCITY 1
 
   #ifndef __CONTROLLER_CONFIG
@@ -185,7 +185,6 @@ reactor MotorController(refresh_period: time = 10 ms) {
 
     self->target_motor_speeds[5] =  (self->target_joint_speeds[5] + self->target_joint_speeds[6]); // pitch + roll
     self->target_motor_speeds[6] = (-self->target_joint_speeds[5] + self->target_joint_speeds[6]); // -pitch + roll
-
 
   =}
 
