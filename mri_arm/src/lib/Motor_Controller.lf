@@ -171,7 +171,6 @@ reactor MotorController(refresh_period: time = 10 ms) {
     vcontrol_u6.current_state
   
 
-  
     
   method convertJointToMotorSpeeds(): void {=
     // apply jacobian

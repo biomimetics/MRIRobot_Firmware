@@ -15,7 +15,7 @@ preamble {=
 
 =}
 
-reactor PIDControllerGeneric(expected_period:float = 0.005, Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, error_deadband: float=0.000001, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0) {
+reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, error_deadband: float=0.000001, do_feedforward:bool=false, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0) {
   input current_state: float
   input target_state: float
   output control_signal: float
@@ -35,11 +35,8 @@ reactor PIDControllerGeneric(expected_period:float = 0.005, Kp:float=0.0, Kd:flo
   state signal_d: float = 0.0
   state signal_i: float = 0.0
 
-
-  timer update_tick(0, 5 ms)
-  state loop_period: float = expected_period
-
   // limits for integral and total control signals
+  state loop_period: float = 0.005 // if not using real time
   state signal_i_max: float = INTEGRAL_CLAMPING_MAX
   state control_signal_max: float = CONTROL_LIMIT
 
@@ -122,8 +119,13 @@ reactor PIDControllerGeneric(expected_period:float = 0.005, Kp:float=0.0, Kd:flo
 
     doControlSignalClamping();
   
-
-    lf_set(control_signal, self->control_signal_);
+    if (self->do_feedforward){
+      lf_set(control_signal, self->control_signal_ + target_state->value);
+    }
+    else {
+      lf_set(control_signal, self->control_signal_);
+    }
+    
 
     if (PRINT_PID_GENERIC && printcnt>=printcnt_lim){
       float print_mult = 1000.0;
