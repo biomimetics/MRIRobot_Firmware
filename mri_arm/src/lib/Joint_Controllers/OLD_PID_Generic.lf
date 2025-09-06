@@ -15,11 +15,7 @@ preamble {=
 
 =}
 
-reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool=false, control_signal_max:float=1.0, integral_clamping_max:float=0.0) {
-  input Kp: float
-  input Kd: float
-  input Ki: float
-  
+reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, error_deadband: float=0.000001, do_feedforward:bool=false, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0) {
   input current_state: float
   input target_state: float
   output control_signal: float
@@ -39,14 +35,10 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
   state signal_d: float = 0.0
   state signal_i: float = 0.0
 
-  state Kp_: float = 0.0
-  state Kd_: float = 0.0
-  state Ki_: float = 0.0
-
   // limits for integral and total control signals
   state loop_period: float = 0.005 // if not using real time
-  state integral_clamping_max_: float = integral_clamping_max
-  state control_signal_max_: float = control_signal_max
+  state signal_i_max: float = INTEGRAL_CLAMPING_MAX
+  state control_signal_max: float = CONTROL_LIMIT
 
   // timer_states
   state timer_start_: uint32_t = 0
@@ -62,11 +54,11 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
 
   method doIntegralClamping(): void {=
     // do integral term clamping
-    if ((self->integral_clamping_max_) < (self->signal_i)){
-      self->signal_i = self->integral_clamping_max_;
+    if ((self->signal_i_max) < (self->signal_i)){
+      self->signal_i = self->signal_i_max;
     } 
-    else if ((self->signal_i) < (-self->integral_clamping_max_)){
-      self->signal_i = -self->integral_clamping_max_;
+    else if ((self->signal_i) < (-self->signal_i_max)){
+      self->signal_i = -self->signal_i_max;
     }
     else {
       // nothing needs to be done.
@@ -79,11 +71,11 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
     }
 
     // do integral term clamping
-    if ((self->control_signal_max_) < (self->control_signal_)){
-      self->control_signal_ = self->control_signal_max_;
+    if ((self->control_signal_max) < (self->control_signal_)){
+      self->control_signal_ = self->control_signal_max;
     } 
-    else if ((self->control_signal_) < (-self->control_signal_max_)){
-      self->control_signal_ = -self->control_signal_max_;
+    else if ((self->control_signal_) < (-self->control_signal_max)){
+      self->control_signal_ = -self->control_signal_max;
     }
     else {
       // nothing needs to be done.
@@ -93,16 +85,6 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
   reaction(startup){=
     //self->reference_tick = HAL_GetTick();
     =}
-
-  reaction(Kp){=
-    self->Kp_ = Kp->value;
-  =}
-  reaction(Kd){=
-    self->Kd_ = Kd->value;
-  =}
-  reaction(Ki){=
-    self->Ki_ = Ki->value;
-  =}
 
   reaction(current_state){=
     self->current_state_ = current_state->value;
@@ -133,7 +115,7 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
 
     doIntegralClamping();
 
-    self->control_signal_ = self->Kp_ * self->signal_p + self->Kd_ * self->signal_d + self->Ki_ * self->signal_i; // sum all clamped components
+    self->control_signal_ = self->Kp * self->signal_p + self->Kd * self->signal_d + self->Ki * self->signal_i; // sum all clamped components
 
     doControlSignalClamping();
   

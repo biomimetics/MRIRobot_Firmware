@@ -49,7 +49,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     timer slow_system_tick(0 ms, slow_refresh_period)
     timer slow_status_tick(0 ms, status_refresh_period)
 
-    state _is_homing_finished: bool = false // consider depreciating these
+    state _is_homing_finished: bool = true //false // setting to true skips needing the homing state to finish!!!
     state _current_mode: MODE_ENUM = 0 // consider depreciating these // initially set to idle
     //state _current_mode_name: string = "STARTUP" // consider depreciating these
 

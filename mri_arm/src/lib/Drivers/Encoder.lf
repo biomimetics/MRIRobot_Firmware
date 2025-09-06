@@ -168,7 +168,8 @@ reactor QDEC(sample_period: time = 5 ms){
     */
 
     for (int i = 0; i<7; i++){
-      self->qdec_convert_sea_to_joint_rad_[i] = (TWO_PI / 360.0) * magic_sea_count_conv[i] * (motor_configs[i]->sea_gear_ratio) / (motor_configs[i]->gear_ratio * motor_configs[i]->sea_cpr);
+      //self->qdec_convert_sea_to_joint_rad_[i] = (TWO_PI / 360.0) * magic_sea_count_conv[i] * (motor_configs[i]->sea_gear_ratio) / (motor_configs[i]->gear_ratio * motor_configs[i]->sea_cpr);
+      self->qdec_convert_sea_to_joint_rad_[i] = (TWO_PI) * (motor_configs[i]->sea_gear_ratio) / (motor_configs[i]->gear_ratio * motor_configs[i]->sea_cpr); // should convert from sea counts to radians
     }
 
     self->prev_time = lf_time_physical(); //lf_time_physical(); //lf_time_physical_elapsed
@@ -229,7 +230,7 @@ reactor QDEC(sample_period: time = 5 ms){
       //float sea_raw = ((float) (sea_counts[i])) * magic_sea_count_conv[i] * (1 / motor_configs[i]->sea_cpr );
       //float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
       //lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
-      float sea_value = ((float) sea_counts[i]) * self->qdec_convert_sea_to_joint_rad_[i] - motor_configs[i]->sea_offset;
+      float sea_value = ((float) sea_counts[i]) * self->qdec_convert_sea_to_joint_rad_[i]; // - motor_configs[i]->sea_offset;
 
       lf_set(sea_out[i],  sea_value);
     }

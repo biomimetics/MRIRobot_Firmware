@@ -40,9 +40,9 @@ preamble {=
    } pid_config;
 
   static pid_config vel_pid_config_0 = {
-    1.0,
-    0.1,
-    0.0,
+    1.0, // kp
+    0.1, // kd
+    0.0, // ki
     10.0,
     10.0 
   };
@@ -88,6 +88,9 @@ reactor MotorController(refresh_period: time = 10 ms) {
   state target_joint_speeds: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
   //state controller_joint_speeds: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
   state target_motor_speeds: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
+
+  state target_joint_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state target_motor_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
 
   state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
   state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for position control
@@ -150,16 +153,33 @@ reactor MotorController(refresh_period: time = 10 ms) {
   // ### VELOCITY CONTROLLERS
 
   
-  
-  // reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0)
-  vcontrol_u0 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u1 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u2 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u3 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u4 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u5 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
-  vcontrol_u6 = new PIDControllerGeneric(Kp = 0.1, Kd = 0.0001, Ki = 0.001, CONTROL_LIMIT = 50.0, INTEGRAL_CLAMPING_MAX = 1.0)
+  pcontrol_u0 = new PIDControllerGeneric(do_feedforward = false)
+  pcontrol_u1 = new PIDControllerGeneric(do_feedforward = false)
+  pcontrol_u2 = new PIDControllerGeneric(do_feedforward = false)
+  pcontrol_u3 = new PIDControllerGeneric(do_feedforward = false)
+  pcontrol_u4 = new PIDControllerGeneric(do_feedforward = false)
+  pcontrol_u5 = new PIDControllerGeneric(do_feedforward = false)
+  pcontrol_u6 = new PIDControllerGeneric(do_feedforward = false)
 
+  // reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0)
+  vcontrol_u0 = new PIDControllerGeneric(do_feedforward = true)
+  vcontrol_u1 = new PIDControllerGeneric(do_feedforward = true)
+  vcontrol_u2 = new PIDControllerGeneric(do_feedforward = true)
+  vcontrol_u3 = new PIDControllerGeneric(do_feedforward = true)
+  vcontrol_u4 = new PIDControllerGeneric(do_feedforward = true)
+  vcontrol_u5 = new PIDControllerGeneric(do_feedforward = true)
+  vcontrol_u6 = new PIDControllerGeneric(do_feedforward = true)
+
+  /*
+  qdec_pos ->
+    pcontrol_u0.current_state,
+    pcontrol_u1.current_state,
+    pcontrol_u2.current_state,
+    pcontrol_u3.current_state,
+    pcontrol_u4.current_state,
+    pcontrol_u5.current_state,
+    pcontrol_u6.current_state
+    */
   
   qdec_vel ->
     vcontrol_u0.current_state,
@@ -187,15 +207,147 @@ reactor MotorController(refresh_period: time = 10 ms) {
 
   =}
 
-  reaction(startup) -> control_u0.constants{=
-    // Control Constants [Kp, Kd, Ki]
-    lf_set(control_u0.constants[0], joint_configs[0]-> Kp);
-    lf_set(control_u0.constants[1], joint_configs[0]-> Kd);
-    lf_set(control_u0.constants[2], 0);
-    lf_set(control_u0.constants[3], joint_configs[0]-> Ks);
+  //lf_set(control_u0.current_pos, (pos0 - pos1)/2); // pitch
+  //lf_set(control_u1.current_pos, (pos0 + pos1)/2); // roll
+  method convertJointToMotorPositions(): void {=
+    // apply jacobian
+    self->target_motor_pos[0] = self->target_joint_pos[0];
+    // for diff motors, w0 = pitch + roll, w1 = -pitch + roll
+    self->target_motor_pos[1] =  (self->target_joint_pos[1] + self->target_joint_pos[2]); // pitch + roll
+    self->target_motor_pos[2] = (-self->target_joint_pos[1] + self->target_joint_pos[2]); // -pitch + roll
+
+    self->target_motor_pos[3] =  (self->target_joint_pos[3] + self->target_joint_pos[4]); // pitch + roll
+    self->target_motor_pos[4] = (-self->target_joint_pos[3] + self->target_joint_pos[4]); // -pitch + roll
+
+    self->target_motor_pos[5] =  (self->target_joint_pos[5] + self->target_joint_pos[6]); // pitch + roll
+    self->target_motor_pos[6] = (-self->target_joint_pos[5] + self->target_joint_pos[6]); // -pitch + roll
+
   =}
 
+  reaction(startup) -> control_u0.constants,
+    pcontrol_u0.Kp, // this reaction has way too many effects, see if we can simplify it
+    pcontrol_u0.Ki,
+    pcontrol_u0.Kd,
+    pcontrol_u1.Kp,
+    pcontrol_u1.Ki,
+    pcontrol_u1.Kd,
+    pcontrol_u2.Kp,
+    pcontrol_u2.Ki,
+    pcontrol_u2.Kd,
+    pcontrol_u3.Kp,
+    pcontrol_u3.Ki,
+    pcontrol_u3.Kd,
+    pcontrol_u4.Kp,
+    pcontrol_u4.Ki,
+    pcontrol_u4.Kd,
+    pcontrol_u5.Kp,
+    pcontrol_u5.Ki,
+    pcontrol_u5.Kd,
+    pcontrol_u6.Kp,
+    pcontrol_u6.Ki,
+    pcontrol_u6.Kd,
+    vcontrol_u0.Kp,
+    vcontrol_u0.Ki,
+    vcontrol_u0.Kd,
+    vcontrol_u1.Kp,
+    vcontrol_u1.Ki,
+    vcontrol_u1.Kd,
+    vcontrol_u2.Kp,
+    vcontrol_u2.Ki,
+    vcontrol_u2.Kd,
+    vcontrol_u3.Kp,
+    vcontrol_u3.Ki,
+    vcontrol_u3.Kd,
+    vcontrol_u4.Kp,
+    vcontrol_u4.Ki,
+    vcontrol_u4.Kd,
+    vcontrol_u5.Kp,
+    vcontrol_u5.Ki,
+    vcontrol_u5.Kd,
+    vcontrol_u6.Kp,
+    vcontrol_u6.Ki,
+    vcontrol_u6.Kd{=
+    // Control Constants [Kp, Kd, Ki]
+    //lf_set(control_u0.constants[0], joint_configs[0]-> Kp);
+    //lf_set(control_u0.constants[1], joint_configs[0]-> Kd);
+    //lf_set(control_u0.constants[2], 0);
+    //lf_set(control_u0.constants[3], joint_configs[0]-> Ks);
 
+    // position control constants
+    lf_set(pcontrol_u0.Kp, joint_configs[0]-> Kp);
+    lf_set(pcontrol_u0.Ki, 0.0);
+    lf_set(pcontrol_u0.Kd, joint_configs[0]-> Kd);
+
+    lf_set(pcontrol_u1.Kp, joint_configs[1]-> Kp);
+    lf_set(pcontrol_u1.Ki, 0.0);
+    lf_set(pcontrol_u1.Kd, joint_configs[1]-> Kd);
+
+    lf_set(pcontrol_u2.Kp, joint_configs[2]-> Kp);
+    lf_set(pcontrol_u2.Ki, 0.0);
+    lf_set(pcontrol_u2.Kd, joint_configs[2]-> Kd);
+
+    lf_set(pcontrol_u3.Kp, joint_configs[3]-> Kp);
+    lf_set(pcontrol_u3.Ki, 0.0);
+    lf_set(pcontrol_u3.Kd, joint_configs[3]-> Kd);
+
+    lf_set(pcontrol_u4.Kp, joint_configs[4]-> Kp);
+    lf_set(pcontrol_u4.Ki, 0.0);
+    lf_set(pcontrol_u4.Kd, joint_configs[4]-> Kd);
+
+    lf_set(pcontrol_u5.Kp, joint_configs[5]-> Kp);
+    lf_set(pcontrol_u5.Ki, 0.0);
+    lf_set(pcontrol_u5.Kd, joint_configs[5]-> Kd);
+
+    lf_set(pcontrol_u6.Kp, joint_configs[6]-> Kp);
+    lf_set(pcontrol_u6.Ki, 0.0);
+    lf_set(pcontrol_u6.Kd, joint_configs[6]-> Kd);
+
+    // velocity control constants
+    lf_set(vcontrol_u0.Kp, vel_pid_config_0.Kp);
+    lf_set(vcontrol_u0.Ki, vel_pid_config_0.Ki);
+    lf_set(vcontrol_u0.Kd, vel_pid_config_0.Kd);
+
+    lf_set(vcontrol_u1.Kp, vel_pid_config_0.Kp);
+    lf_set(vcontrol_u1.Ki, vel_pid_config_0.Ki);
+    lf_set(vcontrol_u1.Kd, vel_pid_config_0.Kd);
+
+    lf_set(vcontrol_u2.Kp, vel_pid_config_0.Kp);
+    lf_set(vcontrol_u2.Ki, vel_pid_config_0.Ki);
+    lf_set(vcontrol_u2.Kd, vel_pid_config_0.Kd);
+
+    lf_set(vcontrol_u3.Kp, vel_pid_config_0.Kp);
+    lf_set(vcontrol_u3.Ki, vel_pid_config_0.Ki);
+    lf_set(vcontrol_u3.Kd, vel_pid_config_0.Kd);
+
+    lf_set(vcontrol_u4.Kp, vel_pid_config_0.Kp);
+    lf_set(vcontrol_u4.Ki, vel_pid_config_0.Ki);
+    lf_set(vcontrol_u4.Kd, vel_pid_config_0.Kd);
+
+    lf_set(vcontrol_u5.Kp, vel_pid_config_0.Kp);
+    lf_set(vcontrol_u5.Ki, vel_pid_config_0.Ki);
+    lf_set(vcontrol_u5.Kd, vel_pid_config_0.Kd);
+
+    lf_set(vcontrol_u6.Kp, vel_pid_config_0.Kp);
+    lf_set(vcontrol_u6.Ki, vel_pid_config_0.Ki);
+    lf_set(vcontrol_u6.Kd, vel_pid_config_0.Kd);
+  =}
+
+  reaction(qdec_pos, qdec_sea) ->
+    pcontrol_u0.current_state,
+    pcontrol_u1.current_state,
+    pcontrol_u2.current_state,
+    pcontrol_u3.current_state,
+    pcontrol_u4.current_state,
+    pcontrol_u5.current_state,
+    pcontrol_u6.current_state {=
+      lf_set(pcontrol_u0.current_state, qdec_pos[0]->value + qdec_sea[0]->value);
+      lf_set(pcontrol_u1.current_state, qdec_pos[1]->value + qdec_sea[1]->value);
+      lf_set(pcontrol_u2.current_state, qdec_pos[2]->value + qdec_sea[2]->value);
+      lf_set(pcontrol_u3.current_state, qdec_pos[3]->value + qdec_sea[3]->value);
+      lf_set(pcontrol_u4.current_state, qdec_pos[4]->value + qdec_sea[4]->value);
+      lf_set(pcontrol_u5.current_state, qdec_pos[5]->value + qdec_sea[5]->value);
+      lf_set(pcontrol_u6.current_state, qdec_pos[6]->value + qdec_sea[6]->value);
+    =}
   // +----------------------------------------------------------------+
   // | MUX between the different target modes
   // +----------------------------------------------------------------+
@@ -234,6 +386,13 @@ reactor MotorController(refresh_period: time = 10 ms) {
       control_j0.target_joint,
       control_j1.target_joint,
       control_j2.target_joint,
+      pcontrol_u0.target_state,
+      pcontrol_u1.target_state,
+      pcontrol_u2.target_state,
+      pcontrol_u3.target_state,
+      pcontrol_u4.target_state,
+      pcontrol_u5.target_state,
+      pcontrol_u6.target_state,
       vcontrol_u0.target_state,
       vcontrol_u1.target_state,
       vcontrol_u2.target_state,
@@ -242,7 +401,9 @@ reactor MotorController(refresh_period: time = 10 ms) {
       vcontrol_u5.target_state,
       vcontrol_u6.target_state
       {=
+      
     // printf("UPDATE VAL: %d\r\n", (int)(100 * self->target_pos[5]));
+    /*
     lf_set(control_u0.target_pos,      self->target_pos[0]);
     lf_set(control_j0.target_joint[0], self->target_pos[1]);
     lf_set(control_j0.target_joint[1], self->target_pos[2]);
@@ -250,6 +411,15 @@ reactor MotorController(refresh_period: time = 10 ms) {
     lf_set(control_j1.target_joint[1], self->target_pos[4]);
     lf_set(control_j2.target_joint[0], self->target_pos[5]);
     lf_set(control_j2.target_joint[1], self->target_pos[6]);
+    */
+
+    lf_set(pcontrol_u0.target_state, self->target_motor_pos[0]);
+    lf_set(pcontrol_u1.target_state, self->target_motor_pos[1]);
+    lf_set(pcontrol_u2.target_state, self->target_motor_pos[2]);
+    lf_set(pcontrol_u3.target_state, self->target_motor_pos[3]);
+    lf_set(pcontrol_u4.target_state, self->target_motor_pos[4]);
+    lf_set(pcontrol_u5.target_state, self->target_motor_pos[5]);
+    lf_set(pcontrol_u6.target_state, self->target_motor_pos[6]);
 
     if (USE_CLOSED_LOOP_VELOCITY){
         lf_set(vcontrol_u0.target_state, self->target_motor_speeds[0]);
@@ -259,15 +429,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
         lf_set(vcontrol_u4.target_state, self->target_motor_speeds[4]);
         lf_set(vcontrol_u5.target_state, self->target_motor_speeds[5]);
         lf_set(vcontrol_u6.target_state, self->target_motor_speeds[6]);
-        /*
-        lf_set(vcontrol_u0.target_state, self->target_joint_speeds[0]);
-        lf_set(vcontrol_u1.target_state, self->target_joint_speeds[1]);
-        lf_set(vcontrol_u2.target_state, self->target_joint_speeds[2]);
-        lf_set(vcontrol_u3.target_state, self->target_joint_speeds[3]);
-        lf_set(vcontrol_u4.target_state, self->target_joint_speeds[4]);
-        lf_set(vcontrol_u5.target_state, self->target_joint_speeds[5]);
-        lf_set(vcontrol_u6.target_state, self->target_joint_speeds[6]);
-        */
+
       }
       else {
         for (int i = 0; i<7; i++){
@@ -287,8 +449,10 @@ reactor MotorController(refresh_period: time = 10 ms) {
   reaction(target_pos_ext) {=
     if(self->_target_mode == MODE_EXT) {
       for(int i=0; i<7; i++){
-        self->target_pos[i] = target_pos_ext[i]->value;
+        //self->target_pos[i] = target_pos_ext[i]->value;
+        self->target_joint_pos[i] = target_pos_ext[i]->value;
       }
+      convertJointToMotorPositions(); // updates self->target_motor_pos[i]
     }
   =}
 
@@ -298,6 +462,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
   
 
   // Read out the positional control speed values
+  /*
   reaction(
       control_j0.speed_out,
       control_j1.speed_out,
@@ -327,6 +492,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
     self -> speed_posc[6] = control_j2.speed_out[1]->value;
     
   =}
+  */
 
   // Read out the positional control speed values
   reaction(
@@ -344,12 +510,23 @@ reactor MotorController(refresh_period: time = 10 ms) {
     self->speed_spc[4] = vcontrol_u4.control_signal->value;
     self->speed_spc[5] = vcontrol_u5.control_signal->value;
     self->speed_spc[6] = vcontrol_u6.control_signal->value;
+  =}
 
-    if (USE_FEEDFORWARD_VELOCITY){
-      for (int i = 0; i<7; i++){
-        self->speed_spc[i] += self->target_motor_speeds[i]; 
-      }
-    }
+  reaction(
+      pcontrol_u0.control_signal,
+      pcontrol_u1.control_signal,
+      pcontrol_u2.control_signal,
+      pcontrol_u3.control_signal,
+      pcontrol_u4.control_signal,
+      pcontrol_u5.control_signal,
+      pcontrol_u6.control_signal) {=
+    self->speed_posc[0] = pcontrol_u0.control_signal->value;
+    self->speed_posc[1] = pcontrol_u1.control_signal->value;
+    self->speed_posc[2] = pcontrol_u2.control_signal->value;
+    self->speed_posc[3] = pcontrol_u3.control_signal->value;
+    self->speed_posc[4] = pcontrol_u4.control_signal->value;
+    self->speed_posc[5] = pcontrol_u5.control_signal->value;
+    self->speed_posc[6] = pcontrol_u6.control_signal->value;
   =}
 
   reaction(enable_motor_command) {=
