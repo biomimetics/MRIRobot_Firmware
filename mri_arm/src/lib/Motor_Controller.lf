@@ -21,6 +21,7 @@ preamble {=
   //#include "stm32_startup.h"
   #include "main.h"
   #include <../../../sm_config.h>
+  #include <../../../joint_config.h>
 
   #define PRINT_MOTOR_CONTROLLER 0
   //state print_motor_controller: bool = true
@@ -106,19 +107,24 @@ reactor MotorController(refresh_period: time = 10 ms) {
 
   // POSITION CONTROLLERS 
   // define reactors 
+
+  /*
   control_u0 = new SEAController()
   control_j0 = new Diff_Joint(motor_ID0=1, motor_ID1=2)
   control_j1 = new Diff_Joint(motor_ID0=3, motor_ID1=4)
   control_j2 = new Diff_Joint(motor_ID0=5, motor_ID1=6)
-    
+  */ 
+  
   // Feed in the current positions
+  /*
   qdec_pos ->
     control_u0.current_pos,
     control_j0.current_pos,
     control_j1.current_pos,
     control_j2.current_pos
-
+    */
   // feed in the SEA positions
+  /*
   qdec_sea ->
     control_u0.sea_pos,
     control_j0.sea_pos,
@@ -148,10 +154,10 @@ reactor MotorController(refresh_period: time = 10 ms) {
     control_j0.sea_lim,
     control_j1.sea_lim,
     control_j2.sea_lim
+    */
 
   // ######
-  // ### VELOCITY CONTROLLERS
-
+  // ### Position CONTROLLERS
   
   pcontrol_u0 = new PIDControllerGeneric(do_feedforward = false)
   pcontrol_u1 = new PIDControllerGeneric(do_feedforward = false)
@@ -160,6 +166,9 @@ reactor MotorController(refresh_period: time = 10 ms) {
   pcontrol_u4 = new PIDControllerGeneric(do_feedforward = false)
   pcontrol_u5 = new PIDControllerGeneric(do_feedforward = false)
   pcontrol_u6 = new PIDControllerGeneric(do_feedforward = false)
+
+  // ######
+  // ### VELOCITY CONTROLLERS
 
   // reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0)
   vcontrol_u0 = new PIDControllerGeneric(do_feedforward = true)
@@ -224,7 +233,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
 
   =}
 
-  reaction(startup) -> control_u0.constants,
+  reaction(startup) -> 
     pcontrol_u0.Kp, // this reaction has way too many effects, see if we can simplify it
     pcontrol_u0.Ki,
     pcontrol_u0.Kd,
@@ -382,10 +391,6 @@ reactor MotorController(refresh_period: time = 10 ms) {
   // | Use targets to get desired speeds
   // +----------------------------------------------------------------+
   reaction(trigger) -> 
-      control_u0.target_pos,
-      control_j0.target_joint,
-      control_j1.target_joint,
-      control_j2.target_joint,
       pcontrol_u0.target_state,
       pcontrol_u1.target_state,
       pcontrol_u2.target_state,
