@@ -10,15 +10,18 @@ preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
 
+  #include <math.h>
+
   #define PRINT_PID_GENERIC 0
   #define USE_REAL_TIME 1
 
 =}
 
-reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool=false, control_signal_max:float=1.0, integral_clamping_max:float=0.0) {
+reactor PIDControllerGeneric(error_deadband: float=0.030, do_feedforward:bool=false, control_signal_max:float=1.0, integral_clamping_max:float=1.0) {
   input Kp: float
   input Kd: float
   input Ki: float
+  input reset_errors: bool
   
   input current_state: float
   input target_state: float
@@ -53,12 +56,20 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
   state timer_elapsed_time_sec_: double = 0.0
   state interval_sec: float = 0.0
 
+  timer update_tick(0, 5 ms)
+
 
   preamble {=
 
    int printcnt = 0;
-   int printcnt_lim = 200;
+   int printcnt_lim = 1000;
     =}
+
+  method doErrorDeadbanding(): void {=
+    if (fabsf(self->error) < self->error_deadband){
+      self->control_signal_ = 0.0;
+    }
+  =}
 
   method doIntegralClamping(): void {=
     // do integral term clamping
@@ -74,9 +85,6 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
   =}
 
   method doControlSignalClamping(): void {=
-    if (self->error < self->error_deadband){
-      self->control_signal_ = 0.0;
-    }
 
     // do integral term clamping
     if ((self->control_signal_max_) < (self->control_signal_)){
@@ -112,6 +120,12 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
     self->target_state_ = target_state->value;
   =}
 
+  reaction(reset_errors){=
+    self->signal_p = 0.0;
+    self->signal_i = 0.0;
+    self->signal_d = 0.0;
+    =}
+
   //reaction(update_tick) -> control_signal {=
   reaction(current_state, target_state) -> control_signal {=
     
@@ -124,7 +138,7 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
     }
     
     self->last_error = self->error;
-    //self->error = (self->target_state_) - (self->current_state_);
+    //self->error = (self->target_state_) - (self->current_state_); 
     self->error = (target_state->value) - (current_state->value);
 
     self->signal_p = (self->error); // Kp * (error)
@@ -135,15 +149,20 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
 
     self->control_signal_ = self->Kp_ * self->signal_p + self->Kd_ * self->signal_d + self->Ki_ * self->signal_i; // sum all clamped components
 
+    doErrorDeadbanding();
     doControlSignalClamping();
   
+     // is feedforward causing issues?
+     
     if (self->do_feedforward){
+      //lf_set(control_signal, self->control_signal_ + self->target_state_);
       lf_set(control_signal, self->control_signal_ + target_state->value);
     }
     else {
       lf_set(control_signal, self->control_signal_);
     }
     
+    //lf_set(control_signal, self->control_signal_);
 
     if (PRINT_PID_GENERIC && printcnt>=printcnt_lim){
       float print_mult = 1000.0;
@@ -152,11 +171,11 @@ reactor PIDControllerGeneric(error_deadband: float=0.000001, do_feedforward:bool
       printf("self->signal_d as int: %d\r\n", (int)(self->signal_d * print_mult));
       printf("self->signal_i as int: %d\r\n", (int)(self->signal_i * print_mult));
 
-      printf("target_state->value as int: %d\r\n", (int)(target_state->value * print_mult));
-      printf("current_state->value as int: %d\r\n", (int)(current_state->value * print_mult));
+      //printf("target_state->value as int: %d\r\n", (int)(target_state->value * print_mult));
+      //printf("current_state->value as int: %d\r\n", (int)(current_state->value * print_mult));
       printf("self->target_state_ as int: %d\r\n", (int)(self->target_state_ * print_mult));
       printf("self->current_state_ as int: %d\r\n", (int)(self->current_state_ * print_mult));
-      printf("self->_control_signal as int: %d\r\n", (int)(self->control_signal_ * print_mult));
+      printf("self->control_signal_ as int: %d\r\n", (int)(self->control_signal_ * print_mult));
       
     }
 

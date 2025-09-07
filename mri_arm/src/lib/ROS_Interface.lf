@@ -20,6 +20,8 @@ preamble {=
   #define DMA_RX_BUFFER_SIZE 60
   #define DMA_RECEIVE_SIZE 15
   //#define DMA_UART huart6 // was huart1
+
+  #define PRINT_ROS 0
 =}
 
 reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
@@ -88,8 +90,8 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     bool flag_handshake_success = false; // unused!
     bool flag_new_command_received = false;
 
-    float joint_dir[7]= {1, 1, 1, 1, 1, 1, 1}; //{1, 1, 1, 1, 1, -1, -1}; // why are both of these defined and used in different functions?
-    float dir_offsets[7]= {1, 1, 1, 1, 1, 1, 1}; //{1, 1, 1, 1, 1, -1, -1};
+    float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1}; //{1, 1, 1, 1, 1, -1, -1}; // why are both of these defined and used in different functions?
+    float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1}; //{1, 1, 1, 1, 1, -1, -1};
     int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
 
     int enc_data[7];
@@ -252,7 +254,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         //joint_pos_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
-      if (print_ros)  {
+      if (PRINT_ROS)  {
         printf("got [JOINT POS]: \r\n");
         print_resp(joint_pos_array);
       }
@@ -265,7 +267,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         //joint_vel_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
-      if (print_ros)  {
+      if (PRINT_ROS)  {
         //printf("got [JOINT VEL]: \r\n");
         //print_resp(joint_vel_array);
       }
@@ -339,8 +341,11 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   =}
 
   reaction(trigger_print) {=
-    printf("encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
-    printf("sea encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
+    if (PRINT_ROS){
+      printf("encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
+      printf("sea encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
+    }
+    
   =}
   /*##### 
     # Input reactions

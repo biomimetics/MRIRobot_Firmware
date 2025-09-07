@@ -25,8 +25,8 @@ preamble {=
 
   // safety const
   #define USM_MAX_DUTY_CYCLE 0.20 //0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
-  #define USM_MIN_DUTY_CYCLE 0.0 // deadband to limit amount of jerky motion at small angular velocities
-  //#define USM_MIN_DUTY_CYCLE 0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
+  //#define USM_MIN_DUTY_CYCLE 0.0 // deadband to limit amount of jerky motion at small angular velocities
+  #define USM_MIN_DUTY_CYCLE 0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
 
   // conversion for if inputs are in rad_per_sec
   #define RAD_PER_SEC_TO_RPM 9.549297
@@ -64,12 +64,12 @@ reactor USM {
 
       if (PRINT_USM)printf("Got duty cycle of %d%, or %d deg/s\r\n", ((int)(duty_cycle*100)), ((int) (duty_cycle * PWM_RPM_MAX * RPM_TO_DEG_PER_SEC)));
       
-      if (duty_cycle > USM_MAX_DUTY_CYCLE){ // limit it to the max value
+      if (USM_MAX_DUTY_CYCLE < duty_cycle){ // limit it to the max value
         if (PRINT_USM)printf("Hit max duty cycle! Setting to %d%\r\n", ((int)(USM_MAX_DUTY_CYCLE*100)));
         duty_cycle = USM_MAX_DUTY_CYCLE;
       }
 
-      if (USM_MAX_DUTY_CYCLE < duty_cycle){ // limit it to the max value
+      if (duty_cycle < USM_MIN_DUTY_CYCLE){ // limit it to the max value
         if (PRINT_USM)printf("Hit min duty cycle! Setting to %d%\r\n", 0);
         duty_cycle = 0.0;
       }
@@ -294,7 +294,7 @@ reactor USM {
       TIM4->CCR1 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[4]);  // Set period for USM4
       TIM4->CCR2 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[5]);  // Set period for USM5
       TIM4->CCR3 = convert_speed_rad_per_sec_to_pwm_ccr(_speed[6]);  // Set period for USM6
-      HAL_Delay(1);
+      //HAL_Delay(1);
     }
 
     float apply_motor_direction_change(float speed, int index){

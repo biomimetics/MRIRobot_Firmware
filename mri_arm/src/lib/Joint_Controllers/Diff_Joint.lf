@@ -87,7 +87,6 @@ reactor Diff_Joint (
     reaction(control_u0.out, control_u1.out) -> speed_out {=
         lf_set(speed_out[0], control_u1.out->value + control_u0.out->value); // pitch(u0) + roll(u1)
         lf_set(speed_out[1], control_u1.out->value - control_u0.out->value); // -pitch(u0) + roll(u1)
-
     =}
 
 

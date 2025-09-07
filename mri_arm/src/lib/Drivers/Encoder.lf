@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
   #include <../../../motor_config.h>
 
-  #define PRINT_ENCODER 1
+  #define PRINT_ENCODER 0
 
   #define TWO_PI 6.28318
   #define NSEC_TO_SEC 0.000000001
@@ -62,7 +62,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     //static int PRINT_ENCODER = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;
-    static int printcnt_lim = 100; // print every nth time
+    static int printcnt_lim = 1;//100; // print every nth time
 
 
     // QDEC Commands
@@ -155,7 +155,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
-      self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio);
+      self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio) * motor_configs[i]->dir;
     }
 
     /*
@@ -257,7 +257,7 @@ reactor QDEC(sample_period: time = 5 ms){
       for (int i = 0; i<7; i++){
         printf("%d  ", (int) (sea_counts[i]));
       }
-      /*
+      
       printf("\r\nqdec [mRad]: ");
       for (int i = 0; i<7; i++){
         printf("%d  ", (int) (qdec_out[i]->value*1000));
@@ -266,7 +266,8 @@ reactor QDEC(sample_period: time = 5 ms){
       for (int i = 0; i<7; i++){
         printf("%d  ", (int) (qdec_vel_out[i]->value*1000));
       }
-        */
+      printf("\r\ninterval [ms] %d, [us]: %d", (int) (self->interval_sec * 1000), (int) (self->interval_sec * 1000000));
+        
       printf("\r\n\r\n");
     }
     printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
