@@ -4,7 +4,7 @@
 #define __MOTOR_CONFIG_H
 typedef struct { /* __MOTOR_CONFIG_H */
     // Base Info
-    int dir;                // Motor direction
+    int dir;                // Motor direction - maps motor direction to output sproket direction. Affected by gear trains.
     float max_speed;          // max motor speed in rad/s
 
     // Encoder Into
@@ -62,7 +62,7 @@ static Motor_Config motor2_config = {
 
 // --------------------------------------- Elbow joint --------------------------------------- 
 static Motor_Config motor3_config = {
-    1,          // dir              - Motor direction
+    -1, //1,          // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     23040,      // qdec_cpr         - motor encoder count per rotation
     22252,       // sea_cpr          - sea encoder count per rotation
@@ -74,7 +74,7 @@ static Motor_Config motor3_config = {
 
 
 static Motor_Config motor4_config = {
-    1,          // dir              - Motor direction
+    -1, //1,          // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     23040,      // qdec_cpr         - motor encoder count per rotation
     22252,       // sea_cpr          - sea encoder count per rotation

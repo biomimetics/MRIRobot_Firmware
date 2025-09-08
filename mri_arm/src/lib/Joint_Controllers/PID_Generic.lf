@@ -17,7 +17,7 @@ preamble {=
 
 =}
 
-reactor PIDControllerGeneric(error_deadband: float=0.030, do_feedforward:bool=false, control_signal_max:float=1.0, integral_clamping_max:float=1.0) {
+reactor PIDControllerGeneric(error_deadband: float=0.000, do_feedforward:bool=false, control_signal_max:float=1.0, integral_clamping_max:float=1.0) {
   input Kp: float
   input Kd: float
   input Ki: float
@@ -126,8 +126,8 @@ reactor PIDControllerGeneric(error_deadband: float=0.030, do_feedforward:bool=fa
     self->signal_d = 0.0;
     =}
 
-  //reaction(update_tick) -> control_signal {=
-  reaction(current_state, target_state) -> control_signal {=
+  reaction(update_tick) target_state, current_state -> control_signal {=
+  //reaction(current_state, target_state) -> control_signal {=
     
     if (USE_REAL_TIME){
       timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
@@ -138,8 +138,8 @@ reactor PIDControllerGeneric(error_deadband: float=0.030, do_feedforward:bool=fa
     }
     
     self->last_error = self->error;
-    //self->error = (self->target_state_) - (self->current_state_); 
-    self->error = (target_state->value) - (current_state->value);
+    self->error = (self->target_state_) - (self->current_state_); 
+    //self->error = (target_state->value) - (current_state->value);
 
     self->signal_p = (self->error); // Kp * (error)
     self->signal_d = ((self->error - self->last_error) / self->interval_sec); // Kd * d(error)/dt
@@ -151,12 +151,10 @@ reactor PIDControllerGeneric(error_deadband: float=0.030, do_feedforward:bool=fa
 
     doErrorDeadbanding();
     doControlSignalClamping();
-  
-     // is feedforward causing issues?
      
     if (self->do_feedforward){
-      //lf_set(control_signal, self->control_signal_ + self->target_state_);
-      lf_set(control_signal, self->control_signal_ + target_state->value);
+      lf_set(control_signal, self->control_signal_ + self->target_state_);
+      //lf_set(control_signal, self->control_signal_ + target_state->value);
     }
     else {
       lf_set(control_signal, self->control_signal_);

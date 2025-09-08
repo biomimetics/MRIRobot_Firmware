@@ -11,7 +11,10 @@ preamble {=
   #include <stdio.h>
   #include <../../../motor_config.h>
 
-  #define PRINT_ENCODER 0
+  #define PRINT_ENCODER 1
+
+  #define DO_INTERVAL_OVERRIDE 0
+  #define OVERRIDE_INTERVAL 0.005
 
   #define TWO_PI 6.28318
   #define NSEC_TO_SEC 0.000000001
@@ -62,7 +65,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     //static int PRINT_ENCODER = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;
-    static int printcnt_lim = 1;//100; // print every nth time
+    static int printcnt_lim = 10;//100; // print every nth time
 
 
     // QDEC Commands
@@ -205,7 +208,14 @@ reactor QDEC(sample_period: time = 5 ms){
   reaction(trigger) -> qdec_out, qdec_vel_out, sea_out {=
 
     timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
-    self->interval_sec = (float) self->timer_elapsed_time_sec_;
+
+    if (DO_INTERVAL_OVERRIDE){
+      self->interval_sec = (float) OVERRIDE_INTERVAL;
+    }
+    else {
+      self->interval_sec = (float) self->timer_elapsed_time_sec_;
+    }
+    
 
     // Prep the next request
     HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);

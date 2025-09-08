@@ -90,8 +90,11 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     bool flag_handshake_success = false; // unused!
     bool flag_new_command_received = false;
 
-    float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1}; //{1, 1, 1, 1, 1, -1, -1}; // why are both of these defined and used in different functions?
-    float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1}; //{1, 1, 1, 1, 1, -1, -1};
+    // FP_COMPRESSION = [-1000, -1000, -1000, 1000, 1000, -1000, 1000] // from Python side right before sending.
+    float joint_dir[7]= {-1, 1, -1, 1, -1, 1, 1}; // {1, 1, 1, 1, 1, 1, 1};
+    //float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map ROS joint axes to robot joint axes // was {1, 1, 1, 1, 1, -1, -1}; 
+    float motor_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map robot motor axes (from encoders) to ROS motor axes. Should be redundant with motor_configs[i]->dir
+
     int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
 
     int enc_data[7];
@@ -354,7 +357,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   // Update our current USM position to send to ROS
   reaction(current_joint) {=
     for (int i=0; i<7; i++) {
-      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
+      enc_data[i] = (int)(current_joint[i]->value * 1000) * motor_dir[i];
     }
   =}
 

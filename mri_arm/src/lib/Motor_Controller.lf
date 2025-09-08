@@ -41,16 +41,16 @@ preamble {=
 
   static pid_config pos_pid_config_0 = {
     1.0, // kp
-    0.001, // kd
-    0.001, // ki
+    0.01, // kd
+    0.01, // ki
     10.0,
     10.0 
   };
 
   static pid_config vel_pid_config_0 = {
     0.1, // kp
-    0.001, // kd
-    0.001, // ki
+    0.000, // kd
+    0.000, // ki
     10.0,
     10.0 
   };
@@ -242,32 +242,52 @@ reactor MotorController(refresh_period: time = 10 ms) {
     //lf_set(control_u0.constants[3], joint_configs[0]-> Ks);
 
     // position control constants
-    lf_set(pcontrol_u0.Kp, joint_configs[0]-> Kp);
-    lf_set(pcontrol_u0.Ki, 0.0);
-    lf_set(pcontrol_u0.Kd, joint_configs[0]-> Kd);
+    //lf_set(pcontrol_u0.Kp, joint_configs[0]-> Kp);
+    //lf_set(pcontrol_u0.Ki, 0.0);
+    //lf_set(pcontrol_u0.Kd, joint_configs[0]-> Kd);
 
-    lf_set(pcontrol_u1.Kp, joint_configs[1]-> Kp);
-    lf_set(pcontrol_u1.Ki, 0.0);
-    lf_set(pcontrol_u1.Kd, joint_configs[1]-> Kd);
+    lf_set(pcontrol_u0.Kp, pos_pid_config_0.Kp);
+    lf_set(pcontrol_u0.Ki, pos_pid_config_0.Ki);
+    lf_set(pcontrol_u0.Kd, pos_pid_config_0.Kd);
 
-    lf_set(pcontrol_u2.Kp, joint_configs[2]-> Kp);
-    lf_set(pcontrol_u2.Ki, 0.0);
-    lf_set(pcontrol_u2.Kd, joint_configs[2]-> Kd);
+    //lf_set(pcontrol_u1.Kp, joint_configs[1]-> Kp);
+    //lf_set(pcontrol_u1.Ki, 0.0);
+    //lf_set(pcontrol_u1.Kd, joint_configs[1]-> Kd);
 
-    lf_set(pcontrol_u3.Kp, joint_configs[3]-> Kp);
-    lf_set(pcontrol_u3.Ki, 0.0);
-    lf_set(pcontrol_u3.Kd, joint_configs[3]-> Kd);
+    lf_set(pcontrol_u1.Kp, pos_pid_config_0.Kp);
+    lf_set(pcontrol_u1.Ki, pos_pid_config_0.Ki);
+    lf_set(pcontrol_u1.Kd, pos_pid_config_0.Kd);
 
-    lf_set(pcontrol_u4.Kp, joint_configs[4]-> Kp);
-    lf_set(pcontrol_u4.Ki, 0.0);
-    lf_set(pcontrol_u4.Kd, joint_configs[4]-> Kd);
+    //lf_set(pcontrol_u2.Kp, joint_configs[2]-> Kp);
+    //lf_set(pcontrol_u2.Ki, 0.0);
+    //lf_set(pcontrol_u2.Kd, joint_configs[2]-> Kd);
 
-    lf_set(pcontrol_u5.Kp, 1.0); //pos_pid_config_0.Kp);
-    lf_set(pcontrol_u5.Ki, 0.0);
+    lf_set(pcontrol_u2.Kp, pos_pid_config_0.Kp);
+    lf_set(pcontrol_u2.Ki, pos_pid_config_0.Ki);
+    lf_set(pcontrol_u2.Kd, pos_pid_config_0.Kd);
+
+    //lf_set(pcontrol_u3.Kp, joint_configs[3]-> Kp);
+    //lf_set(pcontrol_u3.Ki, 0.0);
+    //lf_set(pcontrol_u3.Kd, joint_configs[3]-> Kd);
+
+    lf_set(pcontrol_u3.Kp, pos_pid_config_0.Kp);
+    lf_set(pcontrol_u3.Ki, pos_pid_config_0.Ki);
+    lf_set(pcontrol_u3.Kd, pos_pid_config_0.Kd);
+
+    //lf_set(pcontrol_u4.Kp, joint_configs[4]-> Kp);
+    //lf_set(pcontrol_u4.Ki, 0.0);
+    //lf_set(pcontrol_u4.Kd, joint_configs[4]-> Kd);
+
+    lf_set(pcontrol_u4.Kp, pos_pid_config_0.Kp);
+    lf_set(pcontrol_u4.Ki, pos_pid_config_0.Ki);
+    lf_set(pcontrol_u4.Kd, pos_pid_config_0.Kd);
+
+    lf_set(pcontrol_u5.Kp, pos_pid_config_0.Kp);
+    lf_set(pcontrol_u5.Ki, pos_pid_config_0.Ki);
     lf_set(pcontrol_u5.Kd, pos_pid_config_0.Kd);
 
-    lf_set(pcontrol_u6.Kp, 1.0); //pos_pid_config_0.Kp);
-    lf_set(pcontrol_u6.Ki, 0.0);
+    lf_set(pcontrol_u6.Kp, pos_pid_config_0.Kp);
+    lf_set(pcontrol_u6.Ki, pos_pid_config_0.Ki);
     lf_set(pcontrol_u6.Kd, pos_pid_config_0.Kd);
 
     // velocity control constants
