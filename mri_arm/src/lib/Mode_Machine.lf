@@ -17,17 +17,7 @@ preamble {=
   #include <../../../sm_config.h>
 
   #define PRINT_MODE 0
-  /*
-  typedef struct mode_status{
-    MODE_ENUM current_mode_index;
-    bool is_homing_finished;
-    bool enable_homing_command;
-    bool enable_motor_command;
-    bool force_disable_motor_pins;
-    TARGET_SRC motor_controller_internal_external_target_mode;
-    MOTOR_MODE[7] motor_controller_target_sel;
-  } mode_status;
-  */
+
 =}
 
 reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 2000 ms){
@@ -64,38 +54,9 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     preamble {= 
       void set_power_relay(bool on_or_off){return;}; // TODO: impliment this when we get a working relay.HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    0);
 
-      /*
-      GPIO_InitTypeDef GPIO_InitStruct = {0};
-      __HAL_RCC_GPIOB_CLK_ENABLE();
-      HAL_GPIO_WritePin(GPIOA,  GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6, GPIO_PIN_RESET);
-      GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
-      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-      GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    0);
-      */
     =}
 
-    /*
-    method toggleStatusLED(): void {=
-      if (self->status_led_counter >= self->status_led_counter_limit){
-        self->status_led_counter = 0;
-        self->status_led_on = !self->status_led_on;
-        if (self->status_led_on){
-          HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    1); // turn on
-        }
-        else {
-          HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    0); // turn off
-        }
-      }
-      else {
-        self->status_led_counter = self->status_led_counter + 1;
-      }
-      return;
-    =}
-    */
 
     method printModeStatus(): void {=
       printf("### MODE MACHINE STATUS ###\r\n");
@@ -340,77 +301,3 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     =}
 }
 
-
-/*
-typedef struct mode_status{
-    int current_mode_index;
-    bool is_homing_finished;
-    bool enable_homing_command;
-    bool enable_motor_command;
-    bool force_disable_motor_pins;
-    TARGET_SRC motor_controller_internal_external_target_mode;
-    MOTOR_MODE[7] motor_controller_target_sel;
-  } mode_status;
-*/
-
-/*
-    method handleModeSwitch(set_mode_enum: MODE_ENUM): void {=
-      switch (set_mode_enum->value) {
-        case 0: // set mode to idle
-          
-          enableIdleMotorSettings();  
-          lf_set_mode(IDLE);
-          printf("Mode set to IDLE!");
-          //_current_mode_name->value = "IDLE";
-          
-        case 1: // set mode to home
-          printf("Starting mode switch to homing...");
-          setHomingMotorSettings();  
-          lf_set_mode(HOME);
-          printf("Mode set to HOME!");
-          //_current_mode_name->value = "HOME";
-        
-        case 2: // set mode to run, use pos control
-          printf("Starting mode switch to running with position control...");
-          if (self->_is_homing_finished){
-            setRunMotorSettings(true);
-            lf_set_mode(RUN);
-            printf("Mode set to RUN!");
-            //_current_mode_name->value = "RUN_POS";
-          }
-          else {
-            printf("!!! Homing is not finished! Cannot do position control. Reverting to IDLE mode... !!!");
-            handleModeSwitch(SET_IDLE);
-            return;
-          }
-          
-        case 3: // set mode to run, use vel control
-          printf("Starting mode switch to running with velocity control...");
-          setRunMotorSettings(false);
-          lf_set_mode(RUN);
-          //_current_mode_name->value = "RUN_VEL";
-          printf("Mode set to RUN!");
-      }
-      _current_mode->value = set_mode_enum->value;
-      return;
-    =}
-    */
-
-    /*
-      reaction(slow_system_tick) -> IDLE, HOME, RUN{=
-        // this has to be done in a modal reactor, can't be external...
-        if (self->flag_ready_to_change_modes){
-          switch (self->staged_mode_status.current_mode_index) {
-            case SET_IDLE: // set mode to idle
-              lf_set_mode(IDLE);
-            case SET_HOMING: // set mode to home
-              lf_set_mode(HOME);
-            case SET_RUN_POS: // set mode to run, use pos control
-              lf_set_mode(RUN);
-            case SET_RUN_VEL: // set mode to run, use vel control
-              lf_set_mode(RUN);
-          }
-          self->flag_ready_to_change_modes = false;
-        }
-      =}
-      */

@@ -58,8 +58,6 @@ reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedfo
   state timer_elapsed_time_sec_: double = 0.0
   state interval_sec: float = 0.0
 
-  timer update_tick(0, 5 ms)
-
   state id_: int = id
 
   preamble {=
@@ -128,7 +126,7 @@ reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedfo
     self->signal_d = 0.0;
     =}
 
-  reaction(update_tick) target_state, current_state -> control_signal {=
+  reaction(current_state) -> control_signal {=
   //reaction(current_state, target_state) -> control_signal {= // using this makes very inconsistent inputs!!!
     
     if (USE_REAL_TIME){

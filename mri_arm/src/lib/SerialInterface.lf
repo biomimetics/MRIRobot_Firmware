@@ -21,20 +21,14 @@ preamble {=
   #define DMA_RECEIVE_SIZE 15
   //#define DMA_UART huart6 // was huart1
 
-  #define PRINT_ROS 0
+  #define PRINT_SERIAL 0
 =}
 
-reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
-  //input[7] current_pos: float // unused!
-  //input[7] joint_pos: float // unused!
-  //input[7] sea_pos: float // unused!
-  //output[7] target_state: int // unused!
+reactor SerialInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
 
   //inputs from motor controller to send back to ROS
   input[7] current_joint: float // position of joints from usm encoders
   input[7] current_joint_sea: float // position of seas from sea encoders
-
-  //input[7] current_joint_vel: float // position of joints from usm encoders
 
   // outputs for sending to motor controller
   output[7] target_pos_ext: float
@@ -46,14 +40,9 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   // outputs for sending state changes
   output set_mode_change: MODE_ENUM
 
-
   // trigger timers
-  timer trigger_send(0 ms, send_period) // unused!
   timer trigger_update(0 ms, recieve_period)
-  timer trigger_test(0 ms, 2000 ms)
-  timer trigger_print(0 ms, 1000 ms)
 
-  timer timer_idle_reset(0 ms, 100 ms)
   state set_command_failed_counter: int = 0 //
   state set_command_failed_counter_max: int = 1000 //20 // TODO: 20 counts * 20ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
   state last_mode_change: MODE_ENUM = 0 // idle
@@ -62,6 +51,16 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   state scaled_joint_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
   state scaled_sea_offset: float[7] = {0, 0, 0, 0, 0, 0, 0}
   state scaled_sea_lim: float[7] = {1000, 1000, 1000, 1000, 1000, 1000, 1000}
+
+  state timer_start_: uint32_t = 0
+  state timer_elapsed_time_sec_: double = 0.0
+
+  state ref_time: time = 0
+  state ref_time_p: time = 0
+
+  method packFloatForTX(float_msg: float): int {=
+    return (int)(float_msg * 1000.0);
+  =}
 
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
@@ -73,8 +72,6 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
 
     extern DMA_HandleTypeDef hdma_usart1_rx;
     extern DMA_HandleTypeDef hdma_usart1_tx;
-
-    static int print_ros = true;
 
     // Setup Rx and Tx buffers
     //static uint16_t dma_receive_size = 15; // moved to preprocessor define statement
@@ -90,22 +87,18 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     bool flag_handshake_success = false; // unused!
     bool flag_new_command_received = false;
 
-    // FP_COMPRESSION = [-1000, -1000, -1000, 1000, 1000, -1000, 1000] // from Python side right before sending.
-    float joint_dir[7]= {-1, 1, -1, 1, -1, 1, 1}; // {1, 1, 1, 1, 1, 1, 1};
-    //float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map ROS joint axes to robot joint axes // was {1, 1, 1, 1, 1, -1, -1}; 
-    float motor_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map robot motor axes (from encoders) to ROS motor axes. Should be redundant with motor_configs[i]->dir
-
-    int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
-
     int enc_data[7];
     int sea_data[7];
 
-    // We have an inFlight indicator if the DMA is currently sending data
-    static volatile int inFlight = 0;
+    float joint_dir[7]= {-1, 1, -1, 1, -1, 1, 1}; // {1, 1, 1, 1, 1, 1, 1};
+    float motor_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map robot motor axes (from encoders) to ROS motor axes. Should be redundant with motor_configs[i]->dir
+
+    int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0}; // I have no idea what this is used for
 
     bool flag_update_set_mode_change = false;
     int desired_state = 0;
 
+    
     // +---------------------------------------------------+
     // | Init functions
     // +---------------------------------------------------+
@@ -173,6 +166,10 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
       //printf("In HAL_UART_RxCallback1");
     } // this needs to be defined to build correctly, check to make sure this is ok
 
+    void HAL_UART_RxCallback3(){
+      //printf("In HAL_UART_RxCallback1");
+    } // this needs to be defined to build correctly, check to make sure this is ok
+
     void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
       //printf("In HAL_UARTEx_RxEventCallback\r\n");
       //printf("rx_buffer before memmove: %s\r\n", rx_buffer);
@@ -202,8 +199,9 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
 
     // UART transmit callback
     void HAL_UART_TxCallback1() {
-      inFlight = 0;
+      //inFlight = 0;
     }
+
 
     /*##### 
     # helper functions for handling inputs from ROS connection
@@ -257,7 +255,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         //joint_pos_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
-      if (PRINT_ROS)  {
+      if (PRINT_SERIAL)  {
         printf("got [JOINT POS]: \r\n");
         print_resp(joint_pos_array);
       }
@@ -270,7 +268,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         //joint_vel_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
-      if (PRINT_ROS)  {
+      if (PRINT_SERIAL)  {
         //printf("got [JOINT VEL]: \r\n");
         //print_resp(joint_vel_array);
       }
@@ -323,6 +321,8 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     void RxCallbackTest() {
     }
 
+    int old_tick = 0;
+
   =}
 
   reaction(startup) {=
@@ -332,24 +332,15 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     // Prep ROS bridge DMA recieve
     HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
 
-    
-
     configure_gpio_switch_pins();
 
     for (int i=0; i<7; i++) {
       self->scaled_sea_lim[i] = joint_configs[i]->lim;
       self->scaled_sea_offset[i] = 0;
     }
-      
+  
   =}
-
-  reaction(trigger_print) {=
-    if (PRINT_ROS){
-      printf("encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
-      printf("sea encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
-    }
     
-  =}
   /*##### 
     # Input reactions
     #####*/
@@ -357,14 +348,14 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   // Update our current USM position to send to ROS
   reaction(current_joint) {=
     for (int i=0; i<7; i++) {
-      enc_data[i] = (int)(current_joint[i]->value * 1000) * motor_dir[i];
+      enc_data[i] = packFloatForTX(current_joint[i]->value) * motor_dir[i];
     }
   =}
 
   // Update our current sea position to send to ROS
   reaction(current_joint_sea) {=
     for (int i=0; i<7; i++) {
-      sea_data[i] = (int)(current_joint_sea[i]->value * 1000);
+      sea_data[i] = packFloatForTX(current_joint_sea[i]->value);
     }
   =}
 
@@ -372,12 +363,32 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     # Output reactions
     #####*/
 
-  reaction send_transmit_update (trigger_send) {=
-    // handle sending back robot's encoder state
-    //handle_usbc_transmit_encoders();
-    =}
-
   reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
+
+    timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
+    
+    int tick_diff = HAL_GetTick() - old_tick;
+    old_tick = HAL_GetTick();
+    
+
+    printf("Serial Timer Interval: %d us\r\n", (int)(self->timer_elapsed_time_sec_ * 1000000));
+    printf("Tick Timer Interval: %d ms\r\n", tick_diff);
+    int time_in_ms = (lf_time_logical() - self->ref_time) / 1000000L;
+    int time_in_ms_p = (lf_time_physical() - self->ref_time_p) / 1000000L;
+
+    printf(
+        "Elapsed logical time is %d ms\r\n",
+        time_in_ms
+    );
+
+    printf(
+        "Elapsed physical time is %d ms\r\n",
+        time_in_ms_p
+    );
+
+    printf("\r\n");
+    self->ref_time = lf_time_logical();
+    self->ref_time_p = lf_time_physical();
 
     // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
     if (!set_newest_command(self->scaled_joint_pos, self->scaled_joint_vel, self->scaled_sea_offset)){
@@ -413,10 +424,6 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         lf_set(set_mode_change, SET_RUN_POS);
         self->last_mode_change = SET_RUN_POS;
       } 
-      else if (desired_state == 3) { // set mode to run with velocity inputs
-        lf_set(set_mode_change, SET_RUN_VEL);
-        self->last_mode_change = SET_RUN_VEL;
-      }
       else {
         printf("Invalid desired_state in receive_transmit_update in ROS_Interface.lf!\r\n");
           printf("Received %d but expected one of 0, 1, 2, or 3\r\n", desired_state);
