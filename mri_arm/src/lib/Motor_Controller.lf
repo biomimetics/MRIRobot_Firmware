@@ -26,7 +26,7 @@ preamble {=
   #define PRINT_MOTOR_CONTROLLER 0
   //state print_motor_controller: bool = true
 
-  #define USE_JOINTSPACE_COTNROLLERS 1 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
+  #define USE_JOINTSPACE_CONTROLLERS 0 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
 
   #ifndef __CONTROLLER_CONFIG
   #define __CONTROLLER_CONFIG
@@ -39,10 +39,20 @@ preamble {=
     float control_signal_max;     // maximum control signal
    } pid_config;
 
+  /* // used for large step changes
   static pid_config pos_pid_config_0 = {
     1.0, // kp
-    0.01, // kd
-    0.01, // ki
+    0.00, // kd
+    0.00, // ki
+    10.0,
+    10.0 
+  };
+  */
+  // used for trajectory control
+  static pid_config pos_pid_config_0 = {
+    10.0, // kp
+    0.00, // kd
+    0.00, // ki
     10.0,
     10.0 
   };
@@ -121,13 +131,13 @@ reactor MotorController(refresh_period: time = 10 ms) {
   // ######
   // ### Position CONTROLLERS
   
-  pcontrol_u0 = new PIDControllerGeneric(do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u1 = new PIDControllerGeneric(do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u2 = new PIDControllerGeneric(do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u3 = new PIDControllerGeneric(do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u4 = new PIDControllerGeneric(do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u5 = new PIDControllerGeneric(do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u6 = new PIDControllerGeneric(do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
+  pcontrol_u0 = new PIDControllerGeneric(id = 0, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
+  pcontrol_u1 = new PIDControllerGeneric(id = 1, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
+  pcontrol_u2 = new PIDControllerGeneric(id = 2, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
+  pcontrol_u3 = new PIDControllerGeneric(id = 3, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
+  pcontrol_u4 = new PIDControllerGeneric(id = 4, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
+  pcontrol_u5 = new PIDControllerGeneric(id = 5, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
+  pcontrol_u6 = new PIDControllerGeneric(id = 6, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
 
   // ######
   // ### VELOCITY CONTROLLERS
@@ -335,7 +345,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
       }
       convertMotorToJointSpace(self->current_motor_pos, self->current_joint_pos); // sets joint_pos
 
-      if (USE_JOINTSPACE_COTNROLLERS){
+      if (USE_JOINTSPACE_CONTROLLERS){
         lf_set(pcontrol_u0.current_state, self->current_joint_pos[0]);
         lf_set(pcontrol_u1.current_state, self->current_joint_pos[1]);
         lf_set(pcontrol_u2.current_state, self->current_joint_pos[2]);
@@ -393,7 +403,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
       printf("\r\n");
       */
 
-      if (USE_JOINTSPACE_COTNROLLERS){
+      if (USE_JOINTSPACE_CONTROLLERS){
         lf_set(vcontrol_u0.current_state, self->current_joint_vel[0]);
         lf_set(vcontrol_u1.current_state, self->current_joint_vel[1]);
         lf_set(vcontrol_u2.current_state, self->current_joint_vel[2]);
@@ -429,10 +439,19 @@ reactor MotorController(refresh_period: time = 10 ms) {
     if(self->_target_mode == MODE_EXT) {
       for(int i=0; i<7; i++){
         //self->target_pos[i] = target_pos_ext[i]->value;
-        self->target_joint_pos[i] = target_pos_ext[i]->value;
+        if (USE_JOINTSPACE_CONTROLLERS){
+          self->target_joint_pos[i] = target_pos_ext[i]->value;
+        }
+        else{
+          self->target_motor_pos[i] = target_pos_ext[i]->value;
+        }
+        
       }
       //convertJointToMotorPositions(); // updates self->target_motor_pos[i]
-      convertJointToMotorSpace(self->target_joint_pos, self->target_motor_pos);
+      if (USE_JOINTSPACE_CONTROLLERS){
+        convertJointToMotorSpace(self->target_joint_pos, self->target_motor_pos);
+      }
+      
     }
   =}
 
@@ -531,7 +550,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
       vcontrol_u6.target_state
       {=
 
-    if (USE_JOINTSPACE_COTNROLLERS){
+    if (USE_JOINTSPACE_CONTROLLERS){
       lf_set(pcontrol_u0.target_state, self->target_joint_pos[0]);
       lf_set(pcontrol_u1.target_state, self->target_joint_pos[1]);
       lf_set(pcontrol_u2.target_state, self->target_joint_pos[2]);
@@ -589,7 +608,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
     cmd_value[5] = vcontrol_u5.control_signal->value;
     cmd_value[6] = vcontrol_u6.control_signal->value;
 
-    if (USE_JOINTSPACE_COTNROLLERS){
+    if (USE_JOINTSPACE_CONTROLLERS){
       // convert joint space values to motor space values, then send
       float motor_cmd_value[7];
       convertJointToMotorSpace(cmd_value, motor_cmd_value);
@@ -640,7 +659,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
       printf("\r\n");
     }
 
-    if (USE_JOINTSPACE_COTNROLLERS){
+    if (USE_JOINTSPACE_CONTROLLERS){
       // convert joint space values to motor space values, then send
       float motor_cmd_value[7];
       convertJointToMotorSpace(cmd_value, motor_cmd_value);

@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
   #include <../../../motor_config.h>
 
-  #define PRINT_ENCODER 1
+  #define PRINT_ENCODER 0
 
   #define DO_INTERVAL_OVERRIDE 0
   #define OVERRIDE_INTERVAL 0.005

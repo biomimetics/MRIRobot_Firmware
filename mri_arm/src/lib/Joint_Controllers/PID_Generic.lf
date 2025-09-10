@@ -12,12 +12,14 @@ preamble {=
 
   #include <math.h>
 
-  #define PRINT_PID_GENERIC 0
+  #define PRINT_PID_GENERIC 1
+  #define printcnt_lim 5
+
   #define USE_REAL_TIME 1
 
 =}
 
-reactor PIDControllerGeneric(error_deadband: float=0.000, do_feedforward:bool=false, control_signal_max:float=1.0, integral_clamping_max:float=1.0) {
+reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedforward:bool=false, control_signal_max:float=1.0, integral_clamping_max:float=1.0) {
   input Kp: float
   input Kd: float
   input Ki: float
@@ -58,11 +60,11 @@ reactor PIDControllerGeneric(error_deadband: float=0.000, do_feedforward:bool=fa
 
   timer update_tick(0, 5 ms)
 
+  state id_: int = id
 
   preamble {=
 
    int printcnt = 0;
-   int printcnt_lim = 1000;
     =}
 
   method doErrorDeadbanding(): void {=
@@ -127,7 +129,7 @@ reactor PIDControllerGeneric(error_deadband: float=0.000, do_feedforward:bool=fa
     =}
 
   reaction(update_tick) target_state, current_state -> control_signal {=
-  //reaction(current_state, target_state) -> control_signal {=
+  //reaction(current_state, target_state) -> control_signal {= // using this makes very inconsistent inputs!!!
     
     if (USE_REAL_TIME){
       timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
@@ -152,6 +154,11 @@ reactor PIDControllerGeneric(error_deadband: float=0.000, do_feedforward:bool=fa
     doErrorDeadbanding();
     doControlSignalClamping();
      
+    // debugging the motors...
+    if (self->id_ == 4){
+      self->control_signal_ = -self->control_signal_;
+    }
+
     if (self->do_feedforward){
       lf_set(control_signal, self->control_signal_ + self->target_state_);
       //lf_set(control_signal, self->control_signal_ + target_state->value);
@@ -162,7 +169,7 @@ reactor PIDControllerGeneric(error_deadband: float=0.000, do_feedforward:bool=fa
     
     //lf_set(control_signal, self->control_signal_);
 
-    if (PRINT_PID_GENERIC && printcnt>=printcnt_lim){
+    if (PRINT_PID_GENERIC && printcnt>=printcnt_lim && (self->id_ == 4)){
       float print_mult = 1000.0;
       printf("interval: %ld us\r\n", (int)(self->interval_sec * 1000000));
       printf("self->signal_p as int: %d\r\n", (int)(self->signal_p * print_mult));
