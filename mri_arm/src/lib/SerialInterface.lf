@@ -157,6 +157,12 @@ reactor SerialInterface (send_period: time = 20 ms, recieve_period: time = 20 ms
       }
     }
 
+    // for timer debug
+    void set_motor_enable_pins(bool set_value){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    set_value); // PB0 is the LED
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    set_value);
+    }
+
     // +---------------------------------------------------+
     // | UART DMA Callback functions
     // +---------------------------------------------------+
@@ -323,6 +329,7 @@ reactor SerialInterface (send_period: time = 20 ms, recieve_period: time = 20 ms
 
     int old_tick = 0;
 
+    bool enable_flag = false;
   =}
 
   reaction(startup) {=
@@ -339,6 +346,39 @@ reactor SerialInterface (send_period: time = 20 ms, recieve_period: time = 20 ms
       self->scaled_sea_offset[i] = 0;
     }
   
+    // for timer testing
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+
+    //+----------------------------------------------------------------+
+    //  Name,     PWM     Direction,    Enable
+    //  USM_0,    PB4,    PC13,         PB1
+    //  USM_1,    PB5,    PC14,         PB2
+    //  USM_2,    PC8,    PC15,         PB3
+    //  USM_3,    PC9,    PC4,          PB9
+    //  USM_4,    PB6,    PC5,          PB10
+    //  USM_5,    PB7,    PB15,         PB12
+    //  USM_6,    PB8,    PB14,         PB13
+    //+----------------------------------------------------------------+
+
+    
+    HAL_GPIO_WritePin(GPIOB,  GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_9|GPIO_PIN_10|
+      GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+    GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_9|GPIO_PIN_10|
+                          GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;//GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    
+    // Configure output pin (Status LED)
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
   =}
     
   /*##### 
@@ -386,9 +426,15 @@ reactor SerialInterface (send_period: time = 20 ms, recieve_period: time = 20 ms
         time_in_ms_p
     );
 
+    set_motor_enable_pins(enable_flag);
+    enable_flag = !enable_flag;
+    printf("Motor 0 enable set to %d\r\n", enable_flag);
+
     printf("\r\n");
     self->ref_time = lf_time_logical();
     self->ref_time_p = lf_time_physical();
+
+    
 
     // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
     if (!set_newest_command(self->scaled_joint_pos, self->scaled_joint_vel, self->scaled_sea_offset)){
