@@ -24,7 +24,7 @@ preamble {=
   #define PRINT_ROS 0
 =}
 
-reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
+reactor ROSInterface (update_period: time = 10 ms){
   //input[7] current_pos: float // unused!
   //input[7] joint_pos: float // unused!
   //input[7] sea_pos: float // unused!
@@ -48,8 +48,8 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
 
 
   // trigger timers
-  timer trigger_send(0 ms, send_period) // unused!
-  timer trigger_update(0 ms, recieve_period)
+  //timer trigger_send(0 ms, send_period) // unused!
+  timer trigger_update(0 ms, update_period)
   timer trigger_test(0 ms, 2000 ms)
   timer trigger_print(0 ms, 1000 ms)
 
@@ -73,8 +73,6 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
 
     extern DMA_HandleTypeDef hdma_usart1_rx;
     extern DMA_HandleTypeDef hdma_usart1_tx;
-
-    static int print_ros = true;
 
     // Setup Rx and Tx buffers
     //static uint16_t dma_receive_size = 15; // moved to preprocessor define statement
@@ -372,11 +370,11 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     # Output reactions
     #####*/
 
-  reaction send_transmit_update (trigger_send) {=
+  /*reaction send_transmit_update (trigger_send) {=
     // handle sending back robot's encoder state
     //handle_usbc_transmit_encoders();
-    =}
-
+    =}*/
+    
   reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
 
     // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
@@ -386,6 +384,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
       }
     }
 
+    /*
     // if the coutner's too big, assume ROS isn't working and reset to idle.
     if (self->set_command_failed_counter_max <= self->set_command_failed_counter){
       if ((self->last_mode_change == SET_RUN_POS) || (self->last_mode_change == SET_RUN_VEL)){
@@ -395,6 +394,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         self->set_command_failed_counter = 0;
       }
     }
+    */
 
     // handle sending back robot's encoder state
     handle_usbc_transmit_encoders(); // TODO: Find out why this has to be done *after* using rx_command_buffer. Very weird. Breaks everything otherwise.

@@ -6,14 +6,7 @@ target C {
   }
 }
 
-
-// import FFBController from "Joint_Controllers/FFB.lf"
-// import PIDController from "Joint_Controllers/PID.lf"
-// import Diff_Drive from "Joint_Controllers/Diff_Drive.lf"
-import SEAController from "Joint_Controllers/SEA.lf"
-import Diff_Motor from "Joint_Controllers/Diff_Motor.lf"
-import Diff_Joint from "Joint_Controllers/Diff_Joint.lf"
-import PIDControllerGeneric from "Joint_Controllers/PID_Generic.lf"
+import PIDGroup7DOF from "Joint_Controllers/PIDGroup7DOF.lf"
 
 preamble {=
   #include <stdio.h>
@@ -23,51 +16,11 @@ preamble {=
   #include <../../../sm_config.h>
   #include <../../../joint_config.h>
 
-  #define PRINT_MOTOR_CONTROLLER 0
+  #define PRINT_MOTOR_CONTROLLER 1
   //state print_motor_controller: bool = true
 
   #define USE_JOINTSPACE_CONTROLLERS 0 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
-
-  #ifndef __CONTROLLER_CONFIG
-  #define __CONTROLLER_CONFIG
-
-  typedef struct {
-    float Kp;                     // proportional control gain
-    float Kd;                     // differential control gain
-    float Ki;                     // integral control gain
-    float integral_clamping_max;  // maximum intergral control signal
-    float control_signal_max;     // maximum control signal
-   } pid_config;
-
-  /* // used for large step changes
-  static pid_config pos_pid_config_0 = {
-    1.0, // kp
-    0.00, // kd
-    0.00, // ki
-    10.0,
-    10.0 
-  };
-  */
-  // used for trajectory control
-  static pid_config pos_pid_config_0 = {
-    10.0, // kp
-    0.00, // kd
-    0.00, // ki
-    10.0,
-    10.0 
-  };
-
-  static pid_config vel_pid_config_0 = {
-    0.1, // kp
-    0.000, // kd
-    0.000, // ki
-    10.0,
-    10.0 
-  };
-   //Kp = 1.0, Kd = 0.1, Ki = 0.0, CONTROL_LIMIT = 5.0, INTEGRAL_CLAMPING_MAX = 1.0
-  #endif // __CONTROLLER_CONFIG
-
-
+  #define USE_SEA_ANGLE_WITH_POSITION_CONTROL 0
 =}
 
 // Import and/or declare reactor classes.
@@ -119,48 +72,25 @@ reactor MotorController(refresh_period: time = 10 ms) {
   state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
   state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for position control
 
-  state _target_mode: TARGET_SRC = 0
-  state _enable_motor_command: bool = false
+  state target_mode_: TARGET_SRC = 0
+  state enable_motor_command_: bool = false
   state _target_sel: MOTOR_MODE[7] = {1, 1, 1, 1, 1, 1, 1}
-
-  
 
   timer trigger(0, refresh_period)
 
 
   // ######
-  // ### Position CONTROLLERS
-  
-  pcontrol_u0 = new PIDControllerGeneric(id = 0, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u1 = new PIDControllerGeneric(id = 1, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u2 = new PIDControllerGeneric(id = 2, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u3 = new PIDControllerGeneric(id = 3, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u4 = new PIDControllerGeneric(id = 4, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u5 = new PIDControllerGeneric(id = 5, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
-  pcontrol_u6 = new PIDControllerGeneric(id = 6, do_feedforward = false, control_signal_max=10.0, integral_clamping_max=5.0)
+  // ### Position Controllers
+  pcontrol_group = new PIDGroup7DOF(id = 0)
 
   // ######
-  // ### VELOCITY CONTROLLERS
-
-  // reactor PIDControllerGeneric(Kp:float=0.0, Kd:float=0.0, Ki:float=0.0, CONTROL_LIMIT:float=1.0, INTEGRAL_CLAMPING_MAX:float=0.0)
-  vcontrol_u0 = new PIDControllerGeneric(do_feedforward = true, control_signal_max=10.0, integral_clamping_max=5.0)
-  vcontrol_u1 = new PIDControllerGeneric(do_feedforward = true, control_signal_max=10.0, integral_clamping_max=5.0)
-  vcontrol_u2 = new PIDControllerGeneric(do_feedforward = true, control_signal_max=10.0, integral_clamping_max=5.0)
-  vcontrol_u3 = new PIDControllerGeneric(do_feedforward = true, control_signal_max=10.0, integral_clamping_max=5.0)
-  vcontrol_u4 = new PIDControllerGeneric(do_feedforward = true, control_signal_max=10.0, integral_clamping_max=5.0)
-  vcontrol_u5 = new PIDControllerGeneric(do_feedforward = true, control_signal_max=10.0, integral_clamping_max=5.0)
-  vcontrol_u6 = new PIDControllerGeneric(do_feedforward = true, control_signal_max=10.0, integral_clamping_max=5.0)
-
+  // ### Velocity Controllers
+  vcontrol_group = new PIDGroup7DOF(id = 1, do_feedforward = true)
   
   // ######
   // ### Conversion Methods
-  /*
-  // Comvert the motor outputs in [joint space] -> [motor space]
-    reaction(control_u0.out, control_u1.out) -> speed_out {=
-        lf_set(speed_out[0], control_u1.out->value + control_u0.out->value); // pitch(u0) + roll(u1)
-        lf_set(speed_out[1], control_u1.out->value - control_u0.out->value); // -pitch(u0) + roll(u1)
-    =}
-  */
+
+  // Convert the motor outputs in [joint space] -> [motor space]
   method convertJointToMotorSpace(joint: float*, motor: float*): void {=
     // apply jacobian
     motor[0] = joint[0];
@@ -176,15 +106,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
     return;
   =}
 
-  /*
-  // Comvert the targets in [motor space] -> [joint space]
-    reaction(current_pos, sea_pos) -> control_u0.current_pos, control_u1.current_pos {=
-        float pos0 = current_pos[0]->value + (motor_configs[self->motor_ID0]->dir)*(sea_pos[0]->value/100);
-        float pos1 = current_pos[1]->value + (motor_configs[self->motor_ID1]->dir)*(sea_pos[1]->value/100);
-        lf_set(control_u0.current_pos, (pos0 - pos1)/2); // pitch
-        lf_set(control_u1.current_pos, (pos0 + pos1)/2); // roll
-    =}
-  */
+  // Convert the targets in [motor space] -> [joint space]
   method convertMotorToJointSpace(motor: float*, joint: float*): void {=
     //float joint_pos[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     joint[0] = motor[0];
@@ -201,242 +123,61 @@ reactor MotorController(refresh_period: time = 10 ms) {
     //return joint_pos*;
   =}
 
-  // this reaction has way too many effects, see if we can simplify it
-  reaction(startup) -> 
-    pcontrol_u0.Kp, 
-    pcontrol_u0.Ki,
-    pcontrol_u0.Kd,
-    pcontrol_u1.Kp,
-    pcontrol_u1.Ki,
-    pcontrol_u1.Kd,
-    pcontrol_u2.Kp,
-    pcontrol_u2.Ki,
-    pcontrol_u2.Kd,
-    pcontrol_u3.Kp,
-    pcontrol_u3.Ki,
-    pcontrol_u3.Kd,
-    pcontrol_u4.Kp,
-    pcontrol_u4.Ki,
-    pcontrol_u4.Kd,
-    pcontrol_u5.Kp,
-    pcontrol_u5.Ki,
-    pcontrol_u5.Kd,
-    pcontrol_u6.Kp,
-    pcontrol_u6.Ki,
-    pcontrol_u6.Kd,
-    vcontrol_u0.Kp,
-    vcontrol_u0.Ki,
-    vcontrol_u0.Kd,
-    vcontrol_u1.Kp,
-    vcontrol_u1.Ki,
-    vcontrol_u1.Kd,
-    vcontrol_u2.Kp,
-    vcontrol_u2.Ki,
-    vcontrol_u2.Kd,
-    vcontrol_u3.Kp,
-    vcontrol_u3.Ki,
-    vcontrol_u3.Kd,
-    vcontrol_u4.Kp,
-    vcontrol_u4.Ki,
-    vcontrol_u4.Kd,
-    vcontrol_u5.Kp,
-    vcontrol_u5.Ki,
-    vcontrol_u5.Kd,
-    vcontrol_u6.Kp,
-    vcontrol_u6.Ki,
-    vcontrol_u6.Kd{=
-    // Control Constants [Kp, Kd, Ki]
-    //lf_set(control_u0.constants[0], joint_configs[0]-> Kp);
-    //lf_set(control_u0.constants[1], joint_configs[0]-> Kd);
-    //lf_set(control_u0.constants[2], 0);
-    //lf_set(control_u0.constants[3], joint_configs[0]-> Ks);
 
-    // position control constants
-    //lf_set(pcontrol_u0.Kp, joint_configs[0]-> Kp);
-    //lf_set(pcontrol_u0.Ki, 0.0);
-    //lf_set(pcontrol_u0.Kd, joint_configs[0]-> Kd);
-
-    lf_set(pcontrol_u0.Kp, pos_pid_config_0.Kp);
-    lf_set(pcontrol_u0.Ki, pos_pid_config_0.Ki);
-    lf_set(pcontrol_u0.Kd, pos_pid_config_0.Kd);
-
-    //lf_set(pcontrol_u1.Kp, joint_configs[1]-> Kp);
-    //lf_set(pcontrol_u1.Ki, 0.0);
-    //lf_set(pcontrol_u1.Kd, joint_configs[1]-> Kd);
-
-    lf_set(pcontrol_u1.Kp, pos_pid_config_0.Kp);
-    lf_set(pcontrol_u1.Ki, pos_pid_config_0.Ki);
-    lf_set(pcontrol_u1.Kd, pos_pid_config_0.Kd);
-
-    //lf_set(pcontrol_u2.Kp, joint_configs[2]-> Kp);
-    //lf_set(pcontrol_u2.Ki, 0.0);
-    //lf_set(pcontrol_u2.Kd, joint_configs[2]-> Kd);
-
-    lf_set(pcontrol_u2.Kp, pos_pid_config_0.Kp);
-    lf_set(pcontrol_u2.Ki, pos_pid_config_0.Ki);
-    lf_set(pcontrol_u2.Kd, pos_pid_config_0.Kd);
-
-    //lf_set(pcontrol_u3.Kp, joint_configs[3]-> Kp);
-    //lf_set(pcontrol_u3.Ki, 0.0);
-    //lf_set(pcontrol_u3.Kd, joint_configs[3]-> Kd);
-
-    lf_set(pcontrol_u3.Kp, pos_pid_config_0.Kp);
-    lf_set(pcontrol_u3.Ki, pos_pid_config_0.Ki);
-    lf_set(pcontrol_u3.Kd, pos_pid_config_0.Kd);
-
-    //lf_set(pcontrol_u4.Kp, joint_configs[4]-> Kp);
-    //lf_set(pcontrol_u4.Ki, 0.0);
-    //lf_set(pcontrol_u4.Kd, joint_configs[4]-> Kd);
-
-    lf_set(pcontrol_u4.Kp, pos_pid_config_0.Kp);
-    lf_set(pcontrol_u4.Ki, pos_pid_config_0.Ki);
-    lf_set(pcontrol_u4.Kd, pos_pid_config_0.Kd);
-
-    lf_set(pcontrol_u5.Kp, pos_pid_config_0.Kp);
-    lf_set(pcontrol_u5.Ki, pos_pid_config_0.Ki);
-    lf_set(pcontrol_u5.Kd, pos_pid_config_0.Kd);
-
-    lf_set(pcontrol_u6.Kp, pos_pid_config_0.Kp);
-    lf_set(pcontrol_u6.Ki, pos_pid_config_0.Ki);
-    lf_set(pcontrol_u6.Kd, pos_pid_config_0.Kd);
-
-    // velocity control constants
-    lf_set(vcontrol_u0.Kp, vel_pid_config_0.Kp);
-    lf_set(vcontrol_u0.Ki, vel_pid_config_0.Ki);
-    lf_set(vcontrol_u0.Kd, vel_pid_config_0.Kd);
-
-    lf_set(vcontrol_u1.Kp, vel_pid_config_0.Kp);
-    lf_set(vcontrol_u1.Ki, vel_pid_config_0.Ki);
-    lf_set(vcontrol_u1.Kd, vel_pid_config_0.Kd);
-
-    lf_set(vcontrol_u2.Kp, vel_pid_config_0.Kp);
-    lf_set(vcontrol_u2.Ki, vel_pid_config_0.Ki);
-    lf_set(vcontrol_u2.Kd, vel_pid_config_0.Kd);
-
-    lf_set(vcontrol_u3.Kp, vel_pid_config_0.Kp);
-    lf_set(vcontrol_u3.Ki, vel_pid_config_0.Ki);
-    lf_set(vcontrol_u3.Kd, vel_pid_config_0.Kd);
-
-    lf_set(vcontrol_u4.Kp, vel_pid_config_0.Kp);
-    lf_set(vcontrol_u4.Ki, vel_pid_config_0.Ki);
-    lf_set(vcontrol_u4.Kd, vel_pid_config_0.Kd);
-
-    lf_set(vcontrol_u5.Kp, vel_pid_config_0.Kp);
-    lf_set(vcontrol_u5.Ki, vel_pid_config_0.Ki);
-    lf_set(vcontrol_u5.Kd, vel_pid_config_0.Kd);
-
-    lf_set(vcontrol_u6.Kp, vel_pid_config_0.Kp);
-    lf_set(vcontrol_u6.Ki, vel_pid_config_0.Ki);
-    lf_set(vcontrol_u6.Kd, vel_pid_config_0.Kd);
-  =}
+  reaction(startup){=
+    //printf("Motor Controller: Starting up...\r\n");
+    =}
 
   // ######
   // ### Current State Update Reactions 
-  reaction(qdec_pos, qdec_sea) -> pcontrol_u0.current_state,
-    pcontrol_u1.current_state,
-    pcontrol_u2.current_state,
-    pcontrol_u3.current_state,
-    pcontrol_u4.current_state,
-    pcontrol_u5.current_state,
-    pcontrol_u6.current_state {=
-      
-      for (int i = 0; i<7; i++){
-        self->current_motor_pos[i] = qdec_pos[i]->value;
+  
+  reaction(qdec_pos, qdec_sea) -> pcontrol_group.current_states{=
+    for (int i = 0; i<7; i++){
+        if (USE_SEA_ANGLE_WITH_POSITION_CONTROL){
+          self->current_motor_pos[i] = qdec_pos[i]->value + qdec_sea[i]->value;
+        } 
+        else {
+          self->current_motor_pos[i] = qdec_pos[i]->value;
+        }
       }
+
       convertMotorToJointSpace(self->current_motor_pos, self->current_joint_pos); // sets joint_pos
 
       if (USE_JOINTSPACE_CONTROLLERS){
-        lf_set(pcontrol_u0.current_state, self->current_joint_pos[0]);
-        lf_set(pcontrol_u1.current_state, self->current_joint_pos[1]);
-        lf_set(pcontrol_u2.current_state, self->current_joint_pos[2]);
-        lf_set(pcontrol_u3.current_state, self->current_joint_pos[3]);
-        lf_set(pcontrol_u4.current_state, self->current_joint_pos[4]);
-        lf_set(pcontrol_u5.current_state, self->current_joint_pos[5]);
-        lf_set(pcontrol_u6.current_state, self->current_joint_pos[6]);
+        for (int i = 0; i<7; i++){lf_set(pcontrol_group.current_states[i], self->current_joint_pos[i]);}
       }
       else {
-        lf_set(pcontrol_u0.current_state, self->current_motor_pos[0]);
-        lf_set(pcontrol_u1.current_state, self->current_motor_pos[1]);
-        lf_set(pcontrol_u2.current_state, self->current_motor_pos[2]);
-        lf_set(pcontrol_u3.current_state, self->current_motor_pos[3]);
-        lf_set(pcontrol_u4.current_state, self->current_motor_pos[4]);
-        lf_set(pcontrol_u5.current_state, self->current_motor_pos[5]);
-        lf_set(pcontrol_u6.current_state, self->current_motor_pos[6]);
+        for (int i = 0; i<7; i++){lf_set(pcontrol_group.current_states[i], self->current_motor_pos[i]);}
       }
+  =}
 
-      /*
-      lf_set(pcontrol_u0.current_state, qdec_pos[0]->value + qdec_sea[0]->value);
-      lf_set(pcontrol_u1.current_state, qdec_pos[1]->value + qdec_sea[1]->value);
-      lf_set(pcontrol_u2.current_state, qdec_pos[2]->value + qdec_sea[2]->value);
-      lf_set(pcontrol_u3.current_state, qdec_pos[3]->value + qdec_sea[3]->value);
-      lf_set(pcontrol_u4.current_state, qdec_pos[4]->value + qdec_sea[4]->value);
-      lf_set(pcontrol_u5.current_state, qdec_pos[5]->value + qdec_sea[5]->value);
-      lf_set(pcontrol_u6.current_state, qdec_pos[6]->value + qdec_sea[6]->value);
-      */
-    =}
-
-  reaction(qdec_vel) -> vcontrol_u0.current_state,
-    vcontrol_u1.current_state,
-    vcontrol_u2.current_state,
-    vcontrol_u3.current_state,
-    vcontrol_u4.current_state,
-    vcontrol_u5.current_state,
-    vcontrol_u6.current_state {=
-      
-      for (int i = 0; i<7; i++){
+  reaction(qdec_vel) -> vcontrol_group.current_states{=
+    for (int i = 0; i<7; i++){
         self->current_motor_vel[i] = qdec_vel[i]->value;
       }
       convertMotorToJointSpace(self->current_motor_vel, self->current_joint_vel); // sets joint
       //self->current_joint_pos = convertMotorToJointPositions(self->current_motor_pos);
 
-      /*
-      printf("Motors: ");
-      for (int i = 0; i<7; i++){
-        printf("%d, ", (int) (self->current_motor_pos[i] * 1000));
-      }
-      printf("\r\n");
-
-      printf("Joints: ");
-      for (int i = 0; i<7; i++){
-        printf("%d, ", (int)(self->current_joint_pos[i] * 1000));
-      }
-      printf("\r\n");
-      */
-
       if (USE_JOINTSPACE_CONTROLLERS){
-        lf_set(vcontrol_u0.current_state, self->current_joint_vel[0]);
-        lf_set(vcontrol_u1.current_state, self->current_joint_vel[1]);
-        lf_set(vcontrol_u2.current_state, self->current_joint_vel[2]);
-        lf_set(vcontrol_u3.current_state, self->current_joint_vel[3]);
-        lf_set(vcontrol_u4.current_state, self->current_joint_vel[4]);
-        lf_set(vcontrol_u5.current_state, self->current_joint_vel[5]);
-        lf_set(vcontrol_u6.current_state, self->current_joint_vel[6]);
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.current_states[i], self->current_joint_vel[i]);}
       }
       else {
-        lf_set(vcontrol_u0.current_state, self->current_motor_vel[0]);
-        lf_set(vcontrol_u1.current_state, self->current_motor_vel[1]);
-        lf_set(vcontrol_u2.current_state, self->current_motor_vel[2]);
-        lf_set(vcontrol_u3.current_state, self->current_motor_vel[3]);
-        lf_set(vcontrol_u4.current_state, self->current_motor_vel[4]);
-        lf_set(vcontrol_u5.current_state, self->current_motor_vel[5]);
-        lf_set(vcontrol_u6.current_state, self->current_motor_vel[6]);
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.current_states[i], self->current_motor_vel[i]);}
       }
-
   =}
 
-  // +----------------------------------------------------------------+
-  // | MUX between the different target modes
-  // +----------------------------------------------------------------+
+  // ######
+  // ### Target State Update Reactions 
   reaction(target_pos_int) {= // this should be unused!
-    if (self->_target_mode == MODE_INT) {
+    if (self->target_mode_ == MODE_INT) {
       for(int i=0; i<7; i++) {
         self->target_pos[i] = target_pos_int[i]->value;
       }
     }
   =}
 
-  reaction(target_pos_ext) {=
-    if(self->_target_mode == MODE_EXT) {
+  reaction(target_pos_ext) -> pcontrol_group.target_states {=
+    if(self->target_mode_ == MODE_EXT) {
       for(int i=0; i<7; i++){
         //self->target_pos[i] = target_pos_ext[i]->value;
         if (USE_JOINTSPACE_CONTROLLERS){
@@ -445,80 +186,56 @@ reactor MotorController(refresh_period: time = 10 ms) {
         else{
           self->target_motor_pos[i] = target_pos_ext[i]->value;
         }
-        
       }
-      //convertJointToMotorPositions(); // updates self->target_motor_pos[i]
-      if (USE_JOINTSPACE_CONTROLLERS){
-        convertJointToMotorSpace(self->target_joint_pos, self->target_motor_pos);
-      }
+
+      convertJointToMotorSpace(self->target_joint_pos, self->target_motor_pos);
       
+      if (USE_JOINTSPACE_CONTROLLERS){
+        for (int i = 0; i<7; i++){lf_set(pcontrol_group.target_states[i], self->target_joint_pos[i]);}
+      }
+      else {
+        for (int i = 0; i<7; i++){lf_set(pcontrol_group.target_states[i], self->target_motor_pos[i]);}
+      }
+
     }
   =}
 
-  reaction(target_vel_int) {=
+  reaction(target_vel_int) -> vcontrol_group.target_states {=
     //printf("target_vel_ext reaction triggered!\r\n");
-    if (self->_target_mode == MODE_INT) {
+    if (self->target_mode_ == MODE_INT) {
       for(int i=0; i<7; i++){
         //self->speed_spc[i] = target_vel_int[i]->value;
         self->target_motor_vel[i] = target_vel_int[i]->value; // sets them directly here, motor by motor, no joint
-        //printf("%d ", ((int)(self->target_motor_vel[i] * 1000.0))); this is happening and these values are being set...
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.target_states[i], self->target_motor_vel[i]);}
       }
     }
   =}
 
   // inputs are the targets for the joints, outputs are the motor commands based on the differential joint kinematics
   // jacobian for motors -> joints is [[0.5, -0.5], [0.5, 0.5]], inv for joints -> motors (this case) is [[1, 1], [-1, 1]]. assumes counterclockwise positive for both motors pointing in towards the center.
-  reaction(target_vel_ext) {=
+  reaction(target_vel_ext) -> vcontrol_group.target_states {=
     // save target_joint_vel from the input
-    if (self->_target_mode == MODE_EXT) {
+    if (self->target_mode_ == MODE_EXT) {
       for (int i = 0; i<7; i++){
         self->target_joint_vel[i] = target_vel_ext[i]->value;
       }
       convertJointToMotorSpace(self->target_joint_vel, self->target_motor_vel);
 
+      if (USE_JOINTSPACE_CONTROLLERS){
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.target_states[i], self->target_joint_vel[i]);}
+      }
+      else {
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.target_states[i], self->target_motor_vel[i]);}
+      }
     }
 
   =}
 
-  reaction(enable_motor_command) -> pcontrol_u0.reset_errors,
-      pcontrol_u1.reset_errors,
-      pcontrol_u2.reset_errors,
-      pcontrol_u3.reset_errors,
-      pcontrol_u4.reset_errors,
-      pcontrol_u5.reset_errors,
-      pcontrol_u6.reset_errors,
-      vcontrol_u0.reset_errors,
-      vcontrol_u1.reset_errors,
-      vcontrol_u2.reset_errors,
-      vcontrol_u3.reset_errors,
-      vcontrol_u4.reset_errors,
-      vcontrol_u5.reset_errors,
-      vcontrol_u6.reset_errors {=
-    bool old_motor_command_bool = self->_enable_motor_command;
-    self->_enable_motor_command = enable_motor_command->value;
-    if (PRINT_MOTOR_CONTROLLER) printf("enable_motor_command reaction called, setting value to from %d to new value of %d from input %d\r\n", old_motor_command_bool, self->_enable_motor_command, enable_motor_command->value);
-    lf_set(pcontrol_u0.reset_errors, true);
-    lf_set(pcontrol_u1.reset_errors, true);
-    lf_set(pcontrol_u2.reset_errors, true);
-    lf_set(pcontrol_u3.reset_errors, true);
-    lf_set(pcontrol_u4.reset_errors, true);
-    lf_set(pcontrol_u5.reset_errors, true);
-    lf_set(pcontrol_u6.reset_errors, true);
-
-    lf_set(vcontrol_u0.reset_errors, true);
-    lf_set(vcontrol_u1.reset_errors, true);
-    lf_set(vcontrol_u2.reset_errors, true);
-    lf_set(vcontrol_u3.reset_errors, true);
-    lf_set(vcontrol_u4.reset_errors, true);
-    lf_set(vcontrol_u5.reset_errors, true);
-    lf_set(vcontrol_u6.reset_errors, true);
-
-  =}
-
+  // ######
+  // ### Behavior Switching Reactions 
   reaction(target_mode) {=
-    self->_target_mode = target_mode->value;
-    if (PRINT_MOTOR_CONTROLLER) printf("target_mode reaction called, setting value to %d from input %d\r\n",  self->_target_mode, target_mode->value);
-
+    self->target_mode_ = target_mode->value;
+    if (PRINT_MOTOR_CONTROLLER) printf("target_mode reaction called, setting value to %d from input %d\r\n",  self->target_mode_, target_mode->value);
   =}
 
   reaction(target_sel) {=
@@ -530,134 +247,17 @@ reactor MotorController(refresh_period: time = 10 ms) {
     }
   =}
 
-  // +----------------------------------------------------------------+
-  // | Use targets to get desired speeds
-  // +----------------------------------------------------------------+
-  reaction(trigger) -> 
-      pcontrol_u0.target_state,
-      pcontrol_u1.target_state,
-      pcontrol_u2.target_state,
-      pcontrol_u3.target_state,
-      pcontrol_u4.target_state,
-      pcontrol_u5.target_state,
-      pcontrol_u6.target_state,
-      vcontrol_u0.target_state,
-      vcontrol_u1.target_state,
-      vcontrol_u2.target_state,
-      vcontrol_u3.target_state,
-      vcontrol_u4.target_state,
-      vcontrol_u5.target_state,
-      vcontrol_u6.target_state
-      {=
+  reaction(enable_motor_command) -> pcontrol_group.reset_errors, vcontrol_group.reset_errors{=
+    self->enable_motor_command_ = enable_motor_command->value;
+    lf_set(pcontrol_group.reset_errors, true);
+    lf_set(vcontrol_group.reset_errors, true);
+    =}
 
-    if (USE_JOINTSPACE_CONTROLLERS){
-      lf_set(pcontrol_u0.target_state, self->target_joint_pos[0]);
-      lf_set(pcontrol_u1.target_state, self->target_joint_pos[1]);
-      lf_set(pcontrol_u2.target_state, self->target_joint_pos[2]);
-      lf_set(pcontrol_u3.target_state, self->target_joint_pos[3]);
-      lf_set(pcontrol_u4.target_state, self->target_joint_pos[4]);
-      lf_set(pcontrol_u5.target_state, self->target_joint_pos[5]);
-      lf_set(pcontrol_u6.target_state, self->target_joint_pos[6]);
-
-      lf_set(vcontrol_u0.target_state, self->target_joint_vel[0]);
-      lf_set(vcontrol_u1.target_state, self->target_joint_vel[1]);
-      lf_set(vcontrol_u2.target_state, self->target_joint_vel[2]);
-      lf_set(vcontrol_u3.target_state, self->target_joint_vel[3]);
-      lf_set(vcontrol_u4.target_state, self->target_joint_vel[4]);
-      lf_set(vcontrol_u5.target_state, self->target_joint_vel[5]);
-      lf_set(vcontrol_u6.target_state, self->target_joint_vel[6]);
-        
-      }
-    else {
-      lf_set(pcontrol_u0.target_state, self->target_motor_pos[0]);
-      lf_set(pcontrol_u1.target_state, self->target_motor_pos[1]);
-      lf_set(pcontrol_u2.target_state, self->target_motor_pos[2]);
-      lf_set(pcontrol_u3.target_state, self->target_motor_pos[3]);
-      lf_set(pcontrol_u4.target_state, self->target_motor_pos[4]);
-      lf_set(pcontrol_u5.target_state, self->target_motor_pos[5]);
-      lf_set(pcontrol_u6.target_state, self->target_motor_pos[6]);
-
-      lf_set(vcontrol_u0.target_state, self->target_motor_vel[0]);
-      lf_set(vcontrol_u1.target_state, self->target_motor_vel[1]);
-      lf_set(vcontrol_u2.target_state, self->target_motor_vel[2]);
-      lf_set(vcontrol_u3.target_state, self->target_motor_vel[3]);
-      lf_set(vcontrol_u4.target_state, self->target_motor_vel[4]);
-      lf_set(vcontrol_u5.target_state, self->target_motor_vel[5]);
-      lf_set(vcontrol_u6.target_state, self->target_motor_vel[6]);
-    }
-  =}
-
-  // +----------------------------------------------------------------+
-
-
-  // Read out the positional control speed values
-  reaction(
-      vcontrol_u0.control_signal,
-      vcontrol_u1.control_signal,
-      vcontrol_u2.control_signal,
-      vcontrol_u3.control_signal,
-      vcontrol_u4.control_signal,
-      vcontrol_u5.control_signal,
-      vcontrol_u6.control_signal) {=
+  // ######
+  // ### Stage Commands Reactions 
+  reaction(pcontrol_group.control_signals) {=
     float cmd_value[7];
-    cmd_value[0] = vcontrol_u0.control_signal->value;
-    cmd_value[1] = vcontrol_u1.control_signal->value;
-    cmd_value[2] = vcontrol_u2.control_signal->value;
-    cmd_value[3] = vcontrol_u3.control_signal->value;
-    cmd_value[4] = vcontrol_u4.control_signal->value;
-    cmd_value[5] = vcontrol_u5.control_signal->value;
-    cmd_value[6] = vcontrol_u6.control_signal->value;
-
-    if (USE_JOINTSPACE_CONTROLLERS){
-      // convert joint space values to motor space values, then send
-      float motor_cmd_value[7];
-      convertJointToMotorSpace(cmd_value, motor_cmd_value);
-      for (int i = 0; i<7; i++){
-        self->speed_spc[i] = motor_cmd_value[i];
-      }
-    }
-    else{
-      for (int i = 0; i<7; i++){
-        self->speed_spc[i] = cmd_value[i];
-      }
-    }
-  =}
-
-  reaction( pcontrol_u0.control_signal,
-      pcontrol_u1.control_signal,
-      pcontrol_u2.control_signal,
-      pcontrol_u3.control_signal,
-      pcontrol_u4.control_signal,
-      pcontrol_u5.control_signal,
-      pcontrol_u6.control_signal) {=
-    float cmd_value[7];
-    cmd_value[0] = pcontrol_u0.control_signal->value;
-    cmd_value[1] = pcontrol_u1.control_signal->value;
-    cmd_value[2] = pcontrol_u2.control_signal->value;
-    cmd_value[3] = pcontrol_u3.control_signal->value;
-    cmd_value[4] = pcontrol_u4.control_signal->value;
-    cmd_value[5] = pcontrol_u5.control_signal->value;
-    cmd_value[6] = pcontrol_u6.control_signal->value;
-    
-    if (PRINT_MOTOR_CONTROLLER){
-      printf("Current Joint Positions: ");
-      for (int i = 0; i<7; i++){
-        printf("%d, ", (int)(self->current_joint_pos[i] * 1000));
-      }
-      printf("\r\n");
-
-      printf("Target Joint Positions: ");
-      for (int i = 0; i<7; i++){
-        printf("%d, ", (int)(self->target_joint_pos[i] * 1000));
-      }
-      printf("\r\n");
-
-      printf("Set Joint Speeds: ");
-      for (int i = 0; i<7; i++){
-        printf("%d, ", (int)(cmd_value[i] * 1000));
-      }
-      printf("\r\n");
-    }
+    for (int i = 0; i<7; i++){cmd_value[i] = pcontrol_group.control_signals[i]->value;}
 
     if (USE_JOINTSPACE_CONTROLLERS){
       // convert joint space values to motor space values, then send
@@ -674,11 +274,29 @@ reactor MotorController(refresh_period: time = 10 ms) {
     }
   =}
 
-  // +----------------------------------------------------------------+
-  // | Set speed output
-  // +----------------------------------------------------------------+
+  reaction(vcontrol_group.control_signals) {=
+    float cmd_value[7];
+    for (int i = 0; i<7; i++){cmd_value[i] = vcontrol_group.control_signals[i]->value;}
+
+    if (USE_JOINTSPACE_CONTROLLERS){
+      // convert joint space values to motor space values, then send
+      float motor_cmd_value[7];
+      convertJointToMotorSpace(cmd_value, motor_cmd_value);
+      for (int i = 0; i<7; i++){
+        self->speed_spc[i] = motor_cmd_value[i];
+      }
+    }
+    else{
+      for (int i = 0; i<7; i++){
+        self->speed_spc[i] = cmd_value[i];
+      }
+    }
+  =}
+
+  // ######
+  // ### Set Output Reactions 
   reaction(trigger) -> speed{=
-    if (self->_enable_motor_command){
+    if (self->enable_motor_command_){
       // We use this to set either the speed or position of the motors
       if (PRINT_MOTOR_CONTROLLER) {printf("Motor_Controller: Setting speeds of: ");}
         for(int i=0; i<7; i++){
@@ -697,9 +315,9 @@ reactor MotorController(refresh_period: time = 10 ms) {
       if (PRINT_MOTOR_CONTROLLER){printf("\r\n");}
     }
     else{
-    //printf("_enable_motor_command is off!\r\n");
+      if (PRINT_MOTOR_CONTROLLER){printf("enable motor speed is off!\r\n");}
     }
-  
-    // consider adding an else statement to force velocity control and set the target velocities to zero. Mode_Machine should do that anyways.
+
   =}
+
 }

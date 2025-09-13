@@ -1,0 +1,155 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+import PIDControllerGeneric from "PID_Generic.lf"
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include <stdio.h>
+
+  #include <math.h>
+
+  #include <../../../control_config.h>
+
+  #define PRINT_PID_GROUP 0
+  #define printcnt_lim 5
+
+=}
+
+reactor PIDGroup7DOF(id: int = 0, do_feedforward: bool = false) {
+  input reset_errors: bool
+
+  input[7] current_states: float
+  input[7] target_states: float
+  output[7] control_signals: float
+
+  state id_: int = id
+
+  // define individual joint controllers
+  control_u0 = new PIDControllerGeneric(id = 0, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
+  control_u1 = new PIDControllerGeneric(id = 1, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
+  control_u2 = new PIDControllerGeneric(id = 2, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
+  control_u3 = new PIDControllerGeneric(id = 3, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
+  control_u4 = new PIDControllerGeneric(id = 4, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
+  control_u5 = new PIDControllerGeneric(id = 5, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
+  control_u6 = new PIDControllerGeneric(id = 6, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
+
+  // route the inputs to each controller
+  current_states -> 
+    control_u0.current_state,
+    control_u1.current_state,
+    control_u2.current_state,
+    control_u3.current_state,
+    control_u4.current_state,
+    control_u5.current_state,
+    control_u6.current_state
+
+  target_states -> 
+    control_u0.target_state,
+    control_u1.target_state,
+    control_u2.target_state,
+    control_u3.target_state,
+    control_u4.target_state,
+    control_u5.target_state,
+    control_u6.target_state
+
+  // route the outputs back to the wrapper reactor
+  control_u0.control_signal,
+  control_u1.control_signal,
+  control_u2.control_signal,
+  control_u3.control_signal,
+  control_u4.control_signal,
+  control_u5.control_signal,
+  control_u6.control_signal ->
+    control_signals
+
+  preamble {=
+
+    =}
+
+  reaction(startup) -> 
+    control_u0.Kp, 
+    control_u0.Ki,
+    control_u0.Kd,
+    control_u1.Kp,
+    control_u1.Ki,
+    control_u1.Kd,
+    control_u2.Kp,
+    control_u2.Ki,
+    control_u2.Kd,
+    control_u3.Kp,
+    control_u3.Ki,
+    control_u3.Kd,
+    control_u4.Kp,
+    control_u4.Ki,
+    control_u4.Kd,
+    control_u5.Kp,
+    control_u5.Ki,
+    control_u5.Kd,
+    control_u6.Kp,
+    control_u6.Ki,
+    control_u6.Kd
+    {=
+      // Set Control Constants [Kp, Kd, Ki] from struct based on ids.
+
+      //joint_configs[self->motor_ID0]-> Kp
+      // static PID_Config* pos_pid_configs[7]
+      PID_Config* pid_configs[7];
+      if (self->id_ == 0){
+        for (int i = 0 ; i<7; i++){pid_configs[i] = pos_pid_configs[i];} // from control_config.h
+      }
+      else {
+        for (int i = 0 ; i<7; i++){pid_configs[i] = vel_pid_configs[i];} // from control_config.h
+      }
+
+      lf_set(control_u0.Kp, pid_configs[0]->Kp);
+      lf_set(control_u0.Ki, pid_configs[0]->Ki);
+      lf_set(control_u0.Kd, pid_configs[0]->Kd);
+
+      lf_set(control_u1.Kp, pid_configs[1]->Kp);
+      lf_set(control_u1.Ki, pid_configs[1]->Ki);
+      lf_set(control_u1.Kd, pid_configs[1]->Kd);
+
+      lf_set(control_u2.Kp, pid_configs[2]->Kp);
+      lf_set(control_u2.Ki, pid_configs[2]->Ki);
+      lf_set(control_u2.Kd, pid_configs[2]->Kd);
+
+      lf_set(control_u3.Kp, pid_configs[3]->Kp);
+      lf_set(control_u3.Ki, pid_configs[3]->Ki);
+      lf_set(control_u3.Kd, pid_configs[3]->Kd);
+
+      lf_set(control_u4.Kp, pid_configs[4]->Kp);
+      lf_set(control_u4.Ki, pid_configs[4]->Ki);
+      lf_set(control_u4.Kd, pid_configs[4]->Kd);
+
+      lf_set(control_u5.Kp, pid_configs[5]->Kp);
+      lf_set(control_u5.Ki, pid_configs[5]->Ki);
+      lf_set(control_u5.Kd, pid_configs[5]->Kd);
+
+      lf_set(control_u6.Kp, pid_configs[6]->Kp);
+      lf_set(control_u6.Ki, pid_configs[6]->Ki);
+      lf_set(control_u6.Kd, pid_configs[6]->Kd);
+    =}
+
+    reaction(reset_errors) -> 
+      control_u0.reset_errors,
+      control_u1.reset_errors,
+      control_u2.reset_errors,
+      control_u3.reset_errors,
+      control_u4.reset_errors,
+      control_u5.reset_errors,
+      control_u6.reset_errors {=
+        lf_set(control_u0.reset_errors, reset_errors->value);
+        lf_set(control_u1.reset_errors, reset_errors->value);
+        lf_set(control_u2.reset_errors, reset_errors->value);
+        lf_set(control_u3.reset_errors, reset_errors->value);
+        lf_set(control_u4.reset_errors, reset_errors->value);
+        lf_set(control_u5.reset_errors, reset_errors->value);
+        lf_set(control_u6.reset_errors, reset_errors->value);
+      =}
+}
