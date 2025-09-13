@@ -410,7 +410,7 @@ reactor SerialInterface (send_period: time = 20 ms, recieve_period: time = 20 ms
     int tick_diff = HAL_GetTick() - old_tick;
     old_tick = HAL_GetTick();
     
-
+    
     printf("Serial Timer Interval: %d us\r\n", (int)(self->timer_elapsed_time_sec_ * 1000000));
     printf("Tick Timer Interval: %d ms\r\n", tick_diff);
     int time_in_ms = (lf_time_logical() - self->ref_time) / 1000000L;
@@ -433,7 +433,7 @@ reactor SerialInterface (send_period: time = 20 ms, recieve_period: time = 20 ms
     printf("\r\n");
     self->ref_time = lf_time_logical();
     self->ref_time_p = lf_time_physical();
-
+    
     
 
     // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner

@@ -165,13 +165,14 @@ int _write(int file, char *ptr, int len){
   return len;
 }
 
+
 double timer_get_elapsed_time(uint32_t *timer_start){
   uint32_t timer_stop = LOOP_TIMER->CNT;
   uint32_t timer_elapsed = 0;
 
   if (timer_stop < *timer_start){
     //printf("Timer overflow!\r\n");
-    timer_elapsed = ((uint32_t)65535 - *timer_start) + timer_stop;
+    timer_elapsed = ((uint32_t)MAX_TIMER_COUNTER - *timer_start) + timer_stop;
   }
   else{
     timer_elapsed = timer_stop - *timer_start;
@@ -199,7 +200,7 @@ void timer_updated_elapsed_time(uint32_t *timer_start, double *timer_elapsed_sec
 
   if (timer_stop < *timer_start){
     //printf("Timer overflow!\r\n");
-    timer_elapsed = ((uint32_t)65535 - *timer_start) + timer_stop;
+    timer_elapsed = ((uint32_t)MAX_TIMER_COUNTER - *timer_start) + timer_stop;
   }
   else{
     timer_elapsed = timer_stop - *timer_start;

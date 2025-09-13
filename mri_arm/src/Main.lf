@@ -65,6 +65,7 @@ main reactor {
       MX_USART6_UART_Init();
       MX_TIM3_Init();
       MX_TIM4_Init();
+      //MX_TIM5_Init(); // added! attempt for aligning LF time
       MX_TIM6_Init();
       HAL_TIM_Base_Start(&htim6); // added!
       MX_RTC_Init();
@@ -72,6 +73,7 @@ main reactor {
 
       printf("\r\n");
       printf("~~~ STM32 START ~~~ \r\n");
+      printf("SystemCoreClock: %ld", SystemCoreClock);
       printf("\r\n");
 
       //HAL_START_DMA(); // not sure if needed
