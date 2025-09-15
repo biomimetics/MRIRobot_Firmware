@@ -110,10 +110,10 @@ main reactor {
   timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
   state count: int = 1
 
-  qdec = new QDEC(sample_period = 5 ms)     // FPGA-based QDEC Encoders
+  qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
   usm = new USM()                            // Ultrasonic motor controllers
-  ros_controller = new ROSInterface()        // ROS UART Interface
-  motor_controller = new MotorController()    // Main Motor driver + controller
+  ros_controller = new ROSInterface(update_period = 10 ms)        // ROS UART Interface
+  motor_controller = new MotorController(refresh_period = 10 ms)    // Main Motor driver + controller
   home_controller = new HomeController()      // Used to home the motors
   mode_machine = new ModeMachine()            // Used to trigger other reactors behavior
 

@@ -20,9 +20,11 @@ preamble {=
   #define DMA_RX_BUFFER_SIZE 60
   #define DMA_RECEIVE_SIZE 15
   //#define DMA_UART huart6 // was huart1
+
+  #define PRINT_ROS 0
 =}
 
-reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
+reactor ROSInterface (update_period: time = 10 ms){
   //input[7] current_pos: float // unused!
   //input[7] joint_pos: float // unused!
   //input[7] sea_pos: float // unused!
@@ -46,8 +48,8 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
 
 
   // trigger timers
-  timer trigger_send(0 ms, send_period) // unused!
-  timer trigger_update(0 ms, recieve_period)
+  //timer trigger_send(0 ms, send_period) // unused!
+  timer trigger_update(0 ms, update_period)
   timer trigger_test(0 ms, 2000 ms)
   timer trigger_print(0 ms, 1000 ms)
 
@@ -72,8 +74,6 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     extern DMA_HandleTypeDef hdma_usart1_rx;
     extern DMA_HandleTypeDef hdma_usart1_tx;
 
-    static int print_ros = true;
-
     // Setup Rx and Tx buffers
     //static uint16_t dma_receive_size = 15; // moved to preprocessor define statement
 
@@ -88,8 +88,11 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     bool flag_handshake_success = false; // unused!
     bool flag_new_command_received = false;
 
-    float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1}; // why are both of these defined and used in different functions?
-    float dir_offsets[7]= {1, 1, 1, 1, 1, -1, -1};
+    // FP_COMPRESSION = [-1000, -1000, -1000, 1000, 1000, -1000, 1000] // from Python side right before sending.
+    float joint_dir[7]= {-1, 1, -1, 1, -1, 1, 1}; // {1, 1, 1, 1, 1, 1, 1};
+    //float joint_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map ROS joint axes to robot joint axes // was {1, 1, 1, 1, 1, -1, -1}; 
+    float motor_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map robot motor axes (from encoders) to ROS motor axes. Should be redundant with motor_configs[i]->dir
+
     int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
 
     int enc_data[7];
@@ -252,7 +255,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         //joint_pos_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
-      if (print_ros)  {
+      if (PRINT_ROS)  {
         printf("got [JOINT POS]: \r\n");
         print_resp(joint_pos_array);
       }
@@ -265,7 +268,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         //joint_vel_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 
-      if (print_ros)  {
+      if (PRINT_ROS)  {
         //printf("got [JOINT VEL]: \r\n");
         //print_resp(joint_vel_array);
       }
@@ -325,29 +328,11 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     // should be done in main.lf
 
     // Prep ROS bridge DMA recieve
-    //HAL_UART_Receive_DMA(&huart1, rx_buffer, 15);
-    //printf("ROS_Interface: In startup reaction before HAL_UARTEx_ReceiveToIdle_DMA...\r\n");
     HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
 
     
 
     configure_gpio_switch_pins();
-    /* //Configure Switch pins : PC1 
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    __HAL_RCC_GPIOH_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
-    GPIO_InitStruct.Pin = GPIO_PIN_1;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-    HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, GPIO_PIN_RESET);
-    GPIO_InitStruct.Pin = GPIO_PIN_1;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
-    */
 
     for (int i=0; i<7; i++) {
       self->scaled_sea_lim[i] = joint_configs[i]->lim;
@@ -357,8 +342,11 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   =}
 
   reaction(trigger_print) {=
-    printf("encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
-    printf("sea encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
+    if (PRINT_ROS){
+      printf("encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
+      printf("sea encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
+    }
+    
   =}
   /*##### 
     # Input reactions
@@ -367,7 +355,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
   // Update our current USM position to send to ROS
   reaction(current_joint) {=
     for (int i=0; i<7; i++) {
-      enc_data[i] = (int)(current_joint[i]->value * 1000) * dir_offsets[i];
+      enc_data[i] = (int)(current_joint[i]->value * 1000) * motor_dir[i];
     }
   =}
 
@@ -382,11 +370,11 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
     # Output reactions
     #####*/
 
-  reaction send_transmit_update (trigger_send) {=
+  /*reaction send_transmit_update (trigger_send) {=
     // handle sending back robot's encoder state
     //handle_usbc_transmit_encoders();
-    =}
-
+    =}*/
+    
   reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
 
     // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
@@ -396,6 +384,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
       }
     }
 
+    /*
     // if the coutner's too big, assume ROS isn't working and reset to idle.
     if (self->set_command_failed_counter_max <= self->set_command_failed_counter){
       if ((self->last_mode_change == SET_RUN_POS) || (self->last_mode_change == SET_RUN_VEL)){
@@ -405,6 +394,7 @@ reactor ROSInterface (send_period: time = 20 ms, recieve_period: time = 20 ms){
         self->set_command_failed_counter = 0;
       }
     }
+    */
 
     // handle sending back robot's encoder state
     handle_usbc_transmit_encoders(); // TODO: Find out why this has to be done *after* using rx_command_buffer. Very weird. Breaks everything otherwise.

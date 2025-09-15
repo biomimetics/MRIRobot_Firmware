@@ -53,7 +53,10 @@ reactor HomeController(sample_period: time = 20 ms) {
   output is_home: bool //int
 
   // state is_home: int = 0
-  state home_speed: float[7] = {-20, -10, 100, 0, 30, 30, 30}
+  //state home_speed: float[7] = {-20, -10, 100, 0, 30, 30, 30} // old units!
+  state home_speed: float[7] = {0.1, 0.1, 0.1, 0, 0.1, 0.1, 0.1} // try 0.1 rad/s to start with.
+  state default_home_speed: float = 0.08 //0.1 // start replacing hardcoded speeds with this value
+  state pos_close_threshold: float = 0.01 
 
   state last_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
   state last_sea: float[7] = {0, 0, 0, 0, 0, 0, 0}
@@ -67,18 +70,26 @@ reactor HomeController(sample_period: time = 20 ms) {
 
   timer switch_update(0 ms, 40 ms)
 
+  // method to replace the old get_speed function that had hardcoded values in it.
+  method getJointSpeed(curr_pos: float, target_pos: float): float {=
+    float speed = (curr_pos - target_pos); // matching sign conventions of old get_speed function
+    speed = speed > self->default_home_speed? self->default_home_speed:speed;
+    speed = speed < -self->default_home_speed? self->default_home_speed:speed;
+    return speed;
+  =}
+
   preamble {=
-    static int printVals = false;
+    static int printVals = true;//false;
     static int printcnt = 0;
-    static int printcnt_lim = 20;
+    static int printcnt_lim = 50;
 
     volatile int switch_val[7] = {0, 0, 0, 0, 0, 0, 0};
-    static float SEA_limits[7] = {3.0, 1.2, 1.2, 2.0, 2.0, 0.6, 0.6};
+    static float SEA_limits[7] = {3.0, 1.2, 1.2, 2.0, 2.0, 0.6, 0.6}; // what units are these in?
     static int SEA_trig[7] = {0, 0, 0, 0, 0, 0, 0};
     static float ref[7] = {0, 0, 0, 0, 0, 0, 0};
     static float rpos[7] = {0, 0, 0, 0, 0, 0, 0};
 
-    static HOME_STATE home_state = WRIST0;
+    static HOME_STATE home_state = WRIST0; // WRIST0; // ELBOW0 // WRIST0
     static int _is_home = 0;
 
     static void MX_GPIO_Init(void) {
@@ -104,7 +115,7 @@ reactor HomeController(sample_period: time = 20 ms) {
       HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
     }
 
-    static float get_speed(float curr, float target) {
+    static float OLD_get_speed(float curr, float target) {
       float speed = 110 * (curr - target);
       speed = speed > 20? 20:speed;
       speed = speed < -20? -20:speed;
@@ -178,7 +189,7 @@ reactor HomeController(sample_period: time = 20 ms) {
         rpos[i] = current_pos[i]->value - ref[i];
       }
 
-
+      printf("[HOME]: home_state: %d. home_stage: %d, %d, %d.\r\n", home_state, home_stage[0], home_stage[1], home_stage[2]);
       if (_is_home == 0) {
         switch (home_state) {
           // + ---------------------------------------------------- +
@@ -189,8 +200,8 @@ reactor HomeController(sample_period: time = 20 ms) {
             home_state = home_stage[0]? WRIST1:ELBOW0;
             break;
           case WRIST1:           //
-            self->home_speed[5] = -10;
-            self->home_speed[6] = 10;
+            self->home_speed[5] = -self->default_home_speed;  // this is just hardcoded differential movements.
+            self->home_speed[6] = self->default_home_speed;
             if (SEA_trig[5] == 1 && SEA_trig[6] == -1 ) {
               printf("    [WRIST] Home step 1 done\r\n");
               self->home_speed[5] = 0;
@@ -201,8 +212,8 @@ reactor HomeController(sample_period: time = 20 ms) {
             }
             break;
           case WRIST2:           //   Then, home with the rotary direction
-            self->home_speed[5] = -10 + -get_speed((rpos[6] - rpos[5]), 0);
-            self->home_speed[6] = -10 +  get_speed((rpos[6] - rpos[5]), 0);
+            self->home_speed[5] = -self->default_home_speed - getJointSpeed((rpos[6] - rpos[5]), 0);
+            self->home_speed[6] = -self->default_home_speed + getJointSpeed((rpos[6] - rpos[5]), 0);
             if (SEA_trig[5] == 1 && SEA_trig[6] == 1) {
               printf("    [WRIST] Home step 2 done\r\n");
               home_state = WRIST3;
@@ -211,9 +222,9 @@ reactor HomeController(sample_period: time = 20 ms) {
             }
             break;
           case WRIST3:           //   Then, home with the rotary direction
-            self->home_speed[5] = get_speed(rpos[5], 0) + -get_speed((rpos[6] - rpos[5]), 0);
-            self->home_speed[6] = get_speed(rpos[6], 0) +  get_speed((rpos[6] - rpos[5]), 0);
-            if (absf(rpos[5]) < 0.01 && absf(rpos[6]) < 0.01) {
+            self->home_speed[5] = getJointSpeed(rpos[5], 0) - getJointSpeed((rpos[6] - rpos[5]), 0);
+            self->home_speed[6] = getJointSpeed(rpos[6], 0) +  getJointSpeed((rpos[6] - rpos[5]), 0);
+            if (absf(rpos[5]) < self->pos_close_threshold && absf(rpos[6]) < self->pos_close_threshold) {
               printf("    [WRIST] Home step 3 done\r\n");
               home_state = ELBOW0;
               self->home_speed[5] = 0;
@@ -229,8 +240,8 @@ reactor HomeController(sample_period: time = 20 ms) {
             home_state = home_stage[1]? ELBOW1:SHOULDER0;
             break;
           case ELBOW1:           //   First home the movement direction
-            self->home_speed[3] = 8;
-            self->home_speed[4] = -8;
+            self->home_speed[3] = self->default_home_speed;
+            self->home_speed[4] = -self->default_home_speed;
             if (SEA_trig[3] == -1 && SEA_trig[4] == 1 ) {
               printf("    [ELBOW] Home step 1 done\r\n");
               self->home_speed[3] = 0;
@@ -241,8 +252,8 @@ reactor HomeController(sample_period: time = 20 ms) {
             }
             break;
           case ELBOW2:           //   Have the motors point up
-            self->home_speed[3] = -25 +  1.1*get_speed((rpos[4] - rpos[3]), 0);
-            self->home_speed[4] = -25 + -1.1*get_speed((rpos[4] - rpos[3]), 0);
+            self->home_speed[3] = -self->default_home_speed +  getJointSpeed((rpos[4] - rpos[3]), 0);
+            self->home_speed[4] = -self->default_home_speed - getJointSpeed((rpos[4] - rpos[3]), 0);
             if (SEA_trig[3] == 1 && SEA_trig[4] == 1) {
               printf("    [ELBOW] Home step 2 done\r\n");
               home_state = ELBOW3;
@@ -251,9 +262,9 @@ reactor HomeController(sample_period: time = 20 ms) {
             }
             break;
           case ELBOW3:           //   Then, home with the rotary direction
-            self->home_speed[3] = -get_speed(rpos[3], 0) + 1.2*get_speed((rpos[4] - rpos[3]), 0);
-            self->home_speed[4] = -get_speed(rpos[4], 0) +  -1.2*get_speed((rpos[4] - rpos[3]), 0);
-            if (absf(rpos[3]) < 0.01 && absf(rpos[4]) < 0.01) {
+            self->home_speed[3] = -getJointSpeed(rpos[3], 0) + getJointSpeed((rpos[4] - rpos[3]), 0);
+            self->home_speed[4] = -getJointSpeed(rpos[4], 0) - getJointSpeed((rpos[4] - rpos[3]), 0);
+            if (absf(rpos[3]) < self->pos_close_threshold && absf(rpos[4]) < self->pos_close_threshold) {
               printf("    [ELBOW] Home step 3 done\r\n");
               home_state = ELBOW4;
               self->home_speed[3] = 0;
@@ -278,8 +289,8 @@ reactor HomeController(sample_period: time = 20 ms) {
           
             
           case SHOULDER1:           // Home rotation axis of shoulder joint
-            self->home_speed[1] = -25 +  1.1*get_speed((rpos[2] - rpos[1]), 0);
-            self->home_speed[2] = -25 + -1.1*get_speed((rpos[2] - rpos[1]), 0);
+            self->home_speed[1] = -self->default_home_speed + getJointSpeed((rpos[2] - rpos[1]), 0);
+            self->home_speed[2] = -self->default_home_speed - getJointSpeed((rpos[2] - rpos[1]), 0);
             if (SEA_trig[1] == 1 && SEA_trig[2] == 1) {
               printf("    [SHOULDER] Home step 1 done\r\n");
               home_state = SHOULDER2;
@@ -288,9 +299,9 @@ reactor HomeController(sample_period: time = 20 ms) {
             }
             break;
           case SHOULDER2:           // Return rotation axis of shoulder joint to center
-            self->home_speed[1] = -get_speed(rpos[1], 0) +   1.2*get_speed((rpos[2] - rpos[1]), 0);
-            self->home_speed[2] = -get_speed(rpos[2], 0) +  -1.2*get_speed((rpos[2] - rpos[1]), 0);
-            if (absf(rpos[1]) < 0.01 && absf(rpos[2]) < 0.01) {
+            self->home_speed[1] = -getJointSpeed(rpos[1], 0) + getJointSpeed((rpos[2] - rpos[1]), 0);
+            self->home_speed[2] = -getJointSpeed(rpos[2], 0) - getJointSpeed((rpos[2] - rpos[1]), 0);
+            if (absf(rpos[1]) < self->pos_close_threshold && absf(rpos[2]) < self->pos_close_threshold) {
               printf("    [SHOULDER] Home step 2 done\r\n");
               home_state = SHOULDER3;
               self->home_speed[1] = 0;
@@ -300,7 +311,7 @@ reactor HomeController(sample_period: time = 20 ms) {
 
 
           case SHOULDER3:           // Home bottom rotation joint
-            self->home_speed[0] = -25;
+            self->home_speed[0] = -self->default_home_speed;
             if (SEA_trig[0] == 1) {
               printf("    [SHOULDER] Home step 3 done\r\n");
               ref[0] = current_pos[0]->value + (1/10) * sea_pos[0]->value + 3.14;
@@ -308,8 +319,8 @@ reactor HomeController(sample_period: time = 20 ms) {
             }
             break;
           case SHOULDER4:           // Return bottom rotation joint to center
-            self->home_speed[0] = -get_speed(rpos[0], 0);
-            if (absf(rpos[0]) < 0.01) {
+            self->home_speed[0] = -getJointSpeed(rpos[0], 0);
+            if (absf(rpos[0]) < self->pos_close_threshold) {
               printf("    [SHOULDER] Home step 4 done\r\n");
               self->home_speed[0] = 0;
               home_state = SHOULDER5;
@@ -339,9 +350,12 @@ reactor HomeController(sample_period: time = 20 ms) {
         }
       }
       // Set the output
+      printf("[Home] Motor speeds: ");
       for(int i=0; i<7; i++) {
+        printf("%d ", ((int) (self->home_speed[i] * 1000.0)));
         lf_set(motor_speed[i], self->home_speed[i]);
       }
+      printf("\r\n");
       lf_set(is_home, _is_home);
     }
   =}

@@ -4,7 +4,7 @@
 #define __MOTOR_CONFIG_H
 typedef struct { /* __MOTOR_CONFIG_H */
     // Base Info
-    int dir;                // Motor direction
+    int dir;                // Motor direction - maps motor direction to output sproket direction. Affected by gear trains.
     float max_speed;          // max motor speed in rad/s
 
     // Encoder Into
@@ -25,7 +25,7 @@ static Motor_Config motor0_config = {
     1,          // dir              - Motor direction
     0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s // APPLY THESE BEFORE GEAR REDUCTION
     23040,      // qdec_cpr         - motor encoder count per rotation
-    8000,       // qdec_cpr         - motor encoder count per rotation
+    22252,       // sea_cpr          - sea encoder count per rotation // see sea encoder scratch spreadsheet for derivation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
     -0.5,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
@@ -37,7 +37,7 @@ static Motor_Config motor1_config = {
     1,          // dir              - Motor direction
     0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
     23040,      // qdec_cpr         - motor encoder count per rotation
-    8000,       // sea_cpr          - sea encoder count per rotation
+    22252,       // sea_cpr          - sea encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
     0.3,        // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
@@ -49,7 +49,7 @@ static Motor_Config motor2_config = {
     1,          // dir              - Motor direction
     0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
     23040,      // qdec_cpr         - motor encoder count per rotation
-    8000,       // sea_cpr          - sea encoder count per rotation
+    22252,       // sea_cpr          - sea encoder count per rotation
     20.0,       // sea_gear_ratio   - sea motor gear ratio
     -0.15,      // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
@@ -62,10 +62,10 @@ static Motor_Config motor2_config = {
 
 // --------------------------------------- Elbow joint --------------------------------------- 
 static Motor_Config motor3_config = {
-    1,          // dir              - Motor direction
+    -1, //1,          // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     23040,      // qdec_cpr         - motor encoder count per rotation
-    8000,       // sea_cpr          - sea encoder count per rotation
+    22252,       // sea_cpr          - sea encoder count per rotation
     13.0,       // sea_gear_ratio   - sea motor gear ratio
     2,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
@@ -74,10 +74,10 @@ static Motor_Config motor3_config = {
 
 
 static Motor_Config motor4_config = {
-    1,          // dir              - Motor direction
+    -1, //1,          // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     23040,      // qdec_cpr         - motor encoder count per rotation
-    8000,       // sea_cpr          - sea encoder count per rotation
+    22252,       // sea_cpr          - sea encoder count per rotation
     15.0,       // sea_gear_ratio   - sea motor gear ratio
     0,         // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
@@ -93,7 +93,7 @@ static Motor_Config motor5_config = {
     -1,         // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     23040,      // qdec_cpr         - motor encoder count per rotation
-    8000,       // sea_cpr          - sea encoder count per rotati--1---on
+    22252,       // sea_cpr          - sea encoder count per rotati--1---on
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
     0.3,        // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
@@ -105,7 +105,7 @@ static Motor_Config motor6_config = {
     -1,         // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     23040,      // qdec_cpr         - motor encoder count per rotation
-    8000,       // sea_cpr          - sea encoder count per rotation
+    22252,       // sea_cpr          - sea encoder count per rotation
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
     -0.2,       // sea_offset       - sea reset offset
     1.0,        // speed_ratio      - motor speed ration 
