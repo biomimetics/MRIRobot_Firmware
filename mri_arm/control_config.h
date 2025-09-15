@@ -17,8 +17,8 @@ typedef struct {
 // --------------------------------------- Base joint --------------------------------------- 
 static PID_Config pos_pid_config_0 = {
     10.0, // kp
-    0.00, // kd
-    0.00, // ki
+    0.10, // kd
+    0.01, // ki
     10.0,
     10.0 
   };
@@ -28,16 +28,16 @@ static PID_Config pos_pid_config_0 = {
 // --------------------------------------- Shoulder joint -----------------------------------
 static PID_Config pos_pid_config_1 = {
     10.0, // kp
-    0.00, // kd
-    0.00, // ki
+    0.10, // kd
+    0.01, // ki
     10.0,
     10.0 
   };
 
 static PID_Config pos_pid_config_2 = {
     10.0, // kp
-    0.00, // kd
-    0.00, // ki
+    0.10, // kd
+    0.01, // ki
     10.0,
     10.0 
   };
@@ -48,16 +48,16 @@ static PID_Config pos_pid_config_2 = {
 // --------------------------------------- Elbow joint --------------------------------------- 
 static PID_Config pos_pid_config_3 = {
     10.0, // kp
-    0.00, // kd
-    0.00, // ki
+    0.10, // kd
+    0.01, // ki
     10.0,
     10.0 
   };
 
 static PID_Config pos_pid_config_4 = {
     10.0, // kp
-    0.00, // kd
-    0.00, // ki
+    0.10, // kd
+    0.01, // ki
     10.0,
     10.0 
   };
@@ -68,16 +68,16 @@ static PID_Config pos_pid_config_4 = {
 // --------------------------------------- Wrist joint --------------------------------------- 
 static PID_Config pos_pid_config_5 = {
     10.0, // kp
-    0.00, // kd
-    0.00, // ki
+    0.10, // kd
+    0.01, // ki
     10.0,
     10.0 
   };
 
 static PID_Config pos_pid_config_6 = {
     10.0, // kp
-    0.00, // kd
-    0.00, // ki
+    0.10, // kd
+    0.01, // ki
     10.0,
     10.0 
   };
@@ -104,7 +104,7 @@ static PID_Config* pos_pid_configs[7] = {
 
 // --------------------------------------- Base joint --------------------------------------- 
 static PID_Config vel_pid_config_0 = {
-    0.1, // kp
+    0.001, // kp
     0.000, // kd
     0.000, // ki
     10.0,
@@ -115,7 +115,7 @@ static PID_Config vel_pid_config_0 = {
 
 // --------------------------------------- Shoulder joint -----------------------------------
 static PID_Config vel_pid_config_1 = {
-    0.1, // kp
+    0.001, // kp
     0.000, // kd
     0.000, // ki
     10.0,
@@ -123,7 +123,7 @@ static PID_Config vel_pid_config_1 = {
   };
 
 static PID_Config vel_pid_config_2 = {
-    0.1, // kp
+    0.001, // kp
     0.000, // kd
     0.000, // ki
     10.0,
@@ -135,7 +135,7 @@ static PID_Config vel_pid_config_2 = {
 
 // --------------------------------------- Elbow joint --------------------------------------- 
 static PID_Config vel_pid_config_3 = {
-    0.1, // kp
+    0.001, // kp
     0.000, // kd
     0.000, // ki
     10.0,
@@ -143,7 +143,7 @@ static PID_Config vel_pid_config_3 = {
   };
 
 static PID_Config vel_pid_config_4 = {
-    0.1, // kp
+    0.001, // kp
     0.000, // kd
     0.000, // ki
     10.0,
@@ -155,7 +155,7 @@ static PID_Config vel_pid_config_4 = {
 
 // --------------------------------------- Wrist joint --------------------------------------- 
 static PID_Config vel_pid_config_5 = {
-    0.1, // kp
+    0.001, // kp
     0.000, // kd
     0.000, // ki
     10.0,
@@ -163,7 +163,7 @@ static PID_Config vel_pid_config_5 = {
   };
 
 static PID_Config vel_pid_config_6 = {
-    0.1, // kp
+    0.001, // kp
     0.000, // kd
     0.000, // ki
     10.0,

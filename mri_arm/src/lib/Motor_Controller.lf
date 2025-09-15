@@ -16,10 +16,11 @@ preamble {=
   #include <../../../sm_config.h>
   #include <../../../joint_config.h>
 
-  #define PRINT_MOTOR_CONTROLLER 1
+  #define PRINT_MOTOR_CONTROLLER 0
   //state print_motor_controller: bool = true
 
-  #define USE_JOINTSPACE_CONTROLLERS 0 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
+  // setting this to zero wasn't working as expected. find out why!
+  #define USE_JOINTSPACE_CONTROLLERS 1 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
   #define USE_SEA_ANGLE_WITH_POSITION_CONTROL 0
 =}
 
@@ -177,14 +178,14 @@ reactor MotorController(refresh_period: time = 10 ms) {
   =}
 
   reaction(target_pos_ext) -> pcontrol_group.target_states {=
+    //printf("in target_pos_ext reaction on motor controller side... \r\n");
     if(self->target_mode_ == MODE_EXT) {
+      //printf("target_pos_ext:\r\n");
       for(int i=0; i<7; i++){
+        //printf("%d, ", (int)(target_pos_ext[i]->value * 1000));
         //self->target_pos[i] = target_pos_ext[i]->value;
         if (USE_JOINTSPACE_CONTROLLERS){
           self->target_joint_pos[i] = target_pos_ext[i]->value;
-        }
-        else{
-          self->target_motor_pos[i] = target_pos_ext[i]->value;
         }
       }
 
@@ -315,7 +316,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
       if (PRINT_MOTOR_CONTROLLER){printf("\r\n");}
     }
     else{
-      if (PRINT_MOTOR_CONTROLLER){printf("enable motor speed is off!\r\n");}
+      //if (PRINT_MOTOR_CONTROLLER){printf("enable motor speed is off!\r\n");}
     }
 
   =}

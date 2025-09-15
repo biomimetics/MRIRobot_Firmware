@@ -25,16 +25,16 @@ preamble {=
 =}
 
 reactor ROSInterface (update_period: time = 10 ms){
-  //input[7] current_pos: float // unused!
-  //input[7] joint_pos: float // unused!
-  //input[7] sea_pos: float // unused!
-  //output[7] target_state: int // unused!
 
   //inputs from motor controller to send back to ROS
-  input[7] current_joint: float // position of joints from usm encoders
-  input[7] current_joint_sea: float // position of seas from sea encoders
+  input[7] current_motor_position: float // position of motors from usm encoders
+  input[7] current_motor_velocity: float // velocity of motors from usm encoders
 
-  //input[7] current_joint_vel: float // position of joints from usm encoders
+  input[7] current_sea_position: float // position of seas from sea encoders
+  //input[7] current_sea_velocity: float // velocity of seas from sea encoders
+
+  input[7] motor_cmd_speed: float // target velocities of motors from motor controller
+  input[7] motor_duty_cycle: float // target velocities of motors from motor controller
 
   // outputs for sending to motor controller
   output[7] target_pos_ext: float
@@ -95,8 +95,23 @@ reactor ROSInterface (update_period: time = 10 ms){
 
     int loopback_offset[7]= {0, 0, 0, 0, 0, 0, 0};
 
-    int enc_data[7];
-    int sea_data[7];
+    /* // compressed to ints for sending to ROS. 
+    Current position 
+    Current velocity
+    Current sea position
+    Current sea velocity (not sure if really useful)
+    Target position (echoed back from ros interface)
+    Target velocity
+    USM Speeds 
+    */
+
+    int encoder_position[7];
+    int encoder_velocity[7];
+
+    int sea_position[7];
+
+    int usm_motor_speeds[7];
+    int usm_duty_cycle[7];
 
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
@@ -239,11 +254,32 @@ reactor ROSInterface (update_period: time = 10 ms){
       
     }
 
+    /*
     void handle_usbc_transmit_encoders(){
       int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
-            enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6], 
-            sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6],
+            encoder_position[0], encoder_position[1], encoder_position[2], encoder_position[3], encoder_position[4], encoder_position[5], encoder_position[6], 
+            sea_position[0], sea_position[1], sea_position[2], sea_position[3], sea_position[4], sea_position[5], sea_position[6],
             loopback_offset[0], loopback_offset[1], loopback_offset[2], loopback_offset[3], loopback_offset[4], loopback_offset[5], loopback_offset[6]);
+      HAL_UART_Transmit_DMA(&DMA_UART, tx_buffer, num);
+    }
+    */
+
+    /*
+    int encoder_position[7];
+    int encoder_velocity[7];
+
+    int sea_position[7];
+
+    int usm_motor_speeds[7];
+    int usm_duty_cycle[7];
+    */
+    void handle_usbc_transmit_encoders(){
+      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+        encoder_position[0], encoder_position[1], encoder_position[2], encoder_position[3], encoder_position[4], encoder_position[5], encoder_position[6], 
+        encoder_velocity[0], encoder_velocity[1], encoder_velocity[2], encoder_velocity[3], encoder_velocity[4], encoder_velocity[5], encoder_velocity[6], 
+        sea_position[0], sea_position[1], sea_position[2], sea_position[3], sea_position[4], sea_position[5], sea_position[6],
+        usm_motor_speeds[0], usm_motor_speeds[1], usm_motor_speeds[2], usm_motor_speeds[3], usm_motor_speeds[4], usm_motor_speeds[5], usm_motor_speeds[6],
+        usm_duty_cycle[0], usm_duty_cycle[1], usm_duty_cycle[2], usm_duty_cycle[3], usm_duty_cycle[4], usm_duty_cycle[5], usm_duty_cycle[6]);
       HAL_UART_Transmit_DMA(&DMA_UART, tx_buffer, num);
     }
 
@@ -269,8 +305,8 @@ reactor ROSInterface (update_period: time = 10 ms){
       }
 
       if (PRINT_ROS)  {
-        //printf("got [JOINT VEL]: \r\n");
-        //print_resp(joint_vel_array);
+        printf("got [JOINT VEL]: \r\n");
+        print_resp(joint_vel_array);
       }
     }
 
@@ -343,8 +379,8 @@ reactor ROSInterface (update_period: time = 10 ms){
 
   reaction(trigger_print) {=
     if (PRINT_ROS){
-      printf("encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", enc_data[0], enc_data[1], enc_data[2], enc_data[3], enc_data[4], enc_data[5], enc_data[6]);
-      printf("sea encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", sea_data[0], sea_data[1], sea_data[2], sea_data[3], sea_data[4], sea_data[5], sea_data[6]);
+      printf("encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", encoder_position[0], encoder_position[1], encoder_position[2], encoder_position[3], encoder_position[4], encoder_position[5], encoder_position[6]);
+      printf("sea encoders: %d, %d, %d, %d, %d, %d, %d.\r\n", sea_position[0], sea_position[1], sea_position[2], sea_position[3], sea_position[4], sea_position[5], sea_position[6]);
     }
     
   =}
@@ -352,20 +388,58 @@ reactor ROSInterface (update_period: time = 10 ms){
     # Input reactions
     #####*/
 
+  /*
+  input[7] current_motor_position: float // position of motors from usm encoders
+  input[7] current_motor_velocity: float // velocity of motors from usm encoders
+
+  input[7] current_sea_position: float // position of seas from sea encoders
+  //input[7] current_sea_velocity: float // velocity of seas from sea encoders
+
+  input[7] target_motor_position: float // target positions of motors from motor controller
+  input[7] motor_cmd_speed: float // target velocities of motors from motor controller
+  input[7] motor_duty_cycle: float // target velocities of motors from motor controller
+
+  int encoder_position[7];
+  int encoder_velocity[7];
+
+  int sea_position[7];
+
+  int usm_motor_speeds[7];
+  int usm_duty_cycle[7];
+  */
+
   // Update our current USM position to send to ROS
-  reaction(current_joint) {=
+  reaction(current_motor_position) {=
     for (int i=0; i<7; i++) {
-      enc_data[i] = (int)(current_joint[i]->value * 1000) * motor_dir[i];
+      encoder_position[i] = (int)(current_motor_position[i]->value * 1000) * motor_dir[i];
+    }
+  =}
+
+  reaction(current_motor_velocity) {=
+    for (int i=0; i<7; i++) {
+      encoder_velocity[i] = (int)(current_motor_velocity[i]->value * 1000) * motor_dir[i];
     }
   =}
 
   // Update our current sea position to send to ROS
-  reaction(current_joint_sea) {=
+  reaction(current_sea_position) {=
     for (int i=0; i<7; i++) {
-      sea_data[i] = (int)(current_joint_sea[i]->value * 1000);
+      sea_position[i] = (int)(current_sea_position[i]->value * 1000);
     }
   =}
 
+  reaction(motor_cmd_speed) {=
+    for (int i=0; i<7; i++) {
+      usm_motor_speeds[i] = (int)(motor_cmd_speed[i]->value * 1000);
+    }
+  =}
+
+  reaction(motor_duty_cycle) {=
+    for (int i=0; i<7; i++) {
+      usm_duty_cycle[i] = (int)(motor_duty_cycle[i]->value * 1000);
+    }
+  =}
+  
   /*##### 
     # Output reactions
     #####*/
@@ -427,6 +501,8 @@ reactor ROSInterface (update_period: time = 10 ms){
     // set target_poisitons and velocities as well as sea offsets
     
     for (int i=0; i<7; i++) {
+      //printf("self->scaled_joint_pos: \r\n");
+      //print_resp(self->scaled_joint_pos);
       lf_set(target_pos_ext[i], self->scaled_joint_pos[i]);   // Update target positions
       lf_set(target_vel_ext[i], self->scaled_joint_vel[i]);   // Update target velocities
       //printf("ROS_Interface: Sending target_vel_ext[%d] = %d (from scaled_joint_vel = %d)\r\n", 

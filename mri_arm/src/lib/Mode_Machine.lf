@@ -30,7 +30,7 @@ preamble {=
   */
 =}
 
-reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 2000 ms){
+reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 5000 ms){
     input set_mode_change: MODE_ENUM 
     input is_homing_finished: bool
 
