@@ -113,6 +113,9 @@ reactor ROSInterface (update_period: time = 10 ms){
     int usm_motor_speeds[7];
     int usm_duty_cycle[7];
 
+    // self->scaled_joint_pos[i]
+    int target_joint_pos[7];
+
     // We have an inFlight indicator if the DMA is currently sending data
     static volatile int inFlight = 0;
 
@@ -274,12 +277,13 @@ reactor ROSInterface (update_period: time = 10 ms){
     int usm_duty_cycle[7];
     */
     void handle_usbc_transmit_encoders(){
-      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
         encoder_position[0], encoder_position[1], encoder_position[2], encoder_position[3], encoder_position[4], encoder_position[5], encoder_position[6], 
         encoder_velocity[0], encoder_velocity[1], encoder_velocity[2], encoder_velocity[3], encoder_velocity[4], encoder_velocity[5], encoder_velocity[6], 
         sea_position[0], sea_position[1], sea_position[2], sea_position[3], sea_position[4], sea_position[5], sea_position[6],
         usm_motor_speeds[0], usm_motor_speeds[1], usm_motor_speeds[2], usm_motor_speeds[3], usm_motor_speeds[4], usm_motor_speeds[5], usm_motor_speeds[6],
-        usm_duty_cycle[0], usm_duty_cycle[1], usm_duty_cycle[2], usm_duty_cycle[3], usm_duty_cycle[4], usm_duty_cycle[5], usm_duty_cycle[6]);
+        usm_duty_cycle[0], usm_duty_cycle[1], usm_duty_cycle[2], usm_duty_cycle[3], usm_duty_cycle[4], usm_duty_cycle[5], usm_duty_cycle[6],
+        target_joint_pos[0], target_joint_pos[1], target_joint_pos[2], target_joint_pos[3], target_joint_pos[4], target_joint_pos[5], target_joint_pos[6]);
       HAL_UART_Transmit_DMA(&DMA_UART, tx_buffer, num);
     }
 
@@ -503,6 +507,7 @@ reactor ROSInterface (update_period: time = 10 ms){
     for (int i=0; i<7; i++) {
       //printf("self->scaled_joint_pos: \r\n");
       //print_resp(self->scaled_joint_pos);
+      target_joint_pos[i] = (int) (self->scaled_joint_pos[i] * 1000);
       lf_set(target_pos_ext[i], self->scaled_joint_pos[i]);   // Update target positions
       lf_set(target_vel_ext[i], self->scaled_joint_vel[i]);   // Update target velocities
       //printf("ROS_Interface: Sending target_vel_ext[%d] = %d (from scaled_joint_vel = %d)\r\n", 

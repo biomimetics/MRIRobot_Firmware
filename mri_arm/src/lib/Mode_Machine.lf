@@ -30,7 +30,7 @@ preamble {=
   */
 =}
 
-reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 5000 ms){
+reactor ModeMachine (slow_refresh_period: time = 20 ms, status_refresh_period: time = 5000 ms){
     input set_mode_change: MODE_ENUM 
     input is_homing_finished: bool
 
@@ -45,7 +45,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     output force_disable_motor_pins: bool
 
     // timer for sending updates depending on the current mode
-    //timer system_tick(0 ms, refresh_period) // unused!
+
     timer slow_system_tick(0 ms, slow_refresh_period)
     timer slow_status_tick(0 ms, status_refresh_period)
 

@@ -17,7 +17,7 @@ preamble {=
   #define DO_DEBUG_PWM_SWEEP 0
 
   // only these two consts are needed if output pin is reliably 3.3V at 100% duty cycle.
-  #define ARR_PERIOD 10000 //2000 //2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
+  #define ARR_PERIOD 2000 //2000 //2000 //2000 //10000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
   #define PWM_RPM_MAX 250.0 // 250 RPM
   #define PWM_RAD_PER_SEC_MAX 26.17993875 // 250 RPM = 26.1799... rad/s
   #define PWM_DEG_PER_SEC_MAX 1500.0 // 250 RPM = 1500 deg/s
