@@ -180,9 +180,9 @@ reactor MotorController(refresh_period: time = 10 ms) {
   reaction(target_pos_ext) -> pcontrol_group.target_states {=
     //printf("in target_pos_ext reaction on motor controller side... \r\n");
     if(self->target_mode_ == MODE_EXT) {
-      //printf("target_pos_ext:\r\n");
+      printf("target_pos_ext:\r\n");
       for(int i=0; i<7; i++){
-        //printf("%d, ", (int)(target_pos_ext[i]->value * 1000));
+        printf("%d, ", (int)(target_pos_ext[i]->value * 1000));
         //self->target_pos[i] = target_pos_ext[i]->value;
         /*
         if (USE_JOINTSPACE_CONTROLLERS){
@@ -190,6 +190,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
         }*/
         self->target_joint_pos[i] = target_pos_ext[i]->value;
       }
+      printf("\r\n");
 
       convertJointToMotorSpace(self->target_joint_pos, self->target_motor_pos);
       
@@ -208,6 +209,7 @@ reactor MotorController(refresh_period: time = 10 ms) {
     if (self->target_mode_ == MODE_INT) {
       for(int i=0; i<7; i++){
         //self->speed_spc[i] = target_vel_int[i]->value;
+        
         self->target_motor_vel[i] = target_vel_int[i]->value; // sets them directly here, motor by motor, no joint
         for (int i = 0; i<7; i++){lf_set(vcontrol_group.target_states[i], self->target_motor_vel[i]);}
       }
@@ -219,9 +221,12 @@ reactor MotorController(refresh_period: time = 10 ms) {
   reaction(target_vel_ext) -> vcontrol_group.target_states {=
     // save target_joint_vel from the input
     if (self->target_mode_ == MODE_EXT) {
+      printf("tartget_vel_ext:\r\n");
       for (int i = 0; i<7; i++){
         self->target_joint_vel[i] = target_vel_ext[i]->value;
+        printf("%d, ", (int)(target_vel_ext[i]->value * 1000));
       }
+      printf("\r\n");
       convertJointToMotorSpace(self->target_joint_vel, self->target_motor_vel);
 
       if (USE_JOINTSPACE_CONTROLLERS){
