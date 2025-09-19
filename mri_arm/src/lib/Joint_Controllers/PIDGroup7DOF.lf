@@ -14,7 +14,7 @@ preamble {=
 
   #include <math.h>
 
-  #include <../../../control_config.h>
+  #include <../../../c_include/control_config.h>
 
   #define PRINT_PID_GROUP 0
   #define printcnt_lim 5

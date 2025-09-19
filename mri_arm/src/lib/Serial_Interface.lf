@@ -1,0 +1,525 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: ["/c_include/stm_packet.h", "/c_include/stm_packet.c"],
+  cmake-include: ["/SerialCMakeLists.txt"]
+}
+// 
+preamble {=
+  #include "stm32f4xx_hal.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
+  #include <stdio.h>
+  #include <string.h>
+  #include <stdlib.h>
+  #include <ctype.h>
+
+  //#include <../../../c_include/stm_packet.h>
+  #include "stm_packet.h"
+  #include <../../../c_include/sm_config.h>
+  #include <../../../c_include/joint_config.h>
+
+  #define DMA_TX_BUFFER_SIZE 600 //256//(STM_BUFFER_SIZE) //200
+  #define DMA_RX_BUFFER_SIZE 600 //256//(STM_BUFFER_SIZE) //200
+  //#define DMA_UART huart6 // was huart1
+
+  #define PRINT_SERIAL 1
+=}
+
+reactor SerialInterface (update_period: time = 10 ms){
+
+  input behavior_mode: int
+
+  //inputs from motor controller to send back to ROS
+  input[7] current_motor_position: float // position of motors from usm encoders
+  input[7] current_motor_velocity: float // velocity of motors from usm encoders
+
+  input[7] current_sea_position: float // position of seas from sea encoders
+  //input[7] current_sea_velocity: float // velocity of seas from sea encoders
+
+  input[7] motor_cmd_speed: float // target velocities of motors from motor controller
+  input[7] motor_duty_cycle: float // target velocities of motors from motor controller
+
+  // outputs for sending to motor controller
+  output[7] target_pos_ext: float
+  output[7] target_vel_ext: float
+
+  output[7] sea_offset: float
+  output[7] sea_lim: float
+
+  // outputs for sending state changes
+  output set_mode_change: MODE_ENUM
+
+
+  // trigger timers
+  //timer trigger_send(0 ms, send_period) // unused!
+  timer trigger_update(0 ms, update_period)
+  timer trigger_test(0 ms, 2000 ms)
+  timer trigger_print(0 ms, 1000 ms)
+
+  timer timer_idle_reset(0 ms, 100 ms)
+  state set_command_failed_counter: int = 0 //
+  state set_command_failed_counter_max: int = 1000 //20 // TODO: 20 counts * 20ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
+  state last_mode_change: MODE_ENUM = 0 // idle
+
+  state scaled_joint_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_joint_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_sea_offset: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_sea_lim: float[7] = {1000, 1000, 1000, 1000, 1000, 1000, 1000}
+
+
+  // Data in format:      'p' + 6x[fp32] -> 25 bytes
+  // Data out format:     'e' + 6x[fp32] -> 25 bytes
+  preamble {=
+
+    extern UART_HandleTypeDef huart1;        // usb-c tied uart for computer communication
+    extern UART_HandleTypeDef huart4; // used for ROS interface
+    extern UART_HandleTypeDef huart6; // used for ROS interface if huart4 is misbehaving
+
+    extern DMA_HandleTypeDef hdma_usart1_rx;
+    extern DMA_HandleTypeDef hdma_usart1_tx;
+
+
+    // +---------------------------------------------------+
+    // | Receiving and transmiting buffers.
+    // +---------------------------------------------------+
+    /*
+    static uint8_t rx_buffer[DMA_RX_BUFFER_SIZE];
+    uint8_t rx_copy_buffer[DMA_RX_BUFFER_SIZE]; // used for storing internal copy of the rx_buffer
+
+    static uint8_t tx_buffer[DMA_TX_BUFFER_SIZE];
+    */
+    char rx_buffer[DMA_RX_BUFFER_SIZE];
+    char rx_copy_buffer[DMA_RX_BUFFER_SIZE]; // used for storing internal copy of the rx_buffer
+
+    char tx_buffer[DMA_TX_BUFFER_SIZE];
+
+    uint16_t RxDataLen = 0; // received data length set by ReceiveToIdle_IT's callback
+
+    // +---------------------------------------------------+
+    // | Receiving, transmiting, and command packet structures.
+    // +---------------------------------------------------+
+    STM_Packet transmit_packet = {
+        .behavior_mode = 0, 
+        .positions = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .velocities = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .sea_positions = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .extra = {0.0},
+        .time_stamp = 0
+    };
+
+    STM_Packet receive_packet = {
+        .behavior_mode = 0, 
+        .positions = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .velocities = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .sea_positions = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .extra = {0.0},
+        .time_stamp = 0
+    };
+
+    STM_Packet command_packet = {
+        .behavior_mode = 0, 
+        .positions = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .velocities = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .sea_positions = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .extra = {0.0},
+        .time_stamp = 0
+    };
+
+    // +---------------------------------------------------+
+    // | Direction conversions that need to be depreciated...
+    // +---------------------------------------------------+
+    float joint_dir[7]= {-1, 1, -1, 1, -1, 1, 1}; // {1, 1, 1, 1, 1, 1, 1};
+    float motor_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map robot motor axes (from encoders) to ROS motor axes. Should be redundant with motor_configs[i]->dir
+
+
+    // +---------------------------------------------------+
+    // | Local copies of inputs to be sent down the serial connection
+    // +---------------------------------------------------+
+    int current_behavior_mode_ = 0;
+    float encoder_position_[7];
+    float encoder_velocity_[7];
+
+    float sea_position_[7];
+
+    // for the extra info we need on the computer side!
+    float target_joint_pos_[7];
+    float usm_motor_speeds_[7];
+    float usm_duty_cycle_copy_[7];
+    float extra_array_[EXTRA_LENGTH]; // size should be reflected in EXTRA_LENGTH in stm_packet.h
+
+    // +---------------------------------------------------+
+    // | Flags set in DMA callbacks to trigger behavior changes in the main update loop
+    // +---------------------------------------------------+
+    bool flag_update_set_mode_change = false;
+    bool flag_new_command_received = false;
+
+    // +---------------------------------------------------+
+    // | Init functions
+    // +---------------------------------------------------+
+    void configure_gpio_switch_pins(){
+      /* Configure Switch pins : PC1 */
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOH_CLK_ENABLE();
+      __HAL_RCC_GPIOC_CLK_ENABLE();
+      GPIO_InitStruct.Pin = GPIO_PIN_1;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_1;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+    }
+
+    // +---------------------------------------------------+
+    // | Helper functions
+    // +---------------------------------------------------+
+
+    void print_resp(float* data) {
+      printf("      [%d, %d, %d, %d, %d, %d, %d]\r\n", 
+                        (int)(data[0]*1000), (int)(data[1]*1000), (int)(data[2]*1000), (int)(data[3]*1000), 
+                        (int)(data[4]*1000), (int)(data[5]*1000), (int)(data[6]*1000));
+    }
+
+
+    // +---------------------------------------------------+
+    // | UART DMA Callback functions
+    // +---------------------------------------------------+
+
+    // UART receive callback
+    void HAL_UART_RxCallback1(){
+    } // this needs to be defined to build correctly
+
+    void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+      //printf("In HAL_UARTEx_RxEventCallback\r\n");
+      //printf("rx_buffer before memmove: %s\r\n", rx_buffer);
+
+      RxDataLen = Size; // RxDataLen is the size of the received data
+      //printf("RxDataLen: %d", RxDataLen);
+      memmove(rx_copy_buffer, rx_buffer, sizeof(rx_buffer)); // copy over the full size of the buffer
+
+      if (PRINT_SERIAL) printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
+
+      bool result = deserialize_packet(rx_copy_buffer,  &receive_packet);
+      //int result = decode_packet_cobs(rx_copy_buffer, RxDataLen - 1, &receive_packet); // len includes delimiter, exclude it here
+
+      //print_packet(&receive_packet);
+
+      if (result) {
+        if (PRINT_SERIAL){
+          printf("\nDecoded packet:\n");
+          print_packet(&receive_packet);
+        }
+        command_packet = receive_packet; // move the received packet into the command packet so it can be used for sending commands
+        flag_new_command_received = true; // flag that there's a new command to be processed by a reaction
+      } else {
+          printf("\nFailed to decode received packet!\n");
+      }
+      
+      HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
+    }
+
+
+    // UART transmit callback
+    void HAL_UART_TxCallback1() {
+    }
+
+    /*##### 
+    # helper functions for handling inputs from serial connection
+    #####*/
+
+    void set_joint_pos_data(float* joint_pos_array) {
+      for (int i=0; i<7; i++) {
+        joint_pos_array[i] = joint_dir[i] * command_packet.positions[i];
+      }
+
+      if (PRINT_SERIAL)  {
+        printf("got [JOINT POS]: \r\n");
+        print_resp(joint_pos_array);
+      }
+    }
+
+    // When the rx_buffer command is a [set joint velocity] command
+    void set_joint_vel_data(float* joint_vel_array) {
+      for (int i=0; i<7; i++) {
+        joint_vel_array[i] = joint_dir[i] * command_packet.velocities[i];
+      }
+
+      if (PRINT_SERIAL)  {
+        printf("got [JOINT VEL]: \r\n");
+        print_resp(joint_vel_array);
+      }
+    }
+
+    // Functions for setting relevant info for seas
+    void set_sea_offset_data(float* sea_offset_array) {
+      for (int i=0; i<7; i++) {
+        if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
+          sea_offset_array[i] = 0;
+        } else {
+          sea_offset_array[i] = command_packet.sea_positions[i];
+        }
+      }
+    }
+
+    // 
+    void set_mode_change() {
+      // check if mode is different from current mode, if it's the same don't stage a mode change.
+      if (command_packet.behavior_mode == current_behavior_mode_) 
+        flag_update_set_mode_change = false;
+      else{
+        // if different, see if it's valid and if so stage the change.
+        if (command_packet.behavior_mode == 0) { // set mode to idle
+          flag_update_set_mode_change = true;
+        } 
+        else if (command_packet.behavior_mode == 1) { // set mode to home
+          flag_update_set_mode_change = true;
+        } 
+        else if (command_packet.behavior_mode == 2) { // set mode to run with position inputs
+          flag_update_set_mode_change = true;
+        } 
+        else if (command_packet.behavior_mode == 3) { // set mode to run with velocity inputs
+          flag_update_set_mode_change = true;
+        }
+        else {
+          flag_update_set_mode_change = true;
+          command_packet.behavior_mode = 0;
+          printf("!! Invalid desired_state in receive_transmit_update in ROS_Interface.lf !!\r\n");
+          printf("trigger_mode_change: Did not receive valid char. Got %d, expected 0, 1, 2, or 3.", command_packet.behavior_mode);
+        }
+      }
+    }
+
+    // if new command is avaiable, set the values for it.
+    bool set_newest_command(float* joint_pos_array, float* joint_vel_array, float* sea_offset_array) {
+      // this function seems to work fine
+      if (flag_new_command_received){
+
+        set_joint_pos_data(joint_pos_array);
+        set_joint_vel_data(joint_vel_array);
+        set_sea_offset_data(sea_offset_array);
+        set_mode_change();
+
+        flag_new_command_received = false; // set it to false after the new command is used.
+        return true; // if command is set, return true
+      }
+      return false; // if commands are not set (not updated or checksums are failing), return false
+      
+    }
+
+    void fill_extra_array(){
+      for (int i = 0; i<DOF_NUMBER; i++){
+        extra_array_[i] = target_joint_pos_[i];
+        extra_array_[i+7] = usm_motor_speeds_[i];
+        extra_array_[i+14] = usm_duty_cycle_copy_[i];
+      }
+      return;
+    }
+
+    void handle_transmit_packet(){
+      
+      /*
+      int current_behavior_mode_ = 0;
+      float encoder_position_[7];
+      float encoder_velocity_[7];
+
+      float sea_position_[7];
+
+      // for the extra info we need on the computer side!
+      float target_joint_pos_[7];
+      float usm_motor_speeds_[7];
+      float usm_duty_cycle_copy_[7];
+      float extra_array_[EXTRA_LENGTH]; // size should be reflected in EXTRA_LENGTH in stm_packet.h
+      */
+    
+      // pack the extra array with extra info from robot not usually included in the packet
+      fill_extra_array();
+
+      construct_stm_packet(&transmit_packet,
+        current_behavior_mode_, encoder_position_, encoder_velocity_, 
+        sea_position_, extra_array_, HAL_GetTick()); 
+
+      /*
+      // build the trasmit packet from inputs
+      construct_stm_packet(&transmit_packet,
+        current_behavior_mode_, encoder_position_, encoder_velocity_, 
+        sea_position_, extra_array_, HAL_GetTick()); 
+
+      printf("Sending Packet: ");
+      print_packet_int(&transmit_packet);
+      // encode the packet into the byte array
+      size_t len = encode_packet_cobs(&transmit_packet, tx_buffer);
+      */
+
+      printf("trying to transmit: ");
+      print_packet_int(&transmit_packet);
+      printf("\r\n");
+
+      serialize_packet(&transmit_packet, tx_buffer);
+      //size_t len = sizeof(tx_buffer);
+      // send the encoded packet down the UART line
+      printf("trying to send tx_buffer of size DMA_TX_BUFFER_SIZE(%d): %s\r\n", DMA_TX_BUFFER_SIZE, tx_buffer);
+      HAL_UART_Transmit_DMA(&DMA_UART, tx_buffer, DMA_TX_BUFFER_SIZE);
+    }
+
+    // When the rx_buffer command is a [set joint position] command
+    
+    
+
+    /*##### 
+    # helper functions for testing
+    #####*/
+    // add test data function to simulate ROS interface
+    void RxCallbackTest() {
+    }
+
+  =}
+
+  reaction(startup) {=
+    // Setup UART interfaces
+    // should be done in main.lf
+
+    // Prep ROS bridge DMA recieve
+    HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
+
+    
+
+    configure_gpio_switch_pins();
+
+    for (int i=0; i<7; i++) {
+      self->scaled_sea_lim[i] = joint_configs[i]->lim;
+      self->scaled_sea_offset[i] = 0;
+    }
+      
+  =}
+
+  /*##### 
+    # Input reactions
+    #####*/
+
+  /*
+  int current_behavior_mode_ = 0;
+  float encoder_position_[7];
+  float encoder_velocity_[7];
+
+  float sea_position_[7];
+
+  // for the extra info we need on the computer side!
+  float target_joint_pos_[7];
+  float usm_motor_speeds_[7];
+  float usm_duty_cycle_copy_[7];
+  */
+
+  reaction(behavior_mode){=
+    current_behavior_mode_ = behavior_mode->value;
+  =}
+
+  // Update our current USM position to send to ROS
+  reaction(current_motor_position) {=
+    for (int i=0; i<7; i++) {
+      encoder_position_[i] = (current_motor_position[i]->value) * motor_dir[i];
+    }
+  =}
+
+  reaction(current_motor_velocity) {=
+    for (int i=0; i<7; i++) {
+      encoder_velocity_[i] = (current_motor_velocity[i]->value) * motor_dir[i];
+    }
+  =}
+
+  // Update our current sea position to send to ROS
+  reaction(current_sea_position) {=
+    for (int i=0; i<7; i++) {
+      sea_position_[i] = (current_sea_position[i]->value);
+      printf("sea_position %d: %d\r\n", i, (int)(sea_position_[i] * 1000));
+    }
+  =}
+
+  reaction(motor_cmd_speed) {=
+    for (int i=0; i<7; i++) {
+      usm_motor_speeds_[i] = (motor_cmd_speed[i]->value);
+    }
+  =}
+
+  reaction(motor_duty_cycle) {=
+    for (int i=0; i<7; i++) {
+      usm_duty_cycle_copy_[i] = (motor_duty_cycle[i]->value);
+    }
+  =}
+  
+  /*##### 
+    # Output reactions
+    #####*/
+    
+  reaction receive_transmit_update (trigger_update) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset, sea_lim{=
+
+    // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
+    if (!set_newest_command(self->scaled_joint_pos, self->scaled_joint_vel, self->scaled_sea_offset)){
+      if ((self->last_mode_change == SET_RUN_POS) || (self->last_mode_change == SET_RUN_VEL)){
+        self->set_command_failed_counter += 1;
+      }
+    }
+
+    // handle sending back robot's encoder state
+    handle_transmit_packet();
+
+    //handle_usbc_transmit_encoders(); // TODO: Find out why this has to be done *after* using rx_command_buffer. Very weird. Breaks everything otherwise.
+    
+
+    // handle mode changes if they occur
+    if (flag_update_set_mode_change){
+      if (command_packet.behavior_mode == 0) { // set mode to idle
+        lf_set(set_mode_change, SET_IDLE); // make sure all of these align with defs in mode_enum from sm_config.h!!! 
+        self->last_mode_change = SET_IDLE;
+      } 
+      else if (command_packet.behavior_mode == 1) { // set mode to home
+        lf_set(set_mode_change, SET_HOMING);
+        self->last_mode_change = SET_HOMING;
+      } 
+      else if (command_packet.behavior_mode == 2) { // set mode to run with position inputs
+        lf_set(set_mode_change, SET_RUN_POS);
+        self->last_mode_change = SET_RUN_POS;
+      } 
+      else if (command_packet.behavior_mode == 3) { // set mode to run with velocity inputs
+        lf_set(set_mode_change, SET_RUN_VEL);
+        self->last_mode_change = SET_RUN_VEL;
+      }
+      else {
+        printf("Invalid desired_state in receive_transmit_update in Serial_Interface.lf!\r\n");
+          printf("Received %d but expected one of 0, 1, 2, or 3\r\n", command_packet.behavior_mode);
+      }
+      flag_update_set_mode_change = false;
+    }
+
+    // set target_poisitons and velocities as well as sea offsets
+    
+    for (int i=0; i<7; i++) {
+      //printf("self->scaled_joint_pos: \r\n");
+      //print_resp(self->scaled_joint_pos);
+      target_joint_pos_[i] = (self->scaled_joint_pos[i]);
+      lf_set(target_pos_ext[i], self->scaled_joint_pos[i]);   // Update target positions
+      lf_set(target_vel_ext[i], self->scaled_joint_vel[i]);   // Update target velocities
+      //printf("ROS_Interface: Sending target_vel_ext[%d] = %d (from scaled_joint_vel = %d)\r\n", 
+      //       i, (int)(self->scaled_joint_vel[i] * 1000), (int)(self->scaled_joint_vel[i] * 1000));
+      lf_set(sea_lim[i], self->scaled_sea_lim[i]);      // Update sea offset values
+
+
+      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1));
+      if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
+        lf_set(sea_offset[i], 0);      // Update sea offset values
+      } else {
+        lf_set(sea_offset[i], self->scaled_sea_offset[i]);      // Update sea offset values
+      }
+    }
+
+    
+  =}
+
+}

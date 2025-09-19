@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
   #include <stdlib.h>
   #include <math.h> // need for floating point abs, or fabsf()
-  #include <../../../motor_config.h>
+  #include <../../../c_include/motor_config.h>
 
   #define PRINT_USM 0
   #define DO_DEBUG_PWM_SWEEP 0

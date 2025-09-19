@@ -1,0 +1,2 @@
+set(C_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../c_include)
+target_sources(${LF_MAIN_TARGET} PRIVATE ${C_INCLUDE_DIR}/stm_packet.c)

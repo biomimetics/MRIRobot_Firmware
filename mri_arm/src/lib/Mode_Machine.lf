@@ -12,9 +12,9 @@ preamble {=
   #include "main.h"
   #include <stdio.h>
 
-  #include <../../../motor_config.h>
-  #include <../../../joint_config.h>
-  #include <../../../sm_config.h>
+  #include <../../../c_include/motor_config.h>
+  #include <../../../c_include/joint_config.h>
+  #include <../../../c_include/sm_config.h>
 
   #define PRINT_MODE 0
   /*

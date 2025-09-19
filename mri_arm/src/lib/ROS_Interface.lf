@@ -15,9 +15,9 @@ preamble {=
   #include <stdlib.h>
   #include <ctype.h>
 
-  #include <../../../motor_config.h>
-  #include <../../../joint_config.h>
-  #include <../../../sm_config.h>
+  #include <../../../c_include/motor_config.h>
+  #include <../../../c_include/joint_config.h>
+  #include <../../../c_include/sm_config.h>
 
   #define DMA_TX_BUFFER_SIZE 60
   #define DMA_RX_BUFFER_SIZE 60
@@ -87,44 +87,6 @@ reactor ROSInterface (update_period: time = 10 ms){
     uint8_t rx_command_buffer[DMA_RX_BUFFER_SIZE]; // used for staging a change of command
 
     static uint8_t tx_buffer[DMA_TX_BUFFER_SIZE];
-
-    #define MAX_VALUES 10
-    #define INPUT_BUFFER_SIZE 128
-
-    int s_data[MAX_VALUES];
-    float p_data[MAX_VALUES];
-    float v_data[MAX_VALUES];
-    int s_count = 0;
-    int p_count = 0;
-    int v_count = 0;
-
-    void parse_input(const char *input) {
-        char buffer[INPUT_BUFFER_SIZE];
-        strncpy(buffer, input, INPUT_BUFFER_SIZE);
-        buffer[INPUT_BUFFER_SIZE - 1] = '\0'; // ensure null-termination
-
-        char *token = strtok(buffer, ",");
-        char current_section = 0; // 'p' or 'v'
-
-        while (token != NULL) {
-            // Trim leading spaces
-            while (isspace((unsigned char)*token)) token++;
-
-            if (strlen(token) == 1 && (token[0] == 'p' || token[0] == 'v') || token[0] == 's') {
-                current_section = token[0];
-            } else {
-                if
-                float value = strtof(token, NULL);
-                if (current_section == 'p' && p_count < MAX_VALUES) {
-                    p_data[p_count++] = value;
-                } else if (current_section == 'v' && v_count < MAX_VALUES) {
-                    v_data[v_count++] = value;
-                }
-            }
-
-            token = strtok(NULL, ",");
-        }
-    }
 
     uint16_t RxDataLen = 0; // received data length set by ReceiveToIdle_IT's callback
     bool flag_receive_to_idle_events_not_yet_triggered = true; // unused!
