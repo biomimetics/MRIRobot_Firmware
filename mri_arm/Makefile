@@ -3,7 +3,7 @@
 # target
 ######################################
 TARGET = Main
-
+TARGET_EX = Main_TXRX
 #######################################
 # paths
 #######################################
@@ -56,6 +56,9 @@ just_flash:
 	
 flash: build_dev just_flash	
 
+flash_ex: 
+	lfc-dev src/Main_TXRX.lf 
+	openocd -f $(OPENOCD_PATH)/tcl/interface/stlink.cfg -f $(OPENOCD_PATH)/tcl/target/stm32f4x.cfg -c "program $(BUILD_DIR)/$(TARGET_EX).elf verify reset exit"	
 
 
 

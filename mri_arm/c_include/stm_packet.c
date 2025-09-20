@@ -5,10 +5,10 @@
 void construct_stm_packet(
     STM_Packet* packet,
     int behavior_mode,
-    const float* positions,
-    const float* velocities,
-    const float* sea_positions,
-    const float* extra,
+    float* positions,
+    float* velocities,
+    float* sea_positions,
+    float* extra,
     uint8_t time_stamp
 ) {
     if (!packet) return;
@@ -26,11 +26,11 @@ void construct_stm_packet(
     packet->checksum = 0; // Zero it first to exclude it from CRC
 
     // Compute checksum
-    packet->checksum = compute_crc16((const uint8_t*)packet, sizeof(STM_Packet) - sizeof(uint16_t));
+    packet->checksum = compute_crc16((uint8_t*)packet, sizeof(STM_Packet) - sizeof(uint16_t));
 }
 
 
-uint16_t compute_crc16(const uint8_t *data_p, uint16_t length){
+uint16_t compute_crc16(uint8_t *data_p, uint16_t length){
     unsigned char x;
     uint16_t crc = 0xFFFF;
 
@@ -42,7 +42,7 @@ uint16_t compute_crc16(const uint8_t *data_p, uint16_t length){
     return crc;
 }
 
-void serialize_packet(const STM_Packet* packet, char* buffer) {
+void serialize_packet(STM_Packet* packet, char* buffer) {
     char temp[64];
     size_t offset = 0;
 
@@ -73,13 +73,50 @@ void serialize_packet(const STM_Packet* packet, char* buffer) {
     offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "/,%d,", packet->time_stamp);
 
     // Compute CRC
-    uint16_t crc = compute_crc16((const uint8_t*)buffer, offset);
+    uint16_t crc = compute_crc16((uint8_t*)buffer, offset);
     snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "?,0x%04X", crc);
 }
 
+void serialize_packet_int(STM_Packet* packet, char* buffer) {
+    char temp[64];
+    size_t offset = 0;
+
+    // Behavior Mode
+    offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "m,%d,", packet->behavior_mode);
+
+    // Positions
+    offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "p,");
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "%d,", (int)(packet->positions[i] * FLOAT_PRINT_SCALE));
+
+    // Velocities
+    offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "v,");
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "%d,", (int)(packet->velocities[i] * FLOAT_PRINT_SCALE));
+
+    // SEA Positions
+    offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "s,");
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "%d,", (int)(packet->sea_positions[i] * FLOAT_PRINT_SCALE));
+
+    // Extra
+    offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "e,");
+    for (int i = 0; i < EXTRA_LENGTH; ++i)
+        offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "%d,", (int)(packet->extra[i] * FLOAT_PRINT_SCALE));
+
+    // Timestamp
+    offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "/,%d,", packet->time_stamp);
+
+    // Compute CRC
+    uint16_t crc = compute_crc16((uint8_t*)buffer, offset);
+    offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "?,0x%04X", crc);
+
+    // Add tail
+    snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "\n");
+}
 
 /*
-void serialize_packet(const STM_Packet* packet, char* buffer) {
+void serialize_packet( STM_Packet* packet, char* buffer) {
     char temp[64];
     size_t offset = 0;
 
@@ -110,12 +147,12 @@ void serialize_packet(const STM_Packet* packet, char* buffer) {
     offset += snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "/,%d,", packet->time_stamp);
 
     // Compute checksum (excluding itself)
-    uint16_t crc = compute_crc16((const uint8_t*)buffer, offset);
+    uint16_t crc = compute_crc16(( uint8_t*)buffer, offset);
     snprintf(buffer + offset, STM_BUFFER_SIZE - offset, "?,0x%04X", crc);
 }
 */
 
-bool deserialize_packet(const char* buffer, STM_Packet* packet) {
+bool deserialize_packet(char* buffer, STM_Packet* packet) {
     char buf_copy[STM_BUFFER_SIZE];
     strncpy(buf_copy, buffer, STM_BUFFER_SIZE - 1);
     buf_copy[STM_BUFFER_SIZE - 1] = '\0';
@@ -129,7 +166,7 @@ bool deserialize_packet(const char* buffer, STM_Packet* packet) {
     *checksum_marker = '\0';  // Terminate buffer at checksum
 
     // Validate checksum
-    uint16_t computed_crc = compute_crc16((const uint8_t*)buf_copy, strlen(buf_copy));
+    uint16_t computed_crc = compute_crc16((uint8_t*)buf_copy, strlen(buf_copy));
     if (parsed_crc != computed_crc) {
         fprintf(stderr, "CRC mismatch: parsed=0x%04X, computed=0x%04X\r\n", parsed_crc, computed_crc);
         return false;
@@ -189,7 +226,7 @@ bool deserialize_packet(const char* buffer, STM_Packet* packet) {
     return true;
 }
 
-void print_packet(const STM_Packet *p) {
+void print_packet( STM_Packet *p) {
     printf("STM_Packet:\r\n");
     printf("  Mode: %d\r\n", p->behavior_mode);
     printf("  Positions: ");
@@ -213,7 +250,7 @@ void print_packet(const STM_Packet *p) {
 }
 
 
-void print_packet_int(const STM_Packet *p) {
+void print_packet_int( STM_Packet *p) {
     printf("STM_Packet:\r\n");
     printf("  Mode: %d\r\n", p->behavior_mode);
     printf("  Positions: ");

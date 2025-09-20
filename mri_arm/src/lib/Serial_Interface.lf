@@ -22,11 +22,11 @@ preamble {=
   #include <../../../c_include/sm_config.h>
   #include <../../../c_include/joint_config.h>
 
-  #define DMA_TX_BUFFER_SIZE 600 //256//(STM_BUFFER_SIZE) //200
-  #define DMA_RX_BUFFER_SIZE 600 //256//(STM_BUFFER_SIZE) //200
+  #define DMA_TX_BUFFER_SIZE 400 //256//(STM_BUFFER_SIZE) //200
+  #define DMA_RX_BUFFER_SIZE 400 //256//(STM_BUFFER_SIZE) //200
   //#define DMA_UART huart6 // was huart1
 
-  #define PRINT_SERIAL 1
+  #define PRINT_SERIAL 0
 =}
 
 reactor SerialInterface (update_period: time = 10 ms){
@@ -323,6 +323,7 @@ reactor SerialInterface (update_period: time = 10 ms){
       return;
     }
 
+
     void handle_transmit_packet(){
       
       /*
@@ -358,15 +359,23 @@ reactor SerialInterface (update_period: time = 10 ms){
       size_t len = encode_packet_cobs(&transmit_packet, tx_buffer);
       */
 
-      printf("trying to transmit: ");
-      print_packet_int(&transmit_packet);
-      printf("\r\n");
+      //printf("trying to transmit: ");
+      //print_packet_int(&transmit_packet);
+      //printf("\r\n");
 
-      serialize_packet(&transmit_packet, tx_buffer);
+      //printf("In transmit. Want to send packet: \r\n");
+      //print_packet_int(&transmit_packet);
+      
+      //char buff[250];
+      //serialize_packet_int(&transmit_packet, tx_buffer);
+      
+      //printf("buff before memcpy: %s\r\n", buff);
       //size_t len = sizeof(tx_buffer);
       // send the encoded packet down the UART line
-      printf("trying to send tx_buffer of size DMA_TX_BUFFER_SIZE(%d): %s\r\n", DMA_TX_BUFFER_SIZE, tx_buffer);
-      HAL_UART_Transmit_DMA(&DMA_UART, tx_buffer, DMA_TX_BUFFER_SIZE);
+      char buff[30] = "From the STM32";
+      memcpy(tx_buffer, buff, sizeof(buff));
+      //printf("trying to send tx_buffer of size DMA_TX_BUFFER_SIZE(%d): %s\r\n", sizeof(tx_buffer), tx_buffer);
+      HAL_UART_Transmit_DMA(&DMA_UART, tx_buffer, sizeof(tx_buffer));
     }
 
     // When the rx_buffer command is a [set joint position] command

@@ -48,21 +48,20 @@ extern "C" {
 typedef struct {
     int behavior_mode;                     ///< Operation behavior_mode
     float positions[DOF_NUMBER];           ///< Joint/motor positions
-    float velocities[DOF_NUMBER];            ///< Joint/motor velocities
+    float velocities[DOF_NUMBER];          ///< Joint/motor velocities
     float sea_positions[DOF_NUMBER];       ///< SEA (Series Elastic Actuator) positions
     float extra[EXTRA_LENGTH];             ///< Extra values, used for debugging info.
     uint8_t time_stamp;                    ///< Timestamp
-    uint16_t checksum;                     ///< CRC-16 checksum
 } STM_Packet;
 
 
 void construct_stm_packet(
     STM_Packet* packet,
     int behavior_mode,
-    const float* positions,
-    const float* velocities,
-    const float* sea_positions,
-    const float* extra,
+     float* positions,
+     float* velocities,
+     float* sea_positions,
+     float* extra,
     uint8_t time_stamp
 );
 
@@ -77,11 +76,11 @@ void construct_stm_packet(
  * @param length Length of data in bytes
  * @return Computed 16-bit CRC
  */
-uint16_t compute_crc16(const uint8_t *data, uint16_t length);
+uint16_t compute_crc16( uint8_t *data, uint16_t length);
 
-bool deserialize_packet(const char* buffer, STM_Packet* packet);
+bool deserialize_packet( char* buffer, STM_Packet* packet);
 
-void serialize_packet(const STM_Packet* packet, char* buffer);
+void serialize_packet( STM_Packet* packet, char* buffer);
 // =====================
 // Debug Utility
 // =====================
@@ -91,14 +90,14 @@ void serialize_packet(const STM_Packet* packet, char* buffer);
  *
  * @param packet Pointer to the packet to print
  */
-void print_packet(const STM_Packet *packet);
+void print_packet( STM_Packet *packet);
 
 /**
  * @brief Pretty-print the contents of an STM_Packet to the console, with floats presented as ints scaled by 1000.
  *
  * @param packet Pointer to the packet to print
  */
-void print_packet_int(const STM_Packet *packet);
+void print_packet_int( STM_Packet *packet);
 
 #ifdef __cplusplus
 }

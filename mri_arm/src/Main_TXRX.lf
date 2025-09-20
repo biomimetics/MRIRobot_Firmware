@@ -1,0 +1,344 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "STM32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include <stdio.h>
+  #include "stm32f4xx_hal.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
+
+  extern UART_HandleTypeDef huart1; // make sure these need to be defined here or not
+  extern UART_HandleTypeDef huart2;
+  extern UART_HandleTypeDef huart3;
+  extern UART_HandleTypeDef huart4;
+  extern UART_HandleTypeDef huart5;
+
+  extern TIM_HandleTypeDef htim6; // used for timing loops
+
+
+
+  #define DOF_NUMBER 7
+  #define EXTRA_LENGTH 2
+
+  #define UART_BUFFER_SIZE  256
+  #define PACKET_START_BYTE 0xAA
+  #define MIN_PACKET_SIZE   (4 + 3 * DOF_NUMBER * 4 + 3 * EXTRA_LENGTH + 1) //64
+  #define MAX_PACKET_SIZE 200
+
+  typedef enum {
+      PKT_TYPE_PING = 0x01,
+      PKT_TYPE_DATA = 0x02,
+      // ... add more as needed
+  } PacketType;
+
+  typedef struct {
+      uint8_t start;
+      uint8_t length;
+      uint8_t type;
+      uint8_t data[MAX_PACKET_SIZE - 4]; // excluding start, len, type, checksum
+      uint8_t checksum;
+  } Packet;
+
+  #pragma pack(push, 1)
+  typedef struct {
+    int behavior_mode;                     ///< Operation behavior_mode
+    float positions[DOF_NUMBER];           ///< Joint/motor positions
+    float velocities[DOF_NUMBER];          ///< Joint/motor velocities
+    float sea_positions[DOF_NUMBER];       ///< SEA (Series Elastic Actuator) positions
+    float extra[EXTRA_LENGTH];             ///< Extra values, used for debugging info.
+    uint8_t time_stamp;                    ///< Timestamp
+  } STM_Packet;
+  #pragma pack(pop)
+  
+
+  =}
+
+// Import and/or declare reactor classes.
+main reactor {
+  preamble {=
+
+    uint8_t uart_rx_dma_buffer[UART_BUFFER_SIZE];
+    uint16_t uart_rx_last_pos = 0;
+
+    static uint8_t pkt_buf[MAX_PACKET_SIZE];
+    static uint8_t pkt_index = 0;
+    static uint8_t pkt_length = 0;
+    static enum { RX_IDLE, RX_GOT_START, RX_GOT_LEN } rx_state = RX_IDLE;
+
+    // ------
+    // Init functions
+    // ------
+    void uart_dma_start() {
+        HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
+    }
+  
+    // ------
+    // Receiving functions
+    // ------
+    void uart_dma_poll() {
+      uint16_t pos = UART_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(DMA_UART.hdmarx);
+      
+      if (pos != uart_rx_last_pos) {
+          if (pos > uart_rx_last_pos) {
+              process_uart_data(&uart_rx_dma_buffer[uart_rx_last_pos], pos - uart_rx_last_pos);
+          } else {
+              // Wrapped around
+              process_uart_data(&uart_rx_dma_buffer[uart_rx_last_pos], UART_BUFFER_SIZE - uart_rx_last_pos);
+              process_uart_data(&uart_rx_dma_buffer[0], pos);
+          }
+          uart_rx_last_pos = pos;
+      }
+    }
+
+    void process_uart_data(uint8_t *data, uint16_t len) {
+      for (uint16_t i = 0; i < len; ++i) {
+        uint8_t byte = data[i];
+        
+        switch (rx_state) {
+          case RX_IDLE:
+            if (byte == PACKET_START_BYTE) {
+              pkt_buf[0] = byte;
+              pkt_index = 1;
+              rx_state = RX_GOT_START;
+            }
+            break;
+
+          case RX_GOT_START:
+            pkt_buf[pkt_index++] = byte;
+            pkt_length = byte;
+            if (pkt_length > MAX_PACKET_SIZE - 3) {
+              rx_state = RX_IDLE; // error
+            } else {
+              rx_state = RX_GOT_LEN;
+            }
+            break;
+
+          case RX_GOT_LEN:
+            pkt_buf[pkt_index++] = byte;
+            if (pkt_index == pkt_length + 2) {
+              // Wait for checksum
+            } else if (pkt_index == pkt_length + 3) {
+              uint8_t checksum = 0;
+              for (int j = 1; j < pkt_index - 1; ++j)
+                  checksum ^= pkt_buf[j];
+
+              if (checksum == byte) {
+                  handle_packet(pkt_buf, pkt_index);
+              }
+              rx_state = RX_IDLE;
+            }
+            break;
+        }
+      }
+    }
+
+    void handle_packet(uint8_t *packet, uint8_t len) {
+      uint8_t type = packet[2];
+
+      switch (type) {
+          case PKT_TYPE_PING:
+              send_packet(PKT_TYPE_PING, NULL, 0); // Echo back
+              break;
+
+          case PKT_TYPE_DATA:
+              uint8_t *data = &packet[3]; // After start, len, type
+              size_t data_len = len - 4; // Remove start, len, type, checksum
+              parse_packet_data(data, data_len);
+              break;
+      }
+    }
+
+    void parse_packet_data(uint8_t *data, size_t data_len) {
+        if (data_len != sizeof(STM_Packet)) {
+            fprintf(stderr, "Unexpected STM_Packet size! Got %zu, expected %zu\n", data_len, sizeof(STM_Packet));
+            return;
+        }
+
+        STM_Packet packet;
+        memcpy(&packet, data, sizeof(STM_Packet));
+
+        printf("Behavior Mode: %d\n", packet.behavior_mode);
+        printf("Timestamp: %u\n", packet.time_stamp);
+
+        printf("Positions: ");
+        for (int i = 0; i < DOF_NUMBER; i++)
+            printf("%.2f ", packet.positions[i]);
+        printf("\n");
+
+        printf("Velocities: ");
+        for (int i = 0; i < DOF_NUMBER; i++)
+            printf("%.2f ", packet.velocities[i]);
+        printf("\n");
+
+        printf("SEA Positions: ");
+        for (int i = 0; i < DOF_NUMBER; i++)
+            printf("%.2f ", packet.sea_positions[i]);
+        printf("\n");
+
+        printf("Extra: ");
+        for (int i = 0; i < EXTRA_LENGTH; i++)
+            printf("%.2f ", packet.extra[i]);
+        printf("\n");
+    }
+
+    // ------
+    // Sending functions
+    // ------
+    void send_packet(PacketType type, uint8_t *data, uint8_t len) {
+      uint8_t tx_buf[MAX_PACKET_SIZE];
+      uint8_t index = 0;
+      uint8_t checksum = 0;
+
+      tx_buf[index++] = PACKET_START_BYTE;
+      tx_buf[index++] = len + 1; // type + data
+      tx_buf[index++] = type;
+
+      for (uint8_t i = 0; i < len; ++i)
+          tx_buf[index++] = data[i];
+
+      for (uint8_t i = 1; i < index; ++i)
+          checksum ^= tx_buf[i];
+
+      tx_buf[index++] = checksum;
+
+      HAL_UART_Transmit_DMA(&DMA_UART, tx_buf, index);
+  }
+
+    void encode_packet_to_bytes_txrx(const STM_Packet *packet, uint8_t *buffer) {
+      size_t offset = 0;
+
+      memcpy(buffer + offset, &packet->behavior_mode, sizeof(int));
+      offset += sizeof(int);
+
+      memcpy(buffer + offset, packet->positions, sizeof(float) * DOF_NUMBER);
+      offset += sizeof(float) * DOF_NUMBER;
+
+      memcpy(buffer + offset, packet->velocities, sizeof(float) * DOF_NUMBER);
+      offset += sizeof(float) * DOF_NUMBER;
+
+      memcpy(buffer + offset, packet->sea_positions, sizeof(float) * DOF_NUMBER);
+      offset += sizeof(float) * DOF_NUMBER;
+
+      memcpy(buffer + offset, packet->extra, sizeof(float) * EXTRA_LENGTH);
+      offset += sizeof(float) * EXTRA_LENGTH;
+
+      buffer[offset++] = packet->time_stamp;
+    }
+    
+    int stm32_init(void){
+      HAL_Init();
+
+      SystemClock_Config();
+
+      MX_GPIO_Init();
+      MX_DMA_Init();
+      MX_UART4_Init();
+      MX_USART1_UART_Init();
+      MX_USART3_UART_Init();
+      MX_USART6_UART_Init();
+      MX_TIM3_Init();
+      MX_TIM4_Init();
+      MX_TIM6_Init();
+      HAL_TIM_Base_Start(&htim6); // added!
+      MX_RTC_Init();
+      MX_USART2_UART_Init();
+
+      printf("\r\n");
+      printf("~~~ STM32 START ~~~ \r\n");
+      printf("\r\n");
+
+      //HAL_START_DMA(); // not sure if needed
+      //main();
+      return 0;
+    }
+
+    void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+
+
+      //memmove(rx_copy_buffer, rx_buffer, sizeof(rx_buffer)); // copy over the full size of the buffer
+
+      //if (PRINT_SERIAL) printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
+
+      //bool result = deserialize_packet(rx_copy_buffer,  &receive_packet);
+      //int result = decode_packet_cobs(rx_copy_buffer, RxDataLen - 1, &receive_packet); // len includes delimiter, exclude it here
+
+      //print_packet(&receive_packet);
+
+      /*
+      if (result) {
+        if (PRINT_SERIAL){
+          printf("\nDecoded packet:\n");
+          print_packet(&receive_packet);
+        }
+        command_packet = receive_packet; // move the received packet into the command packet so it can be used for sending commands
+        flag_new_command_received = true; // flag that there's a new command to be processed by a reaction
+      } else {
+          printf("\nFailed to decode received packet!\n");
+      }
+      */
+      //HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
+    }
+
+    void handle_transmit_packet(){
+
+      // send the encoded packet down the UART line
+      char buff[30] = "From the STM32";
+      //memcpy(tx_buffer, buff, sizeof(buff));
+      //printf("trying to send tx_buffer of size DMA_TX_BUFFER_SIZE(%d): %s\r\n", sizeof(tx_buffer), tx_buffer);
+      HAL_UART_Transmit_DMA(&DMA_UART, buff, sizeof(buff));
+    }
+
+
+  =}
+  
+  timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
+  timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
+
+  timer comms(0 ms, 10 ms)
+
+  state counter: int = 0
+  state counter_max: int = 100
+
+  state start_time: time = 0
+
+  reaction(startup) {=
+    // Prep all GPIO values
+    //MX_GPIO_Init();
+
+    // Initialize the STM32 peripherals
+    stm32_init();
+    uart_dma_start();
+
+    self->start_time = lf_time_physical();
+  =}
+
+  reaction(comms) {=
+    uart_dma_poll();
+
+    self->counter++;
+    if (self->counter_max < self->counter) self->counter = 0;
+    
+    STM_Packet transmit_packet = {
+        .behavior_mode = 0, 
+        .positions = {0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f},
+        .velocities = {((float)self->counter) / 2000.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        .sea_positions = {1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.6f, 1.7f},
+        .extra = {3.14},
+        .time_stamp = (uint8_t)HAL_GetTick()
+    };
+
+    //PacketType type, uint8_t *data, uint8_t len
+    uint8_t tx_buff[50];
+    encode_packet_to_bytes_txrx(&transmit_packet, tx_buff);
+    //uint8_t num = sprintf(tx_buff, "%s", "look at this packet!\n");
+    send_packet(PKT_TYPE_DATA, tx_buff, sizeof(STM_Packet));//MAX_PACKET_SIZE);
+
+    //printf("Elapsed time: %d ms\n", (int)((lf_time_physical() - self->start_time) / 1000000));
+    self->start_time = lf_time_physical();
+    =}
+}
