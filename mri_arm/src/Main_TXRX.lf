@@ -3,7 +3,8 @@ target C {
   platform: {
     name: "STM32",
     board: "F446RE"
-  }
+  },
+  files: ["/include_c/stm_comms.h", "/src_c/stm_comms.c"],
 }
 
 preamble {=
@@ -11,6 +12,7 @@ preamble {=
   #include "stm32f4xx_hal.h"
   //#include "stm32_startup.h"
   #include "main.h"
+  #include "stm_comms.h"
 
   extern UART_HandleTypeDef huart1; // make sure these need to be defined here or not
   extern UART_HandleTypeDef huart2;
@@ -19,46 +21,6 @@ preamble {=
   extern UART_HandleTypeDef huart5;
 
   extern TIM_HandleTypeDef htim6; // used for timing loops
-
-
-
-  #define DOF_NUMBER 7
-  #define EXTRA_LENGTH 1
-
-  #define FLOAT_PRINT_SCALE 1000
-
-  #pragma pack(push, 1)
-  typedef struct {
-      int behavior_mode;
-      float positions[DOF_NUMBER];
-      float velocities[DOF_NUMBER];
-      float sea_positions[DOF_NUMBER];
-      float extra[EXTRA_LENGTH];
-      int time_stamp;
-  } STM_Packet;
-  #pragma pack(pop)
-  
-  #define UART_HALF_BUFFER_SIZE 128
-  #define UART_BUFFER_SIZE  (UART_HALF_BUFFER_SIZE * 2)
-  #define PACKET_START_BYTE 0xAA
-  #define MAX_PACKET_SIZE 200 //(1 + 4 * DOF_NUMBER * 3 + 4 * EXTRA_LENGTH + 1)//200
-
-
-  typedef enum {
-      PKT_TYPE_PING = 0x01,
-      PKT_TYPE_DATA = 0x02,
-      // ... add more as needed
-  } PacketType;
-
-  typedef struct {
-      uint8_t start;
-      uint8_t length;
-      uint8_t type;
-      uint8_t data[MAX_PACKET_SIZE - 4]; // excluding start, len, type, checksum
-      uint8_t checksum;
-  } Packet;
-
-
 
   =}
 
@@ -74,28 +36,8 @@ main reactor {
     static uint8_t pkt_index = 0;
     static uint8_t pkt_length = 0;
     static enum { RX_IDLE, RX_GOT_START, RX_GOT_LEN } rx_state = RX_IDLE;
+`
 
-    void print_packet_int( STM_Packet *p) {
-      printf("STM_Packet:\r\n");
-      printf("  Mode: %d\r\n", p->behavior_mode);
-      printf("  Positions: ");
-      for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int)(p->positions[i] * FLOAT_PRINT_SCALE));
-      printf("\r\n");
-
-      printf("  Velocities: ");
-      for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int)(p->velocities[i] * FLOAT_PRINT_SCALE));
-      printf("\r\n");
-
-      printf("  SEA Positions: ");
-      for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int)(p->sea_positions[i] * FLOAT_PRINT_SCALE));
-      printf("\r\n");
-
-      printf("  Extra Values: ");
-      for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%d ", (int)(p->extra[i] * FLOAT_PRINT_SCALE));
-      printf("\r\n");
-
-      printf("  Timestamp: %u\r\n", p->time_stamp);
-    }
 
     void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
       //printf("In the HAL_UARTEx_RxEventCallback function! Got %d bytes.\n", Size);
@@ -104,34 +46,6 @@ main reactor {
       printf("In the HAL_UARTEx_RxEventCallback function! Received packet (%d bytes): ", Size);
 
       handle_packet(uart_rx_dma_buffer, Size);
-      /*
-      if (Size > 0) {
-        
-        //for (int i = 0; i < rx_len; ++i) {
-        //    printf("%02X ", rx_buf[i]);
-        //    //printf("%s ", rx_buf[i]);
-        //}
-        //printf("\n");
-
-        //for (int i = 0; i < rx_len; ++i) {
-            //printf("%02X ", rx_buf[i]);
-        //    printf("%d ", rx_buf[i]);
-        //}
-        //printf("\n");
-
-        uint8_t type = rx_buf[2];
-        if (type == PKT_TYPE_PING) {
-          printf("Received PING reply from device.\n");
-        }
-
-        if (type == PKT_TYPE_DATA) {
-          uint8_t *data = &rx_buf[3]; // After start, len, type
-          size_t data_len = Size - 4; // Remove start, len, type, checksum
-
-          parse_packet_data(data, data_len);
-        }
-      }
-      */
 
       HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
     }
@@ -144,49 +58,6 @@ main reactor {
         HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
         //HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
     }
-  
-    // ------
-    // Receiving functions
-    // ------
-    int HTC = 0, FTC = 0;
-    uint32_t indx=0;
-
-    int isSizeRxed = 0;
-    uint32_t size=0;
-
-    /*
-    void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
-    {
-      printf("In HAL_UART_RxHalfCpltCallback\r\n");
-      if (isSizeRxed == 0)
-      {
-        size = ((uart_rx_dma_buffer[0]-48)*1000)+((uart_rx_dma_buffer[1]-48)*100)+((uart_rx_dma_buffer[2]-48)*10)+((uart_rx_dma_buffer[3]-48));  // extract the size
-        indx = 0;
-        memcpy(uart_rx_dma_copy_buffer+indx, uart_rx_dma_buffer+4, UART_HALF_BUFFER_SIZE - 4);  // copy the data into the main buffer/file
-        memset(uart_rx_dma_buffer, '\0', UART_HALF_BUFFER_SIZE);  // clear the RxData buffer
-        indx += 124;  // update the indx variable
-        isSizeRxed = 1;  // set the variable to 1 so that this loop does not enter again
-      }
-      else
-      {
-        memcpy(uart_rx_dma_copy_buffer+indx, uart_rx_dma_buffer, UART_HALF_BUFFER_SIZE);
-        memset(uart_rx_dma_buffer, '\0', UART_HALF_BUFFER_SIZE);
-        indx += 128;
-      }
-      HTC=1;  // half transfer complete callback was called
-      FTC=0;
-    }
-
-    void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-    {
-      printf("In HAL_UART_RxCpltCallback\r\n");
-      memcpy(uart_rx_dma_copy_buffer+indx, uart_rx_dma_buffer+UART_HALF_BUFFER_SIZE, UART_HALF_BUFFER_SIZE);
-      memset(uart_rx_dma_buffer+UART_HALF_BUFFER_SIZE, '\0', UART_HALF_BUFFER_SIZE);
-      indx+=UART_HALF_BUFFER_SIZE;
-      HTC=0;
-      FTC=1;
-    }
-    */
 
     // ------
     // Receiving functions
@@ -208,49 +79,6 @@ main reactor {
       }
     }
 
-    void process_uart_data(uint8_t *data, uint16_t len) {
-      printf("In process_uart_data... rx_state: %d\n", rx_state);
-      for (uint16_t i = 0; i < len; ++i) {
-        uint8_t byte = data[i];
-        printf("i: %d, rx_state: %d\n", i, rx_state);
-        switch (rx_state) {
-          case RX_IDLE:
-            if (byte == PACKET_START_BYTE) {
-              pkt_buf[0] = byte;
-              pkt_index = 1;
-              rx_state = RX_GOT_START;
-            }
-            break;
-
-          case RX_GOT_START:
-            pkt_buf[pkt_index++] = byte;
-            pkt_length = byte;
-            if (pkt_length > MAX_PACKET_SIZE - 3) {
-              rx_state = RX_IDLE; // error
-            } else {
-              rx_state = RX_GOT_LEN;
-            }
-            break;
-
-          case RX_GOT_LEN:
-            pkt_buf[pkt_index++] = byte;
-            if (pkt_index == pkt_length + 2) {
-              // Wait for checksum
-            } else if (pkt_index == pkt_length + 3) {
-              uint8_t checksum = 0;
-              for (int j = 1; j < pkt_index - 1; ++j)
-                  checksum ^= pkt_buf[j];
-
-              if (checksum == byte) {
-                  handle_packet(pkt_buf, pkt_index);
-              }
-              rx_state = RX_IDLE;
-            }
-            break;
-        }
-      }
-    }
-
     void handle_packet(uint8_t *packet, uint8_t len) {
       uint8_t type = packet[2];
 
@@ -267,45 +95,10 @@ main reactor {
       }
     }
 
-    void parse_packet_data(uint8_t *data, size_t data_len) {
-        if (data_len != sizeof(STM_Packet)) {
-            fprintf(stderr, "Unexpected STM_Packet size! Got %zu, expected %zu\n", data_len, sizeof(STM_Packet));
-            return;
-        }
-
-        STM_Packet packet;
-        memcpy(&packet, data, sizeof(STM_Packet));
-
-        print_packet_int(&packet);
-        /*
-        printf("Behavior Mode: %d\n", packet.behavior_mode);
-        printf("Timestamp: %u\n", packet.time_stamp);
-
-        printf("Positions: ");
-        for (int i = 0; i < DOF_NUMBER; i++)
-            printf("%.2f ", packet.positions[i]);
-        printf("\n");
-
-        printf("Velocities: ");
-        for (int i = 0; i < DOF_NUMBER; i++)
-            printf("%.2f ", packet.velocities[i]);
-        printf("\n");
-
-        printf("SEA Positions: ");
-        for (int i = 0; i < DOF_NUMBER; i++)
-            printf("%.2f ", packet.sea_positions[i]);
-        printf("\n");
-
-        printf("Extra: ");
-        for (int i = 0; i < EXTRA_LENGTH; i++)
-            printf("%.2f ", packet.extra[i]);
-        printf("\n");
-        */
-    }
-
     // ------
     // Sending functions
     // ------
+
     void send_packet(PacketType type, uint8_t *data, uint8_t len) {
       uint8_t tx_buf[MAX_PACKET_SIZE];
       uint8_t index = 0;
@@ -330,26 +123,6 @@ main reactor {
       //HAL_UART_Transmit(&DMA_UART, tx_buf, index, HAL_MAX_DELAY);
     }
 
-    void encode_packet_to_bytes(const STM_Packet *packet, uint8_t *buffer) {
-      size_t offset = 0;
-
-      memcpy(buffer + offset, &packet->behavior_mode, sizeof(int));
-      offset += sizeof(int);
-
-      memcpy(buffer + offset, packet->positions, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
-
-      memcpy(buffer + offset, packet->velocities, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
-
-      memcpy(buffer + offset, packet->sea_positions, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
-
-      memcpy(buffer + offset, packet->extra, sizeof(float) * EXTRA_LENGTH);
-      offset += sizeof(float) * EXTRA_LENGTH;
-
-      buffer[offset++] = packet->time_stamp;
-    }
     
     int stm32_init(void){
       HAL_Init();
@@ -377,33 +150,6 @@ main reactor {
       //main();
       return 0;
     }
-
-    //void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
-
-
-      //memmove(rx_copy_buffer, rx_buffer, sizeof(rx_buffer)); // copy over the full size of the buffer
-
-      //if (PRINT_SERIAL) printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
-
-      //bool result = deserialize_packet(rx_copy_buffer,  &receive_packet);
-      //int result = decode_packet_cobs(rx_copy_buffer, RxDataLen - 1, &receive_packet); // len includes delimiter, exclude it here
-
-      //print_packet(&receive_packet);
-
-      /*
-      if (result) {
-        if (PRINT_SERIAL){
-          printf("\nDecoded packet:\n");
-          print_packet(&receive_packet);
-        }
-        command_packet = receive_packet; // move the received packet into the command packet so it can be used for sending commands
-        flag_new_command_received = true; // flag that there's a new command to be processed by a reaction
-      } else {
-          printf("\nFailed to decode received packet!\n");
-      }
-      */
-      //HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
-    //}
 
     void handle_transmit_packet(){
 
@@ -467,7 +213,6 @@ main reactor {
     //uint8_t num = sprintf(tx_buff, "%s", "look at this packet!\n");
     send_packet(PKT_TYPE_DATA, tx_buff, sizeof(STM_Packet));//MAX_PACKET_SIZE);
 
-    //printf("Elapsed time: %d ms\n", (int)((lf_time_physical() - self->start_time) / 1000000));
     
 
     =}

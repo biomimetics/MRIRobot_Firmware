@@ -1,0 +1,68 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "STM32",
+    board: "F446RE"
+  },
+  files: ["/c_include/stm_comms.h", "/c_src/stm_comms.c"],
+}
+
+preamble{=
+  #include "stm32f4xx_hal.h"
+  #include "main.h"
+  #include <stdio.h>
+  #include <string.h>
+  #include <stdlib.h>
+  #include <ctype.h>
+
+  #include "stm_comms.h"
+
+  #define PRINT_UART 0
+=}
+
+reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms){
+    input send_buffer: uint8_t*
+    output receive_buffer: uint8_t*
+    
+    state receive_buffer_: uint8_t*
+
+    
+    timer transmit_timer(0 ms, transmit_period)
+    timer receive_timer(0 ms, receive_period)
+
+    preamble{=
+        // ------
+        // Init functions
+        // ------
+
+        uint8_t uart_rx_dma_buffer[UART_BUFFER_SIZE];
+        uint8_t uart_tx_dma_buffer[UART_BUFFER_SIZE];
+
+        void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+            //handle_send_packet(uart_rx_dma_buffer, Size);
+            memcpy(self->receive_buffer_, uart_rx_dma_buffer, Size); // lets see if this works, if not, lets add another copy buffer above and have it update in a reaction
+        }
+        
+    =}
+
+    method receiveToIdle_DMA_Init(){=
+        HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
+    =}
+
+    reaction (startup){=
+        receiveToIdle_DMA_Init();
+    =}
+
+    reaction (send_buffer){=
+        self->send_buffer_ = send_buffer->value;
+    =}
+
+    reaction (transmit_timer){=
+        int packet_len = encode_receive_data_to_bytes(self->receive_data_, uart_tx_dma_buffer);
+        HAL_UART_Transmit_DMA(&DMA_UART, uart_tx_dma_buffer, packet_len);
+    =}
+
+    reaction (receive_timer){=
+        HAL_UART_Transmit_DMA(&DMA_UART, uart_tx_dma_buffer, packet_len);
+    =}
+}
