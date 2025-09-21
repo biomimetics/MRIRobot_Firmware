@@ -71,6 +71,7 @@ void timer_updated_elapsed_time(uint32_t *timer_start, double *timer_elapsed_sec
 #define SWO_GPIO_Port GPIOB
 
 // main LF defs and options
+extern UART_HandleTypeDef huart4;
 #define DMA_UART huart4 // huart1 or huart6 are other DMA compative UARTs
 #define LOOP_TIMER TIM6 // timer used for measuing loop times and intervals
 
