@@ -10,7 +10,6 @@ import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import HomeController from "lib/Home_Controller.lf"
 import MotorController from "lib/Motor_Controller.lf"
-import ROSInterface from "lib/ROS_Interface.lf"
 import ModeMachine from "lib/Mode_Machine.lf"
 import SerialInterface from "lib/Serial_Interface.lf"
 
@@ -112,7 +111,7 @@ main reactor {
 
   qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
   usm = new USM()                            // Ultrasonic motor controllers
-  ros_controller = new SerialInterface(update_period = 20 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
+  ros_controller = new SerialInterface(send_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   motor_controller = new MotorController(refresh_period = 10 ms)    // Main Motor driver + controller
   home_controller = new HomeController()      // Used to home the motors
   mode_machine = new ModeMachine()            // Used to trigger other reactors behavior

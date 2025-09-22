@@ -133,24 +133,25 @@ bool decode_data_buffer_to_command_message(CommandMessage *msg, uint8_t *data_bu
         return 0;
     }
 
-    memcpy(&msg, data_buffer, sizeof(data_buffer_len));
+    memcpy(msg, data_buffer, sizeof(data_buffer_len));
     return 1;
 }
 
-void handle_command_message_packet(CommandMessage* msg, uint8_t *packet, size_t packet_len) {
+bool handle_command_message_packet(CommandMessage* msg, uint8_t *packet, size_t packet_len) {
     uint8_t type = packet[2];
-
+    bool result = false;
     switch (type) {
         case PKT_TYPE_PING:
             //send_packet(PKT_TYPE_PING, NULL, 0); // Echo back
             break;
 
         case PKT_TYPE_DATA:
-            uint8_t *msg = &packet[3]; // After start, len, type
+            uint8_t *data_buffer = &packet[3]; // After start, len, type
             size_t data_len = packet_len - 4; // Remove start, len, type, checksum
-            decode_data_buffer_to_command_message(msg, packet, data_len);
+            result = decode_data_buffer_to_command_message(msg, data_buffer, data_len);
             break;
     }
+    return result;
 }
 
 void print_command_message(const CommandMessage *msg) {
@@ -248,24 +249,28 @@ bool decode_data_buffer_to_state_message(StateMessage *msg, uint8_t *data_buffer
         return 0;
     }
 
-    memcpy(&msg, data_buffer, sizeof(StateMessage));
+    memcpy(msg, data_buffer, sizeof(StateMessage));
     return 1;
 }
 
-void handle_state_message_packet(StateMessage* msg, uint8_t *packet, size_t len) {
+bool handle_state_message_packet(StateMessage* msg, uint8_t *packet, size_t len) {
     uint8_t type = packet[2];
 
+    bool result = false;
     switch (type) {
         case PKT_TYPE_PING:
             //send_packet(PKT_TYPE_PING, NULL, 0); // Echo back
             break;
 
         case PKT_TYPE_DATA:
+            //printf("Got PKT_TYPE_DATA.\n");
             uint8_t *data_buffer = &packet[3]; // After start, len, type
             size_t data_len = len - 4; // Remove start, len, type, checksum
-            decode_data_buffer_to_state_message(msg, data_buffer, data_len);
+            //printf("Before decode_data_buffer_to_state_message");
+            result = decode_data_buffer_to_state_message(msg, data_buffer, data_len);
             break;
     }
+    return result;
 }
 
 void print_state_message(const StateMessage *msg) {

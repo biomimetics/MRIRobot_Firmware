@@ -13,8 +13,8 @@ preamble {=
   #include "stm32f4xx_hal.h"
   //#include "stm32_startup.h"
   #include "main.h"
-  #include <../../../c_include/sm_config.h>
-  #include <../../../c_include/joint_config.h>
+  #include <../../../include_c/sm_config.h>
+  #include <../../../include_c/joint_config.h>
 
   #define PRINT_MOTOR_CONTROLLER 0
   //state print_motor_controller: bool = true

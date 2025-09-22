@@ -12,8 +12,8 @@ import SEAController from "SEA.lf"
 preamble {=
     #include "stm32f4xx_hal.h"
     #include <stdio.h>
-    #include <../../../c_include/motor_config.h>
-    #include <../../../c_include/joint_config.h>
+    #include <../../../include_c/motor_config.h>
+    #include <../../../include_c/joint_config.h>
 =}
 
 reactor Diff_Joint (

@@ -23,7 +23,14 @@
 // TX/RX packet defintiions
 // =====================
 
-#define UART_BUFFER_SIZE  120 // needs to be at least max(sizeof(SendData, ReceiveData) + 4
+#define DOF_NUMBER 7
+#define EXTRA_LENGTH 21 // 1
+
+#define COMMAND_MSG_SIZE (4 + 4 * DOF_NUMBER * 3 + 4 * EXTRA_LENGTH * 1 + 4)
+#define STATE_MSG_SIZE (4 + 4 * DOF_NUMBER * 3 + 4 * EXTRA_LENGTH * 1 + 4)
+
+#define PACKET_BYTE_OVERHEAD 4
+#define UART_BUFFER_SIZE  (COMMAND_MSG_SIZE + PACKET_BYTE_OVERHEAD) // needs to be at least max(sizeof(CommandMessage), sizeof(StateMessage)) + 4
 #define PACKET_START_BYTE 0xAA
 
 #define USLEEP_TIME 1000
@@ -40,7 +47,7 @@ typedef struct {
     uint8_t start;
     uint8_t length;
     uint8_t type;
-    uint8_t data[UART_BUFFER_SIZE - 4]; // excluding start, len, type, checksum
+    uint8_t data[UART_BUFFER_SIZE - PACKET_BYTE_OVERHEAD]; // excluding start, len, type, checksum
     uint8_t checksum;
 } Packet;
 
@@ -51,8 +58,7 @@ int read_packet(int fd, uint8_t *buf, int max_iterations);
 // Command Message data structure definitions and helper functions
 // =====================
 
-#define DOF_NUMBER 7
-#define EXTRA_LENGTH 1
+
 
 #define FLOAT_PRINT_SCALE 1000
 
@@ -81,7 +87,7 @@ void construct_command_message(
 
 size_t encode_command_message_to_data_buffer(const CommandMessage *msg, uint8_t *data_buffer);
 bool decode_data_buffer_to_command_message(CommandMessage *msg, uint8_t *data_buffer, size_t data_buffer_len);
-void handle_command_message_packet(CommandMessage* msg, uint8_t *packet, size_t packet_len);
+bool handle_command_message_packet(CommandMessage* msg, uint8_t *packet, size_t packet_len);
 
 
 /**
@@ -97,9 +103,6 @@ void print_command_message(const CommandMessage *msg);
  * @param packet Pointer to the packet to print
  */
 void print_command_message_int(const CommandMessage *msg);
-
-
-
 
 
 // =====================
@@ -128,7 +131,7 @@ void construct_state_message(
 );
 int encode_state_message_to_data_buffer(const StateMessage *msg, uint8_t *data_buffer);
 bool decode_data_buffer_to_state_message(StateMessage *msg, uint8_t *data_buffer, size_t data_buffer_len);
-void handle_state_message_packet(StateMessage* msg, uint8_t *packet, size_t packet_len);
+bool handle_state_message_packet(StateMessage* msg, uint8_t *packet, size_t packet_len);
 
 /**
  * @brief Pretty-print the contents of a Receive_Data to the console.

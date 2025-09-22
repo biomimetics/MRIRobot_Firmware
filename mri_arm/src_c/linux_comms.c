@@ -1,8 +1,5 @@
-#include <termios.h>
 #include "../include_c/stm_comms.h"
-#include <string.h>
-#include <stdio.h>
-#include <stdbool.h>
+#include <termios.h>
 
 // --- Serial Port Setup ---
 int open_serial(const char *port) {

@@ -20,14 +20,14 @@ preamble{=
   #define PRINT_UART 0
 =}
 
-reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms){
+reactor UART_Handler(receive_period: time = 10 ms){
     input state_msg: StateMessage
     output cmd_msg: CommandMessage
 
     state state_msg_: StateMessage
     state cmd_msg_: CommandMessage
 
-    timer transmit_timer(0 ms, transmit_period)
+    //timer transmit_timer(0 ms, transmit_period)
     timer receive_timer(0 ms, receive_period)
 
     preamble{=
@@ -42,6 +42,9 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
         uint8_t uart_tx_data_buffer[UART_BUFFER_SIZE];
 
         uint8_t uart_tx_dma_buffer[UART_BUFFER_SIZE];
+
+        void HAL_UART_RxCallback1(){};
+        void HAL_UART_TxCallback1(){};
 
         void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
             //handle_send_packet(uart_rx_dma_buffer, Size);
@@ -60,15 +63,23 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
         receiveToIdle_DMA_Init();
     =}
 
+    //reaction (state_msg){=
+    //    self->state_msg_ = state_msg->value;
+    //=}
+
     reaction (state_msg){=
         self->state_msg_ = state_msg->value;
-    =}
-
-    reaction (transmit_timer){=
         int data_buffer_len = encode_state_message_to_data_buffer(&self->state_msg_, uart_tx_data_buffer);
         int packet_len = build_packet(uart_tx_dma_buffer, PKT_TYPE_DATA, uart_tx_data_buffer, data_buffer_len);
         // int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_len)
-        HAL_UART_Transmit_DMA(&DMA_UART, uart_tx_dma_buffer, packet_len);
+
+        if (packet_len < 1){
+            printf("Failed to build packet!");
+        }
+        else{
+            printf("Sending packet with length: %d", packet_len);
+            HAL_UART_Transmit_DMA(&DMA_UART, uart_tx_dma_buffer, packet_len);
+        }
     =}
 
     reaction (receive_timer) -> cmd_msg{=

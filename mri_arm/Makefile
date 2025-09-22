@@ -75,4 +75,4 @@ clean_data:
 # For running communication debugging programs
 #######################################
 comms:
-	gcc src_c/uart_comms_example.c src_c/linux_comms.c -o uart_comms_example
+	gcc src_c/uart_comms_example.c src_c/linux_comms.c src_c/stm_comms.c -o uart_comms_example

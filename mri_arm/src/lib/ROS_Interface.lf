@@ -15,9 +15,9 @@ preamble {=
   #include <stdlib.h>
   #include <ctype.h>
 
-  #include <../../../c_include/motor_config.h>
-  #include <../../../c_include/joint_config.h>
-  #include <../../../c_include/sm_config.h>
+  #include <../../../include_c/motor_config.h>
+  #include <../../../include_c/joint_config.h>
+  #include <../../../include_c/sm_config.h>
 
   #define DMA_TX_BUFFER_SIZE 60
   #define DMA_RX_BUFFER_SIZE 60
