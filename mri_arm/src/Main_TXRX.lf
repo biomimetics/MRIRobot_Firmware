@@ -8,7 +8,7 @@ target C {
   cmake-include: ["/SerialCMakeLists.txt"]
 }
 
-import UART_Handler from "lib/Drivers/UART.lf"
+//import UART_Handler from "lib/Drivers/UART.lf"
 
 preamble {=
   #include <stdio.h>
@@ -72,7 +72,7 @@ main reactor {
 
   state start_time: time = 0
 
-  uart_handler = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms)
+  //uart_handler = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms)
 
   reaction(startup) {=
     // Prep all GPIO values
@@ -85,24 +85,12 @@ main reactor {
   =}
 
   
-  reaction(comms) -> uart_handler.state_msg{=
+  reaction(comms) {=
 
     // in general this does not need to be initiated by a timer
-    StateMessage transmit_packet = {
-        .behavior_mode = 0, 
-        .positions = {0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f},
-        .velocities = {((float)self->counter) / 2000.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-        .sea_positions = {1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.6f, 1.7f},
-        .extra = {3.14},
-        .time_stamp = HAL_GetTick()
-    };
 
-    lf_set(uart_handler.state_msg, transmit_packet);
-
+    //lf_set(uart_handler.state_msg, transmit_packet);
+    printf("Testing...\n");
     =}
 
-    reaction(uart_handler.cmd_msg){=
-      printf("Received command message: \r\n");
-      print_command_message_int(&uart_handler.cmd_msg->value);
-      =}
 }

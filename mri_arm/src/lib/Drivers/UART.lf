@@ -18,9 +18,10 @@ preamble{=
   #include "stm_comms.h"
 
   #define PRINT_UART 0
+  #define TRANSMIT_SLEEP_TIME 500
 =}
 
-reactor UART_Handler(receive_period: time = 10 ms){
+reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms){
     input state_msg: StateMessage
     output cmd_msg: CommandMessage
 
@@ -32,7 +33,7 @@ reactor UART_Handler(receive_period: time = 10 ms){
     state not_receiving_count: int = 0
     state not_receiving_count_max: int = 100
 
-    //timer transmit_timer(0 ms, transmit_period)
+    timer transmit_timer(0 ms, transmit_period)
     timer receive_timer(0 ms, receive_period)
 
     preamble{=
@@ -82,6 +83,7 @@ reactor UART_Handler(receive_period: time = 10 ms){
 
     reaction (state_msg){=
         self->state_msg_ = state_msg->value;
+        
         int data_buffer_len = encode_state_message_to_data_buffer(&self->state_msg_, uart_tx_data_buffer);
         int packet_len = build_packet(uart_tx_dma_buffer, PKT_TYPE_DATA, uart_tx_data_buffer, data_buffer_len);
         // int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_len)
@@ -96,6 +98,7 @@ reactor UART_Handler(receive_period: time = 10 ms){
             //printf("Sending packet with data buffer length: %d, and total length: %d\n", data_buffer_len, packet_len);
             HAL_UART_Transmit_DMA(&DMA_UART, uart_tx_dma_buffer, packet_len);
         }
+            
     =}
 
     reaction (receive_timer) -> cmd_msg, not_receiving_error{=

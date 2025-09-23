@@ -32,9 +32,12 @@
 #define PACKET_BYTE_OVERHEAD 4
 #define UART_BUFFER_SIZE  (COMMAND_MSG_SIZE + PACKET_BYTE_OVERHEAD) // needs to be at least max(sizeof(CommandMessage), sizeof(StateMessage)) + 4
 #define PACKET_START_BYTE 0xAA
+#define CHECKSUM_MOD 256
 
-#define USLEEP_TIME 100
-//#define LONG_USLEEP_TIME 1000 //5000
+#define FLOAT_PRINT_SCALE 1000
+#define FLOAT_DECIMAL_SCALE 6 //3
+#define USLEEP_TIME 100 // used during reads
+#define LONG_USLEEP_TIME 1000 // used at end of logging loops
 
 typedef enum {
     PKT_TYPE_PING = 0x01,
@@ -52,15 +55,10 @@ typedef struct {
 } Packet;
 
 int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_len);
-int read_packet(int fd, uint8_t *buf, int max_iterations);
 
 // =====================
 // Command Message data structure definitions and helper functions
 // =====================
-
-
-
-#define FLOAT_PRINT_SCALE 1000
 
 //#pragma pack(push, 1)
 typedef struct {
@@ -121,6 +119,10 @@ typedef struct {
     int time_stamp;
     int message_index;
 } StateMessage;
+
+
+
+
 //#pragma pack(pop)
 
 /*
@@ -163,5 +165,8 @@ void print_state_message(const StateMessage *msg);
  * @param packet Pointer to the packet to print
  */
 void print_state_message_int(const StateMessage *msg);
+
+void write_state_message_csv_header(char *buffer, size_t size);
+void serialize_state_message_csv(const StateMessage *msg, char *buffer, size_t size);
 
 #endif // STM_COMMS_H

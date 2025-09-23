@@ -321,33 +321,34 @@ reactor SerialInterface (send_period: time = 10 ms){
 
     fill_extra_array();
     int time_stamp = HAL_GetTick();
-    printf("Time stamp: %d\n", time_stamp);
+    //printf("Time stamp: %d\n", time_stamp);
     construct_state_message(&self->state_msg_, current_behavior_mode_,
                             encoder_position_, encoder_velocity_,
                             sea_position_, extra_array_,
                             time_stamp, self->send_message_index++);
     self->send_message_index = self->send_message_index % 256;
-    printf("About to send state_message: \n");
-    print_state_message_int(&self->state_msg_);
+    //printf("About to send state_message: \n");
+    //print_state_message_int(&self->state_msg_);
 
     lf_set(uart_handler.state_msg, self->state_msg_);
   =}
 
   reaction(uart_handler.cmd_msg) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset{=
-    printf("Received command message: \n");
-    print_command_message_int(&uart_handler.cmd_msg->value);
+    //printf("Received command message: \n");
+    //print_command_message_int(&uart_handler.cmd_msg->value);
 
     self->cmd_msg_ = uart_handler.cmd_msg->value;
 
     // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
     if (!set_newest_command(self->scaled_joint_pos, self->scaled_joint_vel, self->scaled_sea_offset, &self->staged_behavior_mode, self->cmd_msg_)){
-      //if ((self->last_mode_change == SET_RUN_POS) || (self->last_mode_change == SET_RUN_VEL)){
-      //  self->set_command_failed_counter += 1;
-      //}
+      if ((current_behavior_mode_ == SET_RUN_POS) || (current_behavior_mode_ == SET_RUN_VEL)){
+        self->set_command_failed_counter += 1;
+      }
     }
     
+
     if (flag_update_set_mode_change){
-      printf("self->staged_behavior_mode: %d\n", self->staged_behavior_mode);
+      //printf("self->staged_behavior_mode: %d\n", self->staged_behavior_mode);
       lf_set(set_mode_change, self->staged_behavior_mode);
     }
 
@@ -358,5 +359,10 @@ reactor SerialInterface (send_period: time = 10 ms){
     }
     
   =}
+
+  reaction(uart_handler.not_receiving_error) -> set_mode_change{=
+    self->staged_behavior_mode = SET_IDLE;
+    lf_set(set_mode_change, self->staged_behavior_mode);
+    =}
 }
 

@@ -23,7 +23,8 @@ int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_
 
     uint8_t checksum = 0;
     for (int i = 1; i < idx; ++i) {
-        checksum ^= out_buf[i];
+        //checksum ^= out_buf[i]; // xor checksum
+        checksum = (out_buf[i] + checksum) % CHECKSUM_MOD;
     }
 
     out_buf[idx++] = checksum;
@@ -31,57 +32,7 @@ int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_
     return idx;
 }
 
-// --- Packet Reader (simple version) ---
-int read_packet(int fd, uint8_t *buf, int max_iterations) {
-    int state = 0;
-    int idx = 0;
-    uint8_t length = 0;
 
-    for (int i = 0; i<max_iterations; i++){
-        uint8_t byte;
-        int n = read(fd, &byte, 1);
-        if (n <= 0) {
-            usleep(USLEEP_TIME); // Small delay
-            continue;
-        }
-
-        //printf("read_packet state: %d, byte: %02X\r\n", state, byte);
-        switch (state) {
-            case 0:
-                if (byte == PACKET_START_BYTE) {
-                    buf[0] = byte;
-                    idx = 1;
-                    state = 1;
-                }
-                break;
-            case 1:
-                length = byte;
-                buf[idx++] = byte;
-                state = 2;
-                break;
-            case 2:
-                buf[idx++] = byte;
-                if (idx >= length + 2) {
-                    state = 3;
-                }
-                break;
-            case 3: {
-                buf[idx++] = byte;
-                uint8_t checksum = 0;
-                for (int i = 1; i < idx - 1; ++i)
-                    checksum ^= buf[i];
-                if (checksum == byte) {
-                    return idx; // Packet received
-                } else {
-                    fprintf(stderr, "Invalid checksum\n");
-                    state = 0;
-                    idx = 0;
-                }
-                break;
-            }
-        }
-    }
-}
 
 // =====================
 // Command message specific definitions
@@ -163,19 +114,19 @@ void print_command_message(const CommandMessage *msg) {
     printf("Command Message:\n");
     printf("  Mode: %d\n", msg->behavior_mode);
     printf("  Positions: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.2f ", msg->positions[i]);
+    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,",FLOAT_DECIMAL_SCALE, msg->positions[i]);
     printf("\n");
 
     printf("  Velocities: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.2f ", msg->velocities[i]);
+    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,",FLOAT_DECIMAL_SCALE, msg->velocities[i]);
     printf("\n");
 
     printf("  SEA Positions: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.2f ", msg->sea_positions[i]);
+    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,",FLOAT_DECIMAL_SCALE, msg->sea_positions[i]);
     printf("\n");
 
     printf("  Extra Values: ");
-    for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%.2f ", msg->extra[i]);
+    for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%.*f,",FLOAT_DECIMAL_SCALE, msg->extra[i]);
     printf("\n");
 
     printf("  Timestamp: %d\n", msg->time_stamp);
@@ -292,19 +243,19 @@ void print_state_message(const StateMessage *msg) {
     printf("State Message:\n");
     printf("  Mode: %d\n", msg->behavior_mode);
     printf("  Positions: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.2f ", msg->positions[i]);
+    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,",FLOAT_DECIMAL_SCALE, msg->positions[i]);
     printf("\n");
 
     printf("  Velocities: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.2f ", msg->velocities[i]);
+    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,",FLOAT_DECIMAL_SCALE, msg->velocities[i]);
     printf("\n");
 
     printf("  SEA Positions: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.2f ", msg->sea_positions[i]);
+    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,",FLOAT_DECIMAL_SCALE, msg->sea_positions[i]);
     printf("\n");
 
     printf("  Extra Values: ");
-    for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%.2f ", msg->extra[i]);
+    for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%.*f,",FLOAT_DECIMAL_SCALE, msg->extra[i]);
     printf("\n");
 
     printf("  Timestamp: %d\n", msg->time_stamp);
@@ -334,4 +285,64 @@ void print_state_message_int(const StateMessage *msg) {
     printf("  Timestamp: %d\n", msg->time_stamp);
 
     printf("  Index: %d\n", msg->message_index);
+}
+
+
+void write_state_message_csv_header(char *buffer, size_t size) {
+    int written = 0;
+
+    // Write fixed field: behavior_mode
+    written += snprintf(buffer + written, size - written, "behavior_mode,");
+
+    // Write position headers
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        written += snprintf(buffer + written, size - written, "position_%d,", i);
+
+    // Write velocity headers
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        written += snprintf(buffer + written, size - written, "velocity_%d,", i);
+
+    // Write sea_position headers
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        written += snprintf(buffer + written, size - written, "sea_position_%d,", i);
+
+    // Write extra headers
+    for (int i = 0; i < EXTRA_LENGTH; ++i)
+        written += snprintf(buffer + written, size - written, "extra_%d,", i);
+
+    // Write final fixed fields: time_stamp and message_index
+    written += snprintf(buffer + written, size - written, "time_stamp,message_index");
+}
+
+/**
+ * Serializes a StateMessage to a CSV string.
+ * 
+ * @param msg    Pointer to the StateMessage to serialize
+ * @param buffer Character buffer to write to
+ * @param size   Size of the buffer
+ */
+void serialize_state_message_csv(const StateMessage *msg, char *buffer, size_t size) {
+    int written = 0;
+
+    // Write fixed fields: behavior_mode
+    written += snprintf(buffer + written, size - written, "%d,", msg->behavior_mode);
+
+    // Write positions
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        written += snprintf(buffer + written, size - written, "%.*f,",FLOAT_DECIMAL_SCALE, msg->positions[i]);
+
+    // Write velocities
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        written += snprintf(buffer + written, size - written, "%.*f,",FLOAT_DECIMAL_SCALE, msg->velocities[i]);
+
+    // Write sea_positions
+    for (int i = 0; i < DOF_NUMBER; ++i)
+        written += snprintf(buffer + written, size - written, "%.*f,",FLOAT_DECIMAL_SCALE, msg->sea_positions[i]);
+
+    // Write extra values
+    for (int i = 0; i < EXTRA_LENGTH; ++i)
+        written += snprintf(buffer + written, size - written, "%.*f,",FLOAT_DECIMAL_SCALE, msg->extra[i]);
+
+    // Write timestamp and message index
+    written += snprintf(buffer + written, size - written, "%d,%d", msg->time_stamp, msg->message_index);
 }

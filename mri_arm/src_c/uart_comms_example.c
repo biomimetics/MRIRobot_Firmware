@@ -1,9 +1,12 @@
 #include "../include_c/stm_comms.h"
 #include "../include_c/linux_comms.h"
 
-#define LONG_USLEEP_TIME 7000
+
+
+#define LONG_USLEEP_TIME 10000
 int main() {
     int fd = open_serial(SERIAL_PORT);
+    int res = configure_serial_port(fd);
     if (fd < 0) return 1;
 
     printf("About to start reading...\n");
@@ -22,26 +25,15 @@ int main() {
     float extra_fake[EXTRA_LENGTH];
     for (int i = 0; i<EXTRA_LENGTH; i++) extra_fake[i] = ((float)i) * ((float) i) / 1000.0;
 
-    StateMessage state_msg;
+    
     printf("sizeof(StateMessage): %d\n", sizeof(StateMessage));
+    
     int message_index = 0;
     for (int i = 0; i<1000; i++){
 
-        // receive a state message packet from the stm32    
-        //printf("Before read_packet\n");
-        int rx_len = read_packet(fd, rx_buf, UART_BUFFER_SIZE);
-        
-        //printf("STATE_MSG_SIZE: %d", STATE_MSG_SIZE);
-        //printf("PACKET_BYTE_OVERHEAD: %d", PACKET_BYTE_OVERHEAD);
-        //printf("Before handle_state_message_packet, got rx_len of %d, expecting packet size of %d\n", rx_len, STATE_MSG_SIZE + PACKET_BYTE_OVERHEAD);
-        bool result = handle_state_message_packet(&state_msg, rx_buf, rx_len);
-        if (result){
-            printf("Received state message:\n");
-            print_state_message_int(&state_msg);
-        }
-        else{
-            printf("Failed to read state message!\n");
-        }
+        StateMessage state_msg;
+        int res = read_state_message(fd, &state_msg);
+        print_state_message_int(&state_msg);
 
         // --- Send a STM_State Packet
         CommandMessage transmit_data;
@@ -52,24 +44,13 @@ int main() {
                             0, message_index++ % 256);
 
         print_command_message_int(&transmit_data);
-        // send a command message packet to the stm32
-        uint8_t state_data_buff[200];
-        //printf("Before encode_command_message_to_data_buffer\n");
-        int msg_len = encode_command_message_to_data_buffer(&transmit_data, state_data_buff);
-        //printf("Before build_packet\n");
-        int pkt_len = build_packet(tx_buf, PKT_TYPE_DATA, state_data_buff, msg_len);
-        //printf("After build_packet with pkt_len: %d", pkt_len);
 
-        if (pkt_len == -1){
-            printf("Error building transmission packet!\r\n");
-        }
-        else{
-            write(fd, tx_buf, pkt_len);
-        }
-        
+        send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
+
         usleep(LONG_USLEEP_TIME);
     }
 
+    /**/
     // --- Send a STM_State Packet
         CommandMessage transmit_data;
 
@@ -79,20 +60,8 @@ int main() {
                             0, message_index++ % 256);
 
         print_command_message_int(&transmit_data);
-        // send a command message packet to the stm32
-        uint8_t state_data_buff[200];
-        //printf("Before encode_command_message_to_data_buffer\n");
-        int msg_len = encode_command_message_to_data_buffer(&transmit_data, state_data_buff);
-        //printf("Before build_packet\n");
-        int pkt_len = build_packet(tx_buf, PKT_TYPE_DATA, state_data_buff, msg_len);
-        //printf("After build_packet with pkt_len: %d", pkt_len);
 
-        if (pkt_len == -1){
-            printf("Error building transmission packet!\r\n");
-        }
-        else{
-            write(fd, tx_buf, pkt_len);
-        }
+
 
     printf("Exiting!\r\n");
     close(fd);
