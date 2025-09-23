@@ -24,8 +24,13 @@ reactor UART_Handler(receive_period: time = 10 ms){
     input state_msg: StateMessage
     output cmd_msg: CommandMessage
 
+    output not_receiving_error: bool
+
     state state_msg_: StateMessage
     state cmd_msg_: CommandMessage
+
+    state not_receiving_count: int = 0
+    state not_receiving_count_max: int = 100
 
     //timer transmit_timer(0 ms, transmit_period)
     timer receive_timer(0 ms, receive_period)
@@ -34,6 +39,8 @@ reactor UART_Handler(receive_period: time = 10 ms){
         // ------
         // Init functions
         // ------
+
+        bool received_new_message = false;
 
         uint8_t uart_rx_dma_buffer[UART_BUFFER_SIZE];
         uint8_t uart_rx_dma_buffer_copy[UART_BUFFER_SIZE];
@@ -48,8 +55,14 @@ reactor UART_Handler(receive_period: time = 10 ms){
 
         void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
             //handle_send_packet(uart_rx_dma_buffer, Size);
+            //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
+            //if (UART_BUFFER_SIZE == Size){
+            //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
             uart_receive_size = (size_t)Size;
             memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, Size); // moves the data over to a buffer that's handled in the receive update
+            received_new_message = true;
+            HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
+            //}
         }
         
     =}
@@ -77,15 +90,30 @@ reactor UART_Handler(receive_period: time = 10 ms){
             printf("Failed to build packet!");
         }
         else{
-            printf("Sending packet with length: %d", packet_len);
+            //printf("Sending packet with length: %d", packet_len);
+            //printf("UART_BUFFER_SIZE: %d\n", UART_BUFFER_SIZE);
+            //printf("sizeof(StateMessage): %d\n", sizeof(StateMessage));
+            //printf("Sending packet with data buffer length: %d, and total length: %d\n", data_buffer_len, packet_len);
             HAL_UART_Transmit_DMA(&DMA_UART, uart_tx_dma_buffer, packet_len);
         }
     =}
 
-    reaction (receive_timer) -> cmd_msg{=
+    reaction (receive_timer) -> cmd_msg, not_receiving_error{=
         // bool decode_data_buffer_to_command_message(CommandMessage *msg, uint8_t *data_buffer, size_t data_buffer_len)
-        handle_state_message_packet(&self->cmd_msg_, uart_rx_dma_buffer_copy, uart_receive_size);
-        lf_set(cmd_msg, self->cmd_msg_);
-        
+        if (received_new_message){
+            handle_state_message_packet(&self->cmd_msg_, uart_rx_dma_buffer_copy, uart_receive_size);
+            lf_set(cmd_msg, self->cmd_msg_);
+            received_new_message = false;
+            self->not_receiving_count = 0;
+        }
+        else{
+            self->not_receiving_count++;
+        }
+
+        if (self->not_receiving_count_max < self->not_receiving_count){
+            printf("UART Handler not receiving new data!\n");
+            self->not_receiving_count = 0;
+            lf_set(not_receiving_error, true);
+        }        
     =}
 }

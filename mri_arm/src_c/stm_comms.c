@@ -90,7 +90,7 @@ int read_packet(int fd, uint8_t *buf, int max_iterations) {
 void construct_command_message(CommandMessage* msg, int behavior_mode,
                         const float* positions, const float* velocities,
                         const float* sea_positions, const float* extra,
-                        int time_stamp) {
+                        int time_stamp, int message_index) {
     if (!msg) return;
 
     msg->behavior_mode = behavior_mode;
@@ -101,29 +101,34 @@ void construct_command_message(CommandMessage* msg, int behavior_mode,
     memcpy(msg->extra, extra, sizeof(float) * EXTRA_LENGTH);
 
     msg->time_stamp = time_stamp;
+    msg->message_index = message_index;
 }
 
-size_t encode_command_message_to_data_buffer(const CommandMessage *msg, uint8_t *buffer) {
-      size_t offset = 0;
+int encode_command_message_to_data_buffer(const CommandMessage *msg, uint8_t *buffer) {
+    int offset = 0;
 
-      memcpy(buffer + offset, &msg->behavior_mode, sizeof(int));
-      offset += sizeof(int);
+    memcpy(buffer + offset, &msg->behavior_mode, sizeof(int));
+    offset += sizeof(int);
 
-      memcpy(buffer + offset, msg->positions, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
+    memcpy(buffer + offset, msg->positions, sizeof(float) * DOF_NUMBER);
+    offset += sizeof(float) * DOF_NUMBER;
 
-      memcpy(buffer + offset, msg->velocities, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
+    memcpy(buffer + offset, msg->velocities, sizeof(float) * DOF_NUMBER);
+    offset += sizeof(float) * DOF_NUMBER;
 
-      memcpy(buffer + offset, msg->sea_positions, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
+    memcpy(buffer + offset, msg->sea_positions, sizeof(float) * DOF_NUMBER);
+    offset += sizeof(float) * DOF_NUMBER;
 
-      memcpy(buffer + offset, msg->extra, sizeof(float) * EXTRA_LENGTH);
-      offset += sizeof(float) * EXTRA_LENGTH;
+    memcpy(buffer + offset, msg->extra, sizeof(float) * EXTRA_LENGTH);
+    offset += sizeof(float) * EXTRA_LENGTH;
 
-      buffer[offset++] = msg->time_stamp;
+    //buffer[offset] = &msg->time_stamp;
+    memcpy(buffer + offset, &msg->time_stamp, sizeof(int));
+    offset += sizeof(int);
 
-      return offset;
+    memcpy(buffer + offset, &msg->message_index, sizeof(int));
+    offset += sizeof(int);
+    return offset;
 }
 
 
@@ -173,7 +178,9 @@ void print_command_message(const CommandMessage *msg) {
     for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%.2f ", msg->extra[i]);
     printf("\n");
 
-    printf("  Timestamp: %u\n", msg->time_stamp);
+    printf("  Timestamp: %d\n", msg->time_stamp);
+
+    printf("  Index: %d\n", msg->message_index);
 }
 
 void print_command_message_int(const CommandMessage *msg) {
@@ -195,7 +202,9 @@ void print_command_message_int(const CommandMessage *msg) {
     for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%d ", (int)(msg->extra[i] * FLOAT_PRINT_SCALE));
     printf("\n");
 
-    printf("  Timestamp: %u\n", msg->time_stamp);
+    printf("  Timestamp: %d\n", msg->time_stamp);
+
+    printf("  Index: %d\n", msg->message_index);
 }
 
 
@@ -203,44 +212,50 @@ void print_command_message_int(const CommandMessage *msg) {
 // Receive Data specific definitions
 // =====================
 
-void construct_state_message(StateMessage* data, int behavior_mode, 
+void construct_state_message(StateMessage* msg, int behavior_mode, 
                             const float* positions, const float* velocities,
                             const float* sea_positions, const float* extra,
-                            int time_stamp) {
-    if (!data) return;
+                            int time_stamp, int message_index) {
+    if (!msg) return;
 
-    data->behavior_mode = behavior_mode;
+    msg->behavior_mode = behavior_mode;
 
-    memcpy(data->positions, positions, sizeof(float) * DOF_NUMBER);
-    memcpy(data->velocities, velocities, sizeof(float) * DOF_NUMBER);
-    memcpy(data->sea_positions, sea_positions, sizeof(float) * DOF_NUMBER);
-    memcpy(data->extra, extra, sizeof(float) * EXTRA_LENGTH);
+    memcpy(msg->positions, positions, sizeof(float) * DOF_NUMBER);
+    memcpy(msg->velocities, velocities, sizeof(float) * DOF_NUMBER);
+    memcpy(msg->sea_positions, sea_positions, sizeof(float) * DOF_NUMBER);
+    memcpy(msg->extra, extra, sizeof(float) * EXTRA_LENGTH);
 
-    data->time_stamp = time_stamp;
+    msg->time_stamp = time_stamp;
+    msg->message_index = message_index;
 }
 
-int encode_state_message_to_data_buffer(const StateMessage *data, uint8_t *buffer) {
-      size_t offset = 0;
+int encode_state_message_to_data_buffer(const StateMessage *msg, uint8_t *buffer) {
+    size_t offset = 0;
 
-      memcpy(buffer + offset, &data->behavior_mode, sizeof(int));
-      offset += sizeof(int);
+    memcpy(buffer + offset, &msg->behavior_mode, sizeof(int));
+    offset += sizeof(int);
 
-      memcpy(buffer + offset, data->positions, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
+    memcpy(buffer + offset, msg->positions, sizeof(float) * DOF_NUMBER);
+    offset += sizeof(float) * DOF_NUMBER;
 
-      memcpy(buffer + offset, data->velocities, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
+    memcpy(buffer + offset, msg->velocities, sizeof(float) * DOF_NUMBER);
+    offset += sizeof(float) * DOF_NUMBER;
 
-      memcpy(buffer + offset, data->sea_positions, sizeof(float) * DOF_NUMBER);
-      offset += sizeof(float) * DOF_NUMBER;
+    memcpy(buffer + offset, msg->sea_positions, sizeof(float) * DOF_NUMBER);
+    offset += sizeof(float) * DOF_NUMBER;
 
-      memcpy(buffer + offset, data->extra, sizeof(float) * EXTRA_LENGTH);
-      offset += sizeof(float) * EXTRA_LENGTH;
+    memcpy(buffer + offset, msg->extra, sizeof(float) * EXTRA_LENGTH);
+    offset += sizeof(float) * EXTRA_LENGTH;
 
-      buffer[offset++] = sizeof(int); //data->time_stamp;
+    //buffer[offset++] = sizeof(int); //data->time_stamp;
+    memcpy(buffer + offset, &msg->time_stamp, sizeof(int));
+    offset += sizeof(int);
 
-      return offset;
-    }
+    memcpy(buffer + offset, &msg->message_index, sizeof(int));
+    offset += sizeof(int);
+
+    return offset;
+}
 
 // --- Parse the incomming packet's data and write it to the state structure
 bool decode_data_buffer_to_state_message(StateMessage *msg, uint8_t *data_buffer, size_t data_buffer_len) {
@@ -292,7 +307,9 @@ void print_state_message(const StateMessage *msg) {
     for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%.2f ", msg->extra[i]);
     printf("\n");
 
-    printf("  Timestamp: %u\n", msg->time_stamp);
+    printf("  Timestamp: %d\n", msg->time_stamp);
+
+    printf("  Index: %d\n", msg->message_index);
 }
 
 void print_state_message_int(const StateMessage *msg) {
@@ -314,5 +331,7 @@ void print_state_message_int(const StateMessage *msg) {
     for (int i = 0; i < EXTRA_LENGTH; ++i) printf("%d ", (int)(msg->extra[i] * FLOAT_PRINT_SCALE));
     printf("\n");
 
-    printf("  Timestamp: %u\n", msg->time_stamp);
+    printf("  Timestamp: %d\n", msg->time_stamp);
+
+    printf("  Index: %d\n", msg->message_index);
 }

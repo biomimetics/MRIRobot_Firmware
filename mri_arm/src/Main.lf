@@ -111,7 +111,7 @@ main reactor {
 
   qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
   usm = new USM()                            // Ultrasonic motor controllers
-  ros_controller = new SerialInterface(send_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
+  ros_controller = new SerialInterface(send_period = 50 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   motor_controller = new MotorController(refresh_period = 10 ms)    // Main Motor driver + controller
   home_controller = new HomeController()      // Used to home the motors
   mode_machine = new ModeMachine()            // Used to trigger other reactors behavior
@@ -149,6 +149,7 @@ main reactor {
   mode_machine.motor_controller_internal_external_target_mode -> motor_controller.target_mode
   mode_machine.motor_controller_target_sel -> motor_controller.target_sel
   mode_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
+  mode_machine.current_mode_status -> ros_controller.current_mode_status
 
   home_controller.is_home -> mode_machine.is_homing_finished after 0;
   home_controller.motor_speed -> motor_controller.target_vel_int
