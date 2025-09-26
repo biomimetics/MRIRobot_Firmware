@@ -5,31 +5,12 @@
 // --- Serial Port Setup ---
 int open_serial(const char *port) {
     //int fd = open(port, O_RDWR | O_NOCTTY | O_NDELAY);
-    int fd = open(SERIAL_PORT, O_RDWR | O_NOCTTY | O_SYNC);
+    int fd = open(port, O_RDWR | O_NOCTTY | O_SYNC);
     if (fd == -1) {
         perror("open_serial");
         return -1;
     }
-    /*
-    struct termios options;
-    tcgetattr(fd, &options);
 
-    cfsetispeed(&options, BAUDRATE);
-    cfsetospeed(&options, BAUDRATE);
-
-    options.c_cflag |= (CLOCAL | CREAD);  // Enable receiver, set local mode
-    options.c_cflag &= ~PARENB;           // No parity
-    options.c_cflag &= ~CSTOPB;           // 1 stop bit
-    options.c_cflag &= ~CSIZE;
-    options.c_cflag |= CS8;               // 8 data bits
-
-    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG); // raw input
-    options.c_oflag &= ~OPOST;                          // raw output
-
-    tcsetattr(fd, TCSANOW, &options);
-
-    tcflush(fd, TCIFLUSH); // Flushes input buffer
-    */
     return fd;
 }
 
@@ -96,6 +77,7 @@ int read_packet(int fd, uint8_t *buf, int max_iterations) {
         }
 
         //printf("read_packet state: %d, byte: %02X\r\n", state, byte);
+        //printf("idx: %d", idx);
         switch (state) {
             case 0:
                 if (byte == PACKET_START_BYTE) {
@@ -111,7 +93,7 @@ int read_packet(int fd, uint8_t *buf, int max_iterations) {
                 break;
             case 2:
                 buf[idx++] = byte;
-                if (idx >= length + 2) {
+                if (idx >= length + 2) { // length doesn't include start byte and checksum
                     state = 3;
                 }
                 break;
@@ -134,15 +116,29 @@ int read_packet(int fd, uint8_t *buf, int max_iterations) {
     }
 }
 
+/*
+typedef struct {
+    uint8_t start;
+    uint8_t length;
+    uint8_t type;
+    uint8_t data[UART_BUFFER_SIZE - PACKET_BYTE_OVERHEAD]; // excluding start, len, type, checksum
+    uint8_t checksum;
+} Packet;
+*/
+// --- Packet Reader (simple version) -
+
 int send_command_message(int port_id, CommandMessage* msg){
 
     uint8_t tx_buff[UART_BUFFER_SIZE];
+    memset(tx_buff, 0, UART_BUFFER_SIZE);
+
     uint8_t state_data_buff[COMMAND_MSG_SIZE];
+    memset(state_data_buff, 0, COMMAND_MSG_SIZE);
 
     int msg_len = encode_command_message_to_data_buffer(msg, state_data_buff);
 
     int pkt_len = build_packet(tx_buff, PKT_TYPE_DATA, state_data_buff, msg_len);
-
+    
     if (pkt_len == -1){
         printf("Error building transmission packet!\r\n");
         return 0;
@@ -155,6 +151,8 @@ int send_command_message(int port_id, CommandMessage* msg){
 
 int read_state_message(int port_id, StateMessage* state_msg){
     uint8_t rx_buff[UART_BUFFER_SIZE];
+    memset(rx_buff, 0, UART_BUFFER_SIZE);
+
     int rx_len = read_packet(port_id, rx_buff, UART_BUFFER_SIZE);
 
     if (0 < rx_len){

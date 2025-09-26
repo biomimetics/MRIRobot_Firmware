@@ -8,6 +8,15 @@
 // TX/RX packet defintiions
 // =====================
 
+void print_buffer(uint8_t *buffer, uint16_t length){
+    printf("Received %d bytes:\n", length);
+    for (uint16_t i = 0; i < length; i++)
+    {
+        printf("0x%02X ", buffer[i]);
+    }
+    printf("\n");
+}
+
 // --- Packet Builder ---
 int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_len) {
     if (data_len > UART_BUFFER_SIZE - 4) return -1;
@@ -23,8 +32,8 @@ int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_
 
     uint8_t checksum = 0;
     for (int i = 1; i < idx; ++i) {
-        //checksum ^= out_buf[i]; // xor checksum
-        checksum = (out_buf[i] + checksum) % CHECKSUM_MOD;
+        checksum ^= out_buf[i]; // xor checksum
+        //checksum = (out_buf[i] + checksum) % CHECKSUM_MOD;
     }
 
     out_buf[idx++] = checksum;
@@ -85,11 +94,11 @@ int encode_command_message_to_data_buffer(const CommandMessage *msg, uint8_t *bu
 
 bool decode_data_buffer_to_command_message(CommandMessage *msg, uint8_t *data_buffer, size_t data_buffer_len) {
     if (data_buffer_len != sizeof(CommandMessage)) {
-        fprintf(stderr, "Unexpected STM_Packet size! Got %zu, expected %zu\n", data_buffer_len, sizeof(CommandMessage));
+        fprintf(stderr, "Unexpected CommandMessage size! Got %d, expected %d\n", data_buffer_len, sizeof(CommandMessage));
         return 0;
     }
 
-    memcpy(msg, data_buffer, sizeof(data_buffer_len));
+    memcpy(msg, data_buffer, sizeof(CommandMessage));
     return 1;
 }
 
@@ -104,6 +113,8 @@ bool handle_command_message_packet(CommandMessage* msg, uint8_t *packet, size_t 
         case PKT_TYPE_DATA:
             uint8_t *data_buffer = &packet[3]; // After start, len, type
             size_t data_len = packet_len - 4; // Remove start, len, type, checksum
+            //printf("In handle_command_message_packet, above decode_data_buffer_to_command_message. Got data packet of: \n");
+            //print_buffer(data_buffer, data_len);
             result = decode_data_buffer_to_command_message(msg, data_buffer, data_len);
             break;
     }
@@ -211,7 +222,7 @@ int encode_state_message_to_data_buffer(const StateMessage *msg, uint8_t *buffer
 // --- Parse the incomming packet's data and write it to the state structure
 bool decode_data_buffer_to_state_message(StateMessage *msg, uint8_t *data_buffer, size_t data_buffer_len) {
     if (data_buffer_len != sizeof(StateMessage)) {
-        fprintf(stderr, "Unexpected StateMessage size! Got %zu, expected %zu\n", data_buffer_len, sizeof(StateMessage));
+        fprintf(stderr, "Unexpected StateMessage size! Got %d, expected %d\n", data_buffer_len, sizeof(StateMessage));
         return 0;
     }
 

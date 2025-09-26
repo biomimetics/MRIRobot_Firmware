@@ -28,10 +28,10 @@ preamble {=
   #define DMA_RX_BUFFER_SIZE 400 //256//(STM_BUFFER_SIZE) //200
   //#define DMA_UART huart6 // was huart1
 
-  #define PRINT_SERIAL 1
+  #define PRINT_SERIAL 0
 =}
 
-reactor SerialInterface (send_period: time = 10 ms){
+reactor SerialInterface (send_period: time = 10 ms, receive_period: time = 10 ms){
 
   input current_mode_status: mode_status
   input behavior_mode: int
@@ -58,7 +58,7 @@ reactor SerialInterface (send_period: time = 10 ms){
 
 
   // trigger timers
-  timer trigger_send(0 ms, send_period) // unused!
+  timer trigger_send(0 ms, send_period)
   //timer trigger_update(0 ms, update_period)
   timer trigger_test(0 ms, 2000 ms)
   timer trigger_print(0 ms, 1000 ms)
@@ -94,7 +94,7 @@ reactor SerialInterface (send_period: time = 10 ms){
 
   state send_message_index: int = 0
 
-  uart_handler = new UART_Handler(receive_period = 10 ms)
+  uart_handler = new UART_Handler(receive_period = receive_period)
 
   preamble {=
 
@@ -296,9 +296,13 @@ reactor SerialInterface (send_period: time = 10 ms){
 
   // Update our current sea position to send to ROS
   reaction(current_sea_position) {=
+    //printf("SEA Positions: ");
     for (int i=0; i<7; i++) {
       sea_position_[i] = (current_sea_position[i]->value);
+      //printf("%d", (int)(sea_position_[i] * 1000));
     }
+    //printf("\n");
+
   =}
 
   reaction(motor_cmd_speed) {=

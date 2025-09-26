@@ -54,6 +54,7 @@ typedef struct {
     uint8_t checksum;
 } Packet;
 
+void print_buffer(uint8_t *buffer, uint16_t length);
 int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_len);
 
 // =====================
@@ -119,7 +120,7 @@ typedef struct {
     int time_stamp;
     int message_index;
 } StateMessage;
-
+//#pragma pack(pop)
 
 
 

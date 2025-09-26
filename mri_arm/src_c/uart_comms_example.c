@@ -3,7 +3,7 @@
 
 
 
-#define LONG_USLEEP_TIME 10000
+#define LONG_USLEEP_TIME 50000
 int main() {
     int fd = open_serial(SERIAL_PORT);
     int res = configure_serial_port(fd);
@@ -26,12 +26,34 @@ int main() {
     for (int i = 0; i<EXTRA_LENGTH; i++) extra_fake[i] = ((float)i) * ((float) i) / 1000.0;
 
     
-    printf("sizeof(StateMessage): %d\n", sizeof(StateMessage));
+    //printf("sizeof(StateMessage): %d\n", sizeof(StateMessage));
     
     int message_index = 0;
+
     for (int i = 0; i<1000; i++){
+        
+        int n = read(fd, &rx_buf, UART_BUFFER_SIZE);
+        printf("Read %d bytes, expected %d.\n", n, UART_BUFFER_SIZE);
+
+        print_buffer(rx_buf, n);
 
         StateMessage state_msg;
+
+        
+        int res = handle_state_message_packet(&state_msg, rx_buf, n);
+        if (res){
+            print_state_message_int(&state_msg);
+        }
+        else{
+            printf("failed to parse it, res was %d\n", res);
+        }
+        
+
+        
+
+        /*
+        //printf("sizeof(Int): %zu\n", sizeof(int)); // just making sure I wasn't going crazy
+        
         int res = read_state_message(fd, &state_msg);
         print_state_message_int(&state_msg);
 
@@ -46,7 +68,7 @@ int main() {
         print_command_message_int(&transmit_data);
 
         send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
-
+        */
         usleep(LONG_USLEEP_TIME);
     }
 
@@ -60,6 +82,8 @@ int main() {
                             0, message_index++ % 256);
 
         print_command_message_int(&transmit_data);
+
+        send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
 
 
 

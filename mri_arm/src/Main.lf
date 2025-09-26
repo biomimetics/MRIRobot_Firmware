@@ -83,17 +83,22 @@ main reactor {
 
 
     // Define empty function handlers for UART callbacks
+    void HAL_UART_RxCallback_DMA();
     void HAL_UART_RxCallback3();
     void HAL_UART_RxCallback1();
 
     void HAL_UART_TxCallback1();
 
     // Define global recieve callback
+
+    
     void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
       if (huart->Instance == USART3) {
-        HAL_UART_RxCallback3();
+        HAL_UART_RxCallback3(); // 
       } else if (huart->Instance == USART1) {
         HAL_UART_RxCallback1();
+      } else if (huart->Instance == UART4) { // UART4 // DMA_UART
+        HAL_UART_RxCallback_DMA();
       }
     }
 
@@ -109,9 +114,10 @@ main reactor {
   timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
   timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
 
-  qdec = new QDEC(sample_period = 5 ms)     // FPGA-based QDEC Encoders
+  qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
   usm = new USM()                            // Ultrasonic motor controllers
-  ros_controller = new SerialInterface(send_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
+  //ros_controller = new SerialInterface(send_period = 20 ms, receive_period = 20 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
+  ros_controller = new SerialInterface(send_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   motor_controller = new MotorController(refresh_period = 10 ms)    // Main Motor driver + controller
   home_controller = new HomeController()      // Used to home the motors
   mode_machine = new ModeMachine()            // Used to trigger other reactors behavior

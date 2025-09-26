@@ -17,6 +17,7 @@ preamble {=
   #include <../../../include_c/sm_config.h>
 
   #define PRINT_MODE 0
+  #define PRINT_MODE_STATUS 0
   /*
   typedef struct mode_status{
     MODE_ENUM current_mode_index;
@@ -218,7 +219,9 @@ reactor ModeMachine (slow_refresh_period: time = 20 ms, status_refresh_period: t
     =}
     
     reaction(slow_status_tick) {=
-      printModeStatus();
+      if (PRINT_MODE_STATUS){
+        printModeStatus();
+      }
       //toggleStatusLED();
       =}
 
