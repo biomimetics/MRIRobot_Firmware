@@ -366,8 +366,10 @@ reactor SerialInterface (send_period: time = 10 ms, receive_period: time = 10 ms
   =}
 
   reaction(uart_handler.not_receiving_error) -> set_mode_change{=
-    self->staged_behavior_mode = SET_IDLE;
-    lf_set(set_mode_change, self->staged_behavior_mode);
+    if (uart_handler.not_receiving_error->value == true){
+      self->staged_behavior_mode = SET_IDLE;
+      lf_set(set_mode_change, self->staged_behavior_mode);
+    }
     =}
 }
 

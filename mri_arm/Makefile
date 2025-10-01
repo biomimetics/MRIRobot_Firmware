@@ -79,3 +79,6 @@ comms:
 
 comms_logger:
 	gcc src_c/uart_comms_logger.c src_c/linux_comms.c src_c/stm_comms.c -o uart_logger
+
+comms_listener:
+	gcc src_c/uart_comms_listener.c src_c/linux_comms.c src_c/stm_comms.c -o uart_listener

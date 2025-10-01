@@ -96,6 +96,7 @@ main reactor {
       if (huart->Instance == USART3) {
         HAL_UART_RxCallback3(); // 
       } else if (huart->Instance == USART1) {
+        //HAL_UART_RxCallback_DMA();
         HAL_UART_RxCallback1();
       } else if (huart->Instance == UART4) { // UART4 // DMA_UART
         HAL_UART_RxCallback_DMA();

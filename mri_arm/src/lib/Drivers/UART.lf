@@ -31,7 +31,7 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
     state cmd_msg_: CommandMessage
 
     state not_receiving_count: int = 0
-    state not_receiving_count_max: int = 100
+    state not_receiving_count_max: int = 1000
 
     //timer transmit_timer(0 ms, transmit_period)
     timer receive_timer(0 ms, receive_period)
@@ -152,7 +152,10 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
             if (PRINT_UART) printf("UART Handler not receiving new data!\n");
             self->not_receiving_count = 0;
             lf_set(not_receiving_error, true);
-        }        
+        }
+        else{
+            lf_set(not_receiving_error, false);
+        }
 
     =}
 }
