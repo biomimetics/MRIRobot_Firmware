@@ -61,7 +61,7 @@ int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_
 // Command Message data structure definitions and helper functions
 // =====================
 
-//#pragma pack(push, 1)
+#pragma pack(push, 1)
 typedef struct {
     int behavior_mode;
     float positions[DOF_NUMBER];
@@ -71,7 +71,7 @@ typedef struct {
     int time_stamp;
     int message_index;
 } CommandMessage;
-//#pragma pack(pop)
+#pragma pack(pop)
 
 
 
@@ -110,7 +110,7 @@ void print_command_message_int(const CommandMessage *msg);
 // State Message data structure definitions and helper functions
 // =====================
 
-//#pragma pack(push, 1)
+#pragma pack(push, 1)
 typedef struct {
     int behavior_mode;
     float positions[DOF_NUMBER];
@@ -120,7 +120,7 @@ typedef struct {
     int time_stamp;
     int message_index;
 } StateMessage;
-//#pragma pack(pop)
+#pragma pack(pop)
 
 
 

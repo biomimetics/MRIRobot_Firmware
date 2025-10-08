@@ -32,8 +32,8 @@ int build_packet(uint8_t *out_buf, PacketType type, uint8_t *data, uint8_t data_
 
     uint8_t checksum = 0;
     for (int i = 1; i < idx; ++i) {
-        checksum ^= out_buf[i]; // xor checksum
-        //checksum = (out_buf[i] + checksum) % CHECKSUM_MOD;
+        //checksum ^= out_buf[i]; // xor checksum
+        checksum = (out_buf[i] + checksum) % CHECKSUM_MOD;
     }
 
     out_buf[idx++] = checksum;
