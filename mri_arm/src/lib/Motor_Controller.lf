@@ -20,7 +20,7 @@ preamble {=
   //state print_motor_controller: bool = true
 
   // setting this to zero wasn't working as expected. find out why!
-  #define USE_JOINTSPACE_CONTROLLERS 1 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
+  #define USE_JOINTSPACE_CONTROLLERS 0 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
   #define USE_SEA_ANGLE_WITH_POSITION_CONTROL 0
 =}
 
