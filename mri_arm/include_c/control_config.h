@@ -18,7 +18,7 @@ typedef struct {
 static PID_Config pos_pid_config_0 = {
     10.0, // kp // was 10.0
     0.10, // kd // was 0.10
-    0.01, // ki // was 0.01
+    0.00, // ki // was 0.01
     10.0,
     10.0 
   };
@@ -29,7 +29,7 @@ static PID_Config pos_pid_config_0 = {
 static PID_Config pos_pid_config_1 = {
     10.0, // kp // was 10.0
     0.10, // kd // was 0.10
-    0.01, // ki // was 0.01
+    0.00, // ki // was 0.01
     10.0,
     10.0 
   };
@@ -37,7 +37,7 @@ static PID_Config pos_pid_config_1 = {
 static PID_Config pos_pid_config_2 = {
     10.0, // kp // was 10.0
     0.10, // kd // was 0.10
-    0.01, // ki // was 0.01
+    0.00, // ki // was 0.01
     10.0,
     10.0 
   };
@@ -49,7 +49,7 @@ static PID_Config pos_pid_config_2 = {
 static PID_Config pos_pid_config_3 = {
     10.0, // kp // was 10.0
     0.10, // kd // was 0.10
-    0.01, // ki // was 0.01
+    0.00, // ki // was 0.01
     10.0,
     10.0 
   };
@@ -57,7 +57,7 @@ static PID_Config pos_pid_config_3 = {
 static PID_Config pos_pid_config_4 = {
     10.0, // kp // was 10.0
     0.10, // kd // was 0.10
-    0.01, // ki // was 0.01
+    0.00, // ki // was 0.01
     10.0,
     10.0 
   };
@@ -69,7 +69,7 @@ static PID_Config pos_pid_config_4 = {
 static PID_Config pos_pid_config_5 = {
     10.0, // kp // was 10.0
     0.10, // kd // was 0.10
-    0.01, // ki // was 0.01
+    0.00, // ki // was 0.01
     10.0,
     10.0 
   };
@@ -77,7 +77,7 @@ static PID_Config pos_pid_config_5 = {
 static PID_Config pos_pid_config_6 = {
     10.0, // kp // was 10.0
     0.10, // kd // was 0.10
-    0.01, // ki // was 0.01
+    0.00, // ki // was 0.01
     10.0,
     10.0 
   };

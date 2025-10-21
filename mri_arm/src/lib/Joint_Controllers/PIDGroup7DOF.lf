@@ -21,7 +21,7 @@ preamble {=
 
 =}
 
-// default deadband_angle should be about 0.5 deg or 0.5 deg/s
+// default deadband_angle should be about of 0.0044 rad = 0.5 deg or 0.5 deg/s
 reactor PIDGroup7DOF(id: int = 0, deadband_angle: float = 0.0044, do_feedforward: bool = false) {
   input reset_errors: bool
 

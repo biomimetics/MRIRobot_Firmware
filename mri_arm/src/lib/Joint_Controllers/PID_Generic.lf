@@ -33,10 +33,12 @@ reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedfo
   state current_state_: float = 0.0
   state target_state_: float = 0.0
   state control_signal_: float = 0.0
+  
 
   // to help with state variables
   state last_error: float = 0.0  
   state prev_time: time = 0
+  state last_control_signal_: float = 0.0
 
   // error and control signal components
   state error: float = 0.0
@@ -67,7 +69,7 @@ reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedfo
 
    int printcnt = 0;
 
-   float filter_alpha = 0.7;
+   float filter_alpha = 0.5;
    float expFilterInput(float input, float old, float alpha){
     return (alpha) * input + (1.0 - alpha) * old;
    }
@@ -178,6 +180,8 @@ reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedfo
 
     doControlSignalClamping();
 
+    self->control_signal_ = expFilterInput(self->control_signal_, self->last_control_signal_, filter_alpha); // self->current_state_ = expFilterInput(current_state->value, self->current_state_, filter_alpha);
+    self->last_control_signal_ = self->control_signal_;
     lf_set(control_signal, self->control_signal_);
     
     
