@@ -19,7 +19,7 @@ preamble {=
   #define USE_INPUT_FILTER 1
 =}
 
-reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedforward:bool=false, control_signal_max:float=1.0, integral_clamping_max:float=1.0) {
+reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedforward:bool=false, control_signal_max:float=1000.0, integral_clamping_max:float=1000.0) {
   input Kp: float
   input Kd: float
   input Ki: float
@@ -75,7 +75,7 @@ reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedfo
 
   method doErrorDeadbanding(): void {=
     if (fabsf(self->error) < self->error_deadband){
-      self->control_signal_ = 0.0;
+      self->error = 0.0;
     }
   =}
 
@@ -162,6 +162,7 @@ reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedfo
     self->last_error = self->error;
     //self->error = (self->target_state_) - (self->current_state_); 
     self->error = (target_state->value) - (current_state->value);
+    doErrorDeadbanding(); // zeros out error if it's less than the deadband. if done here, doesn't propagate to control signals, likely more smooth
 
     self->signal_p = (self->error); // Kp * (error)
     self->signal_d = ((self->error - self->last_error) / self->interval_sec); // Kd * d(error)/dt
@@ -171,16 +172,14 @@ reactor PIDControllerGeneric(id: int = 0, error_deadband: float=0.000, do_feedfo
 
     self->control_signal_ = self->Kp_ * self->signal_p + self->Kd_ * self->signal_d + self->Ki_ * self->signal_i; // sum all clamped components
 
-    doErrorDeadbanding();
+    if (self->do_feedforward){
+      self->control_signal_ = self->control_signal_ + target_state->value;
+    }
+
     doControlSignalClamping();
 
-    if (self->do_feedforward){
-      //lf_set(control_signal, self->control_signal_ + self->target_state_);
-      lf_set(control_signal, self->control_signal_ + target_state->value);
-    }
-    else {
-      lf_set(control_signal, self->control_signal_);
-    }
+    lf_set(control_signal, self->control_signal_);
+    
     
     //lf_set(control_signal, self->control_signal_);
 

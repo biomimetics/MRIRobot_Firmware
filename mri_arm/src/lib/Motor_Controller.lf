@@ -19,8 +19,7 @@ preamble {=
   #define PRINT_MOTOR_CONTROLLER 0
   //state print_motor_controller: bool = true
 
-  // setting this to zero wasn't working as expected. find out why!
-  #define USE_JOINTSPACE_CONTROLLERS 0 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
+  #define USE_JOINTSPACE_CONTROLLERS 1 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
   #define USE_SEA_ANGLE_WITH_POSITION_CONTROL 0
 =}
 
@@ -72,6 +71,8 @@ reactor MotorController(refresh_period: time = 10 ms) {
 
   state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
   state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for position control
+  state speed_cmd: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state speed_cmd_max: float = 20.0
 
   state target_mode_: TARGET_SRC = 0
   state enable_motor_command_: bool = false
@@ -307,19 +308,32 @@ reactor MotorController(refresh_period: time = 10 ms) {
     if (self->enable_motor_command_){
       // We use this to set either the speed or position of the motors
       if (PRINT_MOTOR_CONTROLLER) {printf("Motor_Controller: Setting speeds of: ");}
-        for(int i=0; i<7; i++){
-          if ((self->_target_sel[i] == MODE_POS)){
-            if (PRINT_MOTOR_CONTROLLER) {printf("p%d, ", (int)(self->speed_posc[i] * 1000));}
-            lf_set(speed[i], self->speed_posc[i]);
-          }
-          else if((self->_target_sel[i] == MODE_VEL)){
-            if (PRINT_MOTOR_CONTROLLER) {printf("v%d, ", (int)(self->speed_spc[i] * 1000));}
-            lf_set(speed[i], self->speed_spc[i]);
-          }
-          else{
-            printf("Received bad target_sel! Got %d, expected %d or %d. Not sending!", self->_target_sel[i], MODE_POS, MODE_VEL);
-          }
+      for(int i=0; i<7; i++){
+        if ((self->_target_sel[i] == MODE_POS)){
+          if (PRINT_MOTOR_CONTROLLER) {printf("p%d, ", (int)(self->speed_posc[i] * 1000));}
+          //lf_set(speed[i], self->speed_posc[i]);
+          self->speed_cmd[i] = self->speed_posc[i];
         }
+        else if((self->_target_sel[i] == MODE_VEL)){
+          if (PRINT_MOTOR_CONTROLLER) {printf("v%d, ", (int)(self->speed_spc[i] * 1000));}
+          //lf_set(speed[i], self->speed_spc[i]);
+          self->speed_cmd[i] = self->speed_spc[i];
+        }
+        else{
+          printf("Received bad target_sel! Got %d, expected %d or %d. Not sending!", self->_target_sel[i], MODE_POS, MODE_VEL);
+          return;
+        }
+
+        // do last minute speed clamping correction in case something else went wrong.
+        if (self->speed_cmd_max < self->speed_cmd[i]){
+          self->speed_cmd[i] = self->speed_cmd_max;
+        } 
+        else if (self->speed_cmd[i] < -self->speed_cmd_max){
+          self->speed_cmd[i] = -self->speed_cmd_max;
+        }
+
+        lf_set(speed[i], self->speed_cmd[i]);
+      }
       if (PRINT_MOTOR_CONTROLLER){printf("\r\n");}
     }
     else{
