@@ -14,14 +14,15 @@ preamble {=
 
   #include <math.h>
 
-  #include <../../../control_config.h>
+  #include <../../../include_c/control_config.h>
 
   #define PRINT_PID_GROUP 0
   #define printcnt_lim 5
 
 =}
 
-reactor PIDGroup7DOF(id: int = 0, do_feedforward: bool = false) {
+// default deadband_angle should be about of 0.0044 rad = 0.5 deg or 0.5 deg/s
+reactor PIDGroup7DOF(id: int = 0, deadband_angle: float = 0.0044, do_feedforward: bool = false) {
   input reset_errors: bool
 
   input[7] current_states: float
@@ -30,14 +31,16 @@ reactor PIDGroup7DOF(id: int = 0, do_feedforward: bool = false) {
 
   state id_: int = id
 
+  // max control signal of 26.8 rad/s corresponds to max possible speed (250 rpm) for the motors
+
   // define individual joint controllers
-  control_u0 = new PIDControllerGeneric(id = 0, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
-  control_u1 = new PIDControllerGeneric(id = 1, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
-  control_u2 = new PIDControllerGeneric(id = 2, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
-  control_u3 = new PIDControllerGeneric(id = 3, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
-  control_u4 = new PIDControllerGeneric(id = 4, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
-  control_u5 = new PIDControllerGeneric(id = 5, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
-  control_u6 = new PIDControllerGeneric(id = 6, do_feedforward = do_feedforward, control_signal_max=10.0, integral_clamping_max=5.0)
+  control_u0 = new PIDControllerGeneric(id = 0, error_deadband=deadband_angle, do_feedforward = do_feedforward, control_signal_max=26.8, integral_clamping_max=50.0)
+  control_u1 = new PIDControllerGeneric(id = 1, error_deadband=deadband_angle, do_feedforward = do_feedforward, control_signal_max=26.8, integral_clamping_max=50.0)
+  control_u2 = new PIDControllerGeneric(id = 2, error_deadband=deadband_angle, do_feedforward = do_feedforward, control_signal_max=26.8, integral_clamping_max=50.0)
+  control_u3 = new PIDControllerGeneric(id = 3, error_deadband=deadband_angle, do_feedforward = do_feedforward, control_signal_max=26.8, integral_clamping_max=50.0)
+  control_u4 = new PIDControllerGeneric(id = 4, error_deadband=deadband_angle, do_feedforward = do_feedforward, control_signal_max=26.8, integral_clamping_max=50.0)
+  control_u5 = new PIDControllerGeneric(id = 5, error_deadband=deadband_angle, do_feedforward = do_feedforward, control_signal_max=26.8, integral_clamping_max=50.0)
+  control_u6 = new PIDControllerGeneric(id = 6, error_deadband=deadband_angle, do_feedforward = do_feedforward, control_signal_max=26.8, integral_clamping_max=50.0)
 
   // route the inputs to each controller
   current_states -> 

@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "span": "c",
+        "errno.h": "c",
+        "stm_comms.h": "c",
+        "cstddef": "c"
+    }
+}

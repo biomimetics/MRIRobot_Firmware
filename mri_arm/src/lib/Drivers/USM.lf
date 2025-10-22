@@ -11,7 +11,7 @@ preamble {=
   #include <stdio.h>
   #include <stdlib.h>
   #include <math.h> // need for floating point abs, or fabsf()
-  #include <../../../motor_config.h>
+  #include <../../../include_c/motor_config.h>
 
   #define PRINT_USM 0
   #define DO_DEBUG_PWM_SWEEP 0
@@ -24,9 +24,8 @@ preamble {=
   #define MSEC_TO_SEC 0.001
 
   // safety const
-  #define USM_MAX_DUTY_CYCLE 0.20 //0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
-  //#define USM_MIN_DUTY_CYCLE 0.0 // deadband to limit amount of jerky motion at small angular velocities
-  #define USM_MIN_DUTY_CYCLE 0.00 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
+  #define USM_MAX_DUTY_CYCLE 0.30 //0.20 //0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
+  #define USM_MIN_DUTY_CYCLE 0.005 //0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
 
   // conversion for if inputs are in rad_per_sec
   #define RAD_PER_SEC_TO_RPM 9.549297
@@ -284,14 +283,29 @@ reactor USM {
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    speed_[4] >= 0);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   speed_[5] >= 0);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   speed_[6] >= 0);
-      HAL_Delay(1);
+      return;
+    }
+
+    void compute_duty_cycles(){
+      for (int i = 0; i < 7; i++){
+        usm_duty_cycle_[i] = convert_speed_rad_per_sec_to_duty_cycle(speed_[i]);
+      }
+      return;
+    }
+
+    void set_motor_enable_deadband(){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    1); // PB0 is the LED
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    usm_duty_cycle_[0] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    usm_duty_cycle_[1] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    usm_duty_cycle_[2] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    usm_duty_cycle_[3] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   usm_duty_cycle_[4] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   usm_duty_cycle_[5] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   usm_duty_cycle_[6] > USM_MIN_DUTY_CYCLE);
       return;
     }
 
     void set_motor_pwm_registers(){
-      for (int i = 0; i < 7; i++){
-        usm_duty_cycle_[i] = convert_speed_rad_per_sec_to_duty_cycle(speed_[i]);
-      }
       TIM3->CCR1 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[0]);  // Set period for USM0
       TIM3->CCR2 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[1]);  // Set period for USM1
       TIM3->CCR3 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[2]);  // Set period for USM2
@@ -299,7 +313,7 @@ reactor USM {
       TIM4->CCR1 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[4]);  // Set period for USM4
       TIM4->CCR2 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[5]);  // Set period for USM5
       TIM4->CCR3 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[6]);  // Set period for USM6
-      //HAL_Delay(1);
+      return;
     }
 
     float apply_motor_direction_change(float speed, int index){
@@ -359,39 +373,26 @@ reactor USM {
       set_motor_enable_pins(false);
     }
     else {
-
-      // ensures all motor pins are enabled
-      set_motor_enable_pins(true);
-
-      // enforces all set speed bounds from motor_config.h
-      //enforce_speed_bounds(); // put these back on later!
-
       // Set USM direction values based on sign of speed_
       set_direction_pins();
+
+      // compute the duty cycles used for later logic
+      compute_duty_cycles(); // updates usm_duty_cycle_ array
+
+      // set motor enable pins based on deadband value of duty cycles
+      set_motor_enable_deadband(); // sets motor enable pins to be true if value is above USM_DUTY_CYCLE_MIN
       
-      
-      // ONLY FOR DEBUGGING PWMs
-      //if (PRINT_USM){
-      //  printf("(int)(speed_[0]*1000.0): %d, convert_speed_rad_per_sec_to_pwm_ccr(speed_[0]): %d, convSpeed(speed_[0], 0): %d\r\n", (int)(speed_[0]*1000.0), convert_speed_rad_per_sec_to_pwm_ccr(speed_[0]), convSpeed(speed_[0], 0));
-      //}
-      //for (int i = 0; i<7; i++){
-      //  speed_[i] = (speed_[i] / 0.087266) * 26.179938749999998; // speed/5[deg/s] * 250[rpm] -> puts it in normalized units to test out full range of pwm
-      //}
+      // set the pwm registers
+      set_motor_pwm_registers();
 
       if (PRINT_USM){
         for (int i = 0; i<7;i++){
           printf("Motor %d: Commanding %d milli rads/sec or %d Deg/s, CCR of %d.\r\n", i, (int)(1000 * speed_[i]), (int)(RAD_PER_SEC_TO_DEG_PER_SEC * speed_[i]), convert_speed_rad_per_sec_to_pwm_ccr(speed_[i]));
         }
       }
-      // Set USM speed values
-      if (DO_DEBUG_PWM_SWEEP){
-        debug_duty_cycle_sweep();
-      } else{
-        set_motor_pwm_registers();
-      }
-
-      for (int i = 0; i<7; i++) {lf_set(commanded_duty_cycle[i], usm_duty_cycle_[i]);} // usm_duty_cycle_ is set internally by set_motor_pwm_registsers
       
+      HAL_Delay(1); // do a HAL delay at the end to allow all the pins to update correctly
+      for (int i = 0; i<7; i++) {lf_set(commanded_duty_cycle[i], usm_duty_cycle_[i]);} // usm_duty_cycle_ is set internally by set_motor_pwm_registsers
     }
   
   =}

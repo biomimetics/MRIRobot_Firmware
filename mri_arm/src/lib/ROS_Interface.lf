@@ -11,10 +11,13 @@ preamble {=
   //#include "stm32_startup.h"
   #include "main.h"
   #include <stdio.h>
+  #include <string.h>
+  #include <stdlib.h>
+  #include <ctype.h>
 
-  #include <../../../motor_config.h>
-  #include <../../../joint_config.h>
-  #include <../../../sm_config.h>
+  #include <../../../include_c/motor_config.h>
+  #include <../../../include_c/joint_config.h>
+  #include <../../../include_c/sm_config.h>
 
   #define DMA_TX_BUFFER_SIZE 60
   #define DMA_RX_BUFFER_SIZE 60
@@ -66,6 +69,8 @@ reactor ROSInterface (update_period: time = 10 ms){
   // Data in format:      'p' + 6x[fp32] -> 25 bytes
   // Data out format:     'e' + 6x[fp32] -> 25 bytes
   preamble {=
+
+    
 
     extern UART_HandleTypeDef huart1;        // usb-c tied uart for computer communication
     extern UART_HandleTypeDef huart4; // used for ROS interface
@@ -168,6 +173,7 @@ reactor ROSInterface (update_period: time = 10 ms){
       //uint8_t rx_buffer[60]; // recieving buffer
       int computed_checksum = 0;
       for (int i = 0; i < msg_size-2; i++){
+      //for (int i = 0; i < msg_size-1; i++){
         computed_checksum += buffer[i];
       }
       computed_checksum = computed_checksum % 256;
@@ -201,15 +207,16 @@ reactor ROSInterface (update_period: time = 10 ms){
 
       memmove(rx_copy_buffer, rx_buffer, sizeof(rx_buffer)); // copy over the full size of the buffer
 
-      //printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
+      printf("rx_copy_buffer after memmove: %s\r\n", rx_copy_buffer);
 
-      checksum_valid = checkChecksum(rx_copy_buffer, RxDataLen); // checks if the checksum is valid
+      //checksum_valid = checkChecksum(rx_copy_buffer, RxDataLen); // checks if the checksum is valid
+      checksum_valid = true;
 
       if (checksum_valid){
         //memmove(rx_command_buffer, rx_copy_buffer, sizeof(rx_copy_buffer)); // copy over the full size of the copy buffer to the command buffer
         memmove(rx_command_buffer, rx_copy_buffer, DMA_RX_BUFFER_SIZE); // copy over the full size of the copy buffer to the command buffer
         flag_new_command_received = true; // flag that there's a new command to be processed by a reaction
-        //printf("rx_command_buffer after memmove: %s\r\n", rx_command_buffer);
+        printf("rx_command_buffer after memmove: %s\r\n", rx_command_buffer);
       }
       
       HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, rx_buffer, DMA_RX_BUFFER_SIZE);
@@ -276,8 +283,20 @@ reactor ROSInterface (update_period: time = 10 ms){
     int usm_motor_speeds[7];
     int usm_duty_cycle[7];
     */
+   /*
     void handle_usbc_transmit_encoders(){
-      int num = sprintf(tx_buffer,"e%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+      int num = sprintf(tx_buffer,"e,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
+        encoder_position[0], encoder_position[1], encoder_position[2], encoder_position[3], encoder_position[4], encoder_position[5], encoder_position[6], 
+        encoder_velocity[0], encoder_velocity[1], encoder_velocity[2], encoder_velocity[3], encoder_velocity[4], encoder_velocity[5], encoder_velocity[6], 
+        sea_position[0], sea_position[1], sea_position[2], sea_position[3], sea_position[4], sea_position[5], sea_position[6],
+        usm_motor_speeds[0], usm_motor_speeds[1], usm_motor_speeds[2], usm_motor_speeds[3], usm_motor_speeds[4], usm_motor_speeds[5], usm_motor_speeds[6],
+        usm_duty_cycle[0], usm_duty_cycle[1], usm_duty_cycle[2], usm_duty_cycle[3], usm_duty_cycle[4], usm_duty_cycle[5], usm_duty_cycle[6],
+        target_joint_pos[0], target_joint_pos[1], target_joint_pos[2], target_joint_pos[3], target_joint_pos[4], target_joint_pos[5], target_joint_pos[6]);
+      HAL_UART_Transmit_DMA(&DMA_UART, tx_buffer, num);
+    }
+    */
+    void handle_usbc_transmit_encoders(){
+      int num = sprintf(tx_buffer,"p,%d,%d,%d,%d,%d,%d,%d,v,%d,%d,%d,%d,%d,%d,%d,s,%d,%d,%d,%d,%d,%d,%d,z,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\r\n", 
         encoder_position[0], encoder_position[1], encoder_position[2], encoder_position[3], encoder_position[4], encoder_position[5], encoder_position[6], 
         encoder_velocity[0], encoder_velocity[1], encoder_velocity[2], encoder_velocity[3], encoder_velocity[4], encoder_velocity[5], encoder_velocity[6], 
         sea_position[0], sea_position[1], sea_position[2], sea_position[3], sea_position[4], sea_position[5], sea_position[6],
@@ -305,6 +324,7 @@ reactor ROSInterface (update_period: time = 10 ms){
     void set_joint_vel_data(float* joint_vel_array) {
       for (int i=0; i<7; i++) {
         joint_vel_array[i] = joint_dir[i] * uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
+        //joint_vel_array[i] = joint_dir[i] * uncompress_data(rx_command_buffer[(i*2)+2], rx_command_buffer[(i*2)+1]);
         //joint_vel_array[i] = joint_dir[i] * uncompress_data(rx_copy_buffer[(i*2)+2], rx_copy_buffer[(i*2)+1]);
       }
 

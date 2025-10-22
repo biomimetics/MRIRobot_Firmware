@@ -14,7 +14,7 @@ import FFBController from "FFB.lf"
 preamble {=
     #include "stm32f4xx_hal.h"
     #include <stdio.h>
-    #include <../../../motor_config.h>
+    #include <../../../include_c/motor_config.h>
 
     #ifndef __SEA_MODE_ENUM
     #define __SEA_MODE_ENUM

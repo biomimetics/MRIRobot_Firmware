@@ -3,7 +3,7 @@
 # target
 ######################################
 TARGET = Main
-
+TARGET_EX = Main_TXRX
 #######################################
 # paths
 #######################################
@@ -56,6 +56,9 @@ just_flash:
 	
 flash: build_dev just_flash	
 
+flash_ex: 
+	lfc-dev src/Main_TXRX.lf 
+	openocd -f $(OPENOCD_PATH)/tcl/interface/stlink.cfg -f $(OPENOCD_PATH)/tcl/target/stm32f4x.cfg -c "program $(BUILD_DIR)/$(TARGET_EX).elf verify reset exit"	
 
 
 
@@ -67,3 +70,15 @@ intf:
 
 clean_data:
 	-rm -rf scripts/data/*
+
+#######################################
+# For running communication debugging programs
+#######################################
+comms:
+	gcc src_c/uart_comms_example.c src_c/linux_comms.c src_c/stm_comms.c -o uart_comms_example
+
+comms_logger:
+	gcc src_c/uart_comms_logger.c src_c/linux_comms.c src_c/stm_comms.c -o uart_logger
+
+comms_listener:
+	gcc src_c/uart_comms_listener.c src_c/linux_comms.c src_c/stm_comms.c -o uart_listener

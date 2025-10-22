@@ -79,7 +79,7 @@ reactor HomeController(sample_period: time = 20 ms) {
   =}
 
   preamble {=
-    static int printVals = true;//false;
+    static int printVals = false;//false;
     static int printcnt = 0;
     static int printcnt_lim = 50;
 
