@@ -10,8 +10,8 @@ import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import HomeController from "lib/Home_Controller.lf"
 import MotorController from "lib/Motor_Controller.lf"
-import ROSInterface from "lib/ROS_Interface.lf"
 import ModeMachine from "lib/Mode_Machine.lf"
+import SerialInterface from "lib/Serial_Interface.lf"
 
 preamble {=
   #include <stdio.h>
@@ -83,17 +83,23 @@ main reactor {
 
 
     // Define empty function handlers for UART callbacks
+    void HAL_UART_RxCallback_DMA();
     void HAL_UART_RxCallback3();
     void HAL_UART_RxCallback1();
 
     void HAL_UART_TxCallback1();
 
     // Define global recieve callback
+
+    
     void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
       if (huart->Instance == USART3) {
-        HAL_UART_RxCallback3();
+        HAL_UART_RxCallback3(); // 
       } else if (huart->Instance == USART1) {
+        //HAL_UART_RxCallback_DMA();
         HAL_UART_RxCallback1();
+      } else if (huart->Instance == UART4) { // UART4 // DMA_UART
+        HAL_UART_RxCallback_DMA();
       }
     }
 
@@ -108,11 +114,11 @@ main reactor {
   
   timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
   timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
-  state count: int = 1
 
   qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
   usm = new USM()                            // Ultrasonic motor controllers
-  ros_controller = new ROSInterface(update_period = 10 ms)        // ROS UART Interface
+  //ros_controller = new SerialInterface(send_period = 20 ms, receive_period = 20 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
+  ros_controller = new SerialInterface(send_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   motor_controller = new MotorController(refresh_period = 10 ms)    // Main Motor driver + controller
   home_controller = new HomeController()      // Used to home the motors
   mode_machine = new ModeMachine()            // Used to trigger other reactors behavior
@@ -120,9 +126,13 @@ main reactor {
   // Route encoder information to relevant reactors
   qdec.qdec_out -> motor_controller.qdec_pos
   qdec.qdec_vel_out -> motor_controller.qdec_vel
-  qdec.qdec_out -> ros_controller.current_joint after 0;
   qdec.sea_out -> motor_controller.qdec_sea
-  qdec.sea_out -> ros_controller.current_joint_sea after 0;
+  qdec.qdec_out -> ros_controller.current_motor_position after 0;
+  qdec.qdec_vel_out -> ros_controller.current_motor_velocity
+  qdec.sea_out -> ros_controller.current_sea_position after 0;
+
+  motor_controller.speed -> ros_controller.motor_cmd_speed after 1 us;
+  usm.commanded_duty_cycle -> ros_controller.motor_duty_cycle after 1 us;
 
   // Route joint targets/information
   //motor_controller.current_joint -> ros_controller.current_joint after 0; // make ros read these from qdec!
@@ -137,15 +147,16 @@ main reactor {
   ros_controller.sea_lim -> motor_controller.sea_lim
   
   
-  ros_controller.set_mode_change -> mode_machine.set_mode_change
+  ros_controller.set_mode_change -> mode_machine.set_mode_change after 0;
   
 
-  mode_machine.reset_qdec -> qdec.reset_qdec
+  mode_machine.reset_qdec -> qdec.reset_qdec after 0;
   mode_machine.enable_motor_command -> motor_controller.enable_motor_command
   mode_machine.enable_homing_command -> home_controller.enable_homing_command
   mode_machine.motor_controller_internal_external_target_mode -> motor_controller.target_mode
   mode_machine.motor_controller_target_sel -> motor_controller.target_sel
   mode_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
+  mode_machine.current_mode_status -> ros_controller.current_mode_status
 
   home_controller.is_home -> mode_machine.is_homing_finished after 0;
   home_controller.motor_speed -> motor_controller.target_vel_int

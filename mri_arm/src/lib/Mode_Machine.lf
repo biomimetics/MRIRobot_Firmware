@@ -12,11 +12,12 @@ preamble {=
   #include "main.h"
   #include <stdio.h>
 
-  #include <../../../motor_config.h>
-  #include <../../../joint_config.h>
-  #include <../../../sm_config.h>
+  #include <../../../include_c/motor_config.h>
+  #include <../../../include_c/joint_config.h>
+  #include <../../../include_c/sm_config.h>
 
   #define PRINT_MODE 0
+  #define PRINT_MODE_STATUS 0
   /*
   typedef struct mode_status{
     MODE_ENUM current_mode_index;
@@ -30,7 +31,7 @@ preamble {=
   */
 =}
 
-reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20 ms, status_refresh_period: time = 2000 ms){
+reactor ModeMachine (slow_refresh_period: time = 20 ms, status_refresh_period: time = 1000 ms){
     input set_mode_change: MODE_ENUM 
     input is_homing_finished: bool
 
@@ -43,9 +44,10 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     output enable_homing_command: bool
     output enable_motor_command: bool
     output force_disable_motor_pins: bool
+    output current_mode_status: mode_status
 
     // timer for sending updates depending on the current mode
-    //timer system_tick(0 ms, refresh_period) // unused!
+
     timer slow_system_tick(0 ms, slow_refresh_period)
     timer slow_status_tick(0 ms, status_refresh_period)
 
@@ -217,7 +219,9 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     =}
     
     reaction(slow_status_tick) {=
-      printModeStatus();
+      if (PRINT_MODE_STATUS){
+        printModeStatus();
+      }
       //toggleStatusLED();
       =}
 
@@ -326,7 +330,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
     //#####
 
     reaction update_mode_status (slow_system_tick) -> enable_homing_command, enable_motor_command, force_disable_motor_pins,
-    motor_controller_internal_external_target_mode, motor_controller_target_sel{=
+    motor_controller_internal_external_target_mode, motor_controller_target_sel, current_mode_status{=
       if (self->flag_ready_to_update_mode_status){
         lf_set(enable_homing_command, self->staged_mode_status.enable_homing_command);
         lf_set(enable_motor_command, self->staged_mode_status.enable_motor_command);
@@ -337,6 +341,7 @@ reactor ModeMachine (refresh_period: time = 5 ms, slow_refresh_period: time = 20
         }
         self->flag_ready_to_update_mode_status = false;
       }
+      lf_set(current_mode_status, self->staged_mode_status);
     =}
 }
 

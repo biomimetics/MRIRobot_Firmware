@@ -9,7 +9,7 @@ target C {
 preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
-  #include <../../../motor_config.h>
+  #include <../../../include_c/motor_config.h>
 
   #define PRINT_ENCODER 0
 

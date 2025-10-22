@@ -1,0 +1,96 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "STM32",
+    board: "F446RE"
+  },
+  //files: ["/include_c/stm_comms.h", "/src_c/stm_comms.c"],
+  cmake-include: ["/SerialCMakeLists.txt"]
+}
+
+//import UART_Handler from "lib/Drivers/UART.lf"
+
+preamble {=
+  #include <stdio.h>
+  #include "stm32f4xx_hal.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
+  #include "stm_comms.h"
+
+  extern UART_HandleTypeDef huart1; // make sure these need to be defined here or not
+  extern UART_HandleTypeDef huart2;
+  extern UART_HandleTypeDef huart3;
+  extern UART_HandleTypeDef huart4;
+  extern UART_HandleTypeDef huart5;
+
+  extern TIM_HandleTypeDef htim6; // used for timing loops
+
+  =}
+
+
+
+// Import and/or declare reactor classes.
+main reactor {
+  preamble {=
+    
+    int stm32_init(void){
+      HAL_Init();
+
+      SystemClock_Config();
+
+      MX_GPIO_Init();
+      MX_DMA_Init();
+      MX_UART4_Init();
+      MX_USART1_UART_Init();
+      MX_USART3_UART_Init();
+      MX_USART6_UART_Init();
+      MX_TIM3_Init();
+      MX_TIM4_Init();
+      MX_TIM6_Init();
+      HAL_TIM_Base_Start(&htim6); // added!
+      MX_RTC_Init();
+      MX_USART2_UART_Init();
+
+      printf("\r\n");
+      printf("~~~ STM32 START ~~~ \r\n");
+      printf("\r\n");
+
+      //HAL_START_DMA(); // not sure if needed
+      //main();
+      return 0;
+    }
+
+  =}
+  
+  timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
+  timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
+
+  timer comms(0 ms, 2 ms)
+
+  state counter: int = 0
+  state counter_max: int = 100
+
+  state start_time: time = 0
+
+  //uart_handler = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms)
+
+  reaction(startup) {=
+    // Prep all GPIO values
+    //MX_GPIO_Init();
+
+    // Initialize the STM32 peripherals
+    stm32_init();
+
+    self->start_time = lf_time_physical();
+  =}
+
+  
+  reaction(comms) {=
+
+    // in general this does not need to be initiated by a timer
+
+    //lf_set(uart_handler.state_msg, transmit_packet);
+    printf("Testing...\n");
+    =}
+
+}
