@@ -1,0 +1,8 @@
+3:00pm : Tested SEA Encoder ranges.
+Joint 0, nominal value 500, (clockwise) + 4000, (ccw) -4000
+Joint 1, nom. value -4705, (cw) 8000, (ccw) -10181
+Joint 2, nom. value 5081, (cw) -5000, (ccw) 11000
+Joint 3, nom. value -2175, (cw) 6000, (ccw) -3000
+Joint 4, nom. value  2270, (cw) -6000, (ccw) 3100
+Joint 5, nom. value -300, (cw) , (ccw) 
+Joint 6, nom. value -320, (cw) 874, (ccw) -3000

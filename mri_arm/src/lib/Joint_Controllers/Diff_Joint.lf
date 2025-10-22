@@ -12,8 +12,8 @@ import SEAController from "SEA.lf"
 preamble {=
     #include "stm32f4xx_hal.h"
     #include <stdio.h>
-    #include <../../../motor_config.h>
-    #include <../../../joint_config.h>
+    #include <../../../include_c/motor_config.h>
+    #include <../../../include_c/joint_config.h>
 =}
 
 reactor Diff_Joint (
@@ -24,8 +24,8 @@ reactor Diff_Joint (
     [Differential Gear Driver]
     - motor space: position of the indivial USMs
     - joint space: position of the differential gear modules    
-    
     */
+
     input[2] current_pos: float             // Current position in      [motor space]
     input[2] sea_pos: float                 // Current SEA position     [motor space]
     input[2] target_joint: float            // Target positionin        [joint space]
@@ -73,8 +73,8 @@ reactor Diff_Joint (
     reaction(current_pos, sea_pos) -> control_u0.current_pos, control_u1.current_pos {=
         float pos0 = current_pos[0]->value + (motor_configs[self->motor_ID0]->dir)*(sea_pos[0]->value/100);
         float pos1 = current_pos[1]->value + (motor_configs[self->motor_ID1]->dir)*(sea_pos[1]->value/100);
-        lf_set(control_u0.current_pos, (pos0 - pos1)/2);
-        lf_set(control_u1.current_pos, (pos0 + pos1)/2);
+        lf_set(control_u0.current_pos, (pos0 - pos1)/2); // pitch
+        lf_set(control_u1.current_pos, (pos0 + pos1)/2); // roll
     =}
 
     // Comvert the SEA offsets in [motor space] -> [joint space]
@@ -85,8 +85,8 @@ reactor Diff_Joint (
 
     // Comvert the motor outputs in [joint space] -> [motor space]
     reaction(control_u0.out, control_u1.out) -> speed_out {=
-        lf_set(speed_out[1], control_u1.out->value - control_u0.out->value);
-        lf_set(speed_out[0], control_u1.out->value + control_u0.out->value);
+        lf_set(speed_out[0], control_u1.out->value + control_u0.out->value); // pitch(u0) + roll(u1)
+        lf_set(speed_out[1], control_u1.out->value - control_u0.out->value); // -pitch(u0) + roll(u1)
     =}
 
 

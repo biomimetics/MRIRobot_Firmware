@@ -1,0 +1,375 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: ["/include_c/stm_comms.h", "/src_c/stm_comms.c"],
+  cmake-include: ["/SerialCMakeLists.txt"]
+}
+
+import UART_Handler from "../lib/Drivers/UART.lf"
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
+  #include <stdio.h>
+  #include <string.h>
+  #include <stdlib.h>
+  #include <ctype.h>
+
+  //#include <../../../include_c/stm_packet.h>
+  #include "stm_comms.h"
+  #include <../../../include_c/sm_config.h>
+  #include <../../../include_c/joint_config.h>
+
+  #define DMA_TX_BUFFER_SIZE 400 //256//(STM_BUFFER_SIZE) //200
+  #define DMA_RX_BUFFER_SIZE 400 //256//(STM_BUFFER_SIZE) //200
+  //#define DMA_UART huart6 // was huart1
+
+  #define PRINT_SERIAL 0
+=}
+
+reactor SerialInterface (send_period: time = 10 ms, receive_period: time = 10 ms){
+
+  input current_mode_status: mode_status
+  input behavior_mode: int
+
+  //inputs from motor controller to send back to ROS
+  input[7] current_motor_position: float // position of motors from usm encoders
+  input[7] current_motor_velocity: float // velocity of motors from usm encoders
+
+  input[7] current_sea_position: float // position of seas from sea encoders
+  //input[7] current_sea_velocity: float // velocity of seas from sea encoders
+
+  input[7] motor_cmd_speed: float // target velocities of motors from motor controller
+  input[7] motor_duty_cycle: float // target velocities of motors from motor controller
+
+  // outputs for sending to motor controller
+  output[7] target_pos_ext: float
+  output[7] target_vel_ext: float
+
+  output[7] sea_offset: float
+  output[7] sea_lim: float
+
+  // outputs for sending state changes
+  output set_mode_change: MODE_ENUM
+
+
+  // trigger timers
+  timer trigger_send(0 ms, send_period)
+  //timer trigger_update(0 ms, update_period)
+  timer trigger_test(0 ms, 2000 ms)
+  timer trigger_print(0 ms, 1000 ms)
+
+  timer timer_idle_reset(0 ms, 100 ms)
+  state set_command_failed_counter: int = 0 //
+  state set_command_failed_counter_max: int = 1000 //20 // TODO: 20 counts * 20ms period should be about 1s if the clock is good enough. Replace this with a real timer asap!
+  state last_mode_change: MODE_ENUM = 0 // idle
+
+  state scaled_joint_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_joint_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_sea_offset: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state scaled_sea_lim: float[7] = {1000, 1000, 1000, 1000, 1000, 1000, 1000}
+  state staged_behavior_mode: MODE_ENUM = 0
+  state cmd_msg_: CommandMessage = {
+        0, 
+        {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+        {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+        {0.0, 0,0, 0.0, 0.0, 0.0, 0.0, 0.0},
+        {0.0},
+        0,
+        0
+    }
+  state state_msg_: StateMessage = {
+        0, 
+        {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+        {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+        {0.0, 0,0, 0.0, 0.0, 0.0, 0.0, 0.0},
+        {0.0},
+        0,
+        0
+    }
+
+  state send_message_index: int = 0
+
+  uart_handler = new UART_Handler(receive_period = receive_period)
+
+  preamble {=
+
+    // +---------------------------------------------------+
+    // | Direction conversions that need to be depreciated...
+    // +---------------------------------------------------+
+    float joint_dir[7]= {-1, 1, -1, 1, -1, 1, 1}; // {1, 1, 1, 1, 1, 1, 1};
+    float motor_dir[7]= {1, 1, 1, 1, 1, -1, -1};  // direction changes to map robot motor axes (from encoders) to ROS motor axes. Should be redundant with motor_configs[i]->dir
+
+
+    // +---------------------------------------------------+
+    // | Local copies of inputs to be sent down the serial connection
+    // +---------------------------------------------------+
+    int current_behavior_mode_ = 0;
+    float encoder_position_[7];
+    float encoder_velocity_[7];
+
+    float sea_position_[7];
+
+    // for the extra info we need on the computer side!
+    float target_joint_pos_[7];
+    float usm_motor_speeds_[7];
+    float usm_duty_cycle_copy_[7];
+    float extra_array_[EXTRA_LENGTH]; // size should be reflected in EXTRA_LENGTH in stm_packet.h
+
+    // +---------------------------------------------------+
+    // | Flags set in DMA callbacks to trigger behavior changes in the main update loop
+    // +---------------------------------------------------+
+    bool flag_update_set_mode_change = false;
+    bool flag_new_command_received = false;
+
+    // +---------------------------------------------------+
+    // | Init functions
+    // +---------------------------------------------------+
+    void configure_gpio_switch_pins(){
+      /* Configure Switch pins : PC1 */
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOH_CLK_ENABLE();
+      __HAL_RCC_GPIOC_CLK_ENABLE();
+      GPIO_InitStruct.Pin = GPIO_PIN_1;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+      HAL_GPIO_WritePin(GPIOH, GPIO_PIN_1, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_1;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+    }
+
+    /*##### 
+    # helper functions for handling inputs from serial connection
+    #####*/
+
+    void print_resp(float* data) {
+      printf("      [%d, %d, %d, %d, %d, %d, %d]\r\n", 
+                        (int)(data[0]*1000), (int)(data[1]*1000), (int)(data[2]*1000), (int)(data[3]*1000), 
+                        (int)(data[4]*1000), (int)(data[5]*1000), (int)(data[6]*1000));
+    }
+
+    void set_joint_pos_data(float* joint_pos_array, float* new_joint_pos_array) {
+      for (int i=0; i<7; i++) {
+        //printf("i: %d, new_joint_pos_array[i]: %d\n", i, (int)(new_joint_pos_array[i] * 1000));
+        joint_pos_array[i] = joint_dir[i] * new_joint_pos_array[i];
+      }
+
+      if (PRINT_SERIAL)  {
+        printf("got [JOINT POS]: \r\n");
+        print_resp(joint_pos_array);
+      }
+    }
+
+    // When the rx_buffer command is a [set joint velocity] command
+    void set_joint_vel_data(float* joint_vel_array, float* new_joint_vel_array) {
+      for (int i=0; i<7; i++) {
+        joint_vel_array[i] = joint_dir[i] * new_joint_vel_array[i];
+      }
+
+      if (PRINT_SERIAL)  {
+        printf("got [JOINT VEL]: \r\n");
+        print_resp(joint_vel_array);
+      }
+    }
+
+    // Functions for setting relevant info for seas
+    void set_sea_offset_data(float* sea_offset_array, float* new_sea_offset_array) {
+      for (int i=0; i<7; i++) {
+        if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1)) {
+          sea_offset_array[i] = 0;
+        } else {
+          sea_offset_array[i] = new_sea_offset_array[i];
+        }
+      }
+    }
+
+    // 
+    /*
+    typedef enum {
+    SET_IDLE = 0,
+    SET_HOMING = 1,
+    SET_RUN_POS = 2,
+    SET_RUN_VEL = 3
+    } MODE_ENUM;
+   */
+    MODE_ENUM set_mode_change(int new_behavior_mode) {
+      // check if mode is different from current mode, if it's the same don't stage a mode change.
+      MODE_ENUM staged_behavior_mode = SET_IDLE;
+
+      if (new_behavior_mode == current_behavior_mode_) 
+        flag_update_set_mode_change = false;
+      else{
+        // if different, see if it's valid and if so stage the change.
+        if (new_behavior_mode == 0) { // set mode to idle
+          flag_update_set_mode_change = true;
+          staged_behavior_mode = SET_IDLE;
+        } 
+        else if (new_behavior_mode == 1) { // set mode to home
+          flag_update_set_mode_change = true;
+          staged_behavior_mode = SET_HOMING;
+        } 
+        else if (new_behavior_mode == 2) { // set mode to run with position inputs
+          flag_update_set_mode_change = true;
+          staged_behavior_mode = SET_RUN_POS;
+        } 
+        else if (new_behavior_mode == 3) { // set mode to run with velocity inputs
+          flag_update_set_mode_change = true;
+          staged_behavior_mode = SET_RUN_VEL;
+        }
+        else {
+          staged_behavior_mode = SET_IDLE;
+          flag_update_set_mode_change = true;
+          //command_packet.behavior_mode = 0;
+          printf("!! Invalid desired_state in receive_transmit_update in ROS_Interface.lf !!\r\n");
+          printf("trigger_mode_change: Did not receive valid char. Got %d, expected 0, 1, 2, or 3.", new_behavior_mode);
+        }
+      }
+      return staged_behavior_mode;
+    }
+
+    // if new command is avaiable, set the values for it.
+    bool set_newest_command(float* joint_pos_array, float* joint_vel_array, float* sea_offset_array, MODE_ENUM* staged_behavior_mode, CommandMessage cmd_msg) {
+
+        set_joint_pos_data(joint_pos_array, cmd_msg.positions);
+        set_joint_vel_data(joint_vel_array, cmd_msg.velocities);
+        set_sea_offset_data(sea_offset_array, cmd_msg.sea_positions);
+        *staged_behavior_mode = set_mode_change(cmd_msg.behavior_mode);
+        //set_mode_change(cmd_msg.behavior_mode);
+        return true; // if command is set, return true
+    }
+
+    void fill_extra_array(){
+      for (int i = 0; i<DOF_NUMBER; i++){
+        extra_array_[i] = target_joint_pos_[i];
+        extra_array_[i+7] = usm_motor_speeds_[i];
+        extra_array_[i+14] = usm_duty_cycle_copy_[i];
+      }
+      return;
+    }
+
+  =}
+
+  reaction(startup) {=
+    configure_gpio_switch_pins();
+
+    for (int i=0; i<7; i++) {
+      self->scaled_sea_lim[i] = joint_configs[i]->lim;
+      self->scaled_sea_offset[i] = 0;
+    }
+      
+  =}
+
+  /*##### 
+    # Input reactions
+    #####*/
+
+  reaction(current_mode_status){=
+    mode_status current_mode_ = current_mode_status->value;
+    current_behavior_mode_ = current_mode_.current_mode_index;
+    =}
+
+  reaction(behavior_mode){=
+    //current_behavior_mode_ = behavior_mode->value;
+  =}
+
+  // Update our current USM position to send to ROS
+  reaction(current_motor_position) {=
+    for (int i=0; i<7; i++) {
+      encoder_position_[i] = (current_motor_position[i]->value) * motor_dir[i];
+    }
+  =}
+
+  reaction(current_motor_velocity) {=
+    for (int i=0; i<7; i++) {
+      encoder_velocity_[i] = (current_motor_velocity[i]->value) * motor_dir[i];
+    }
+  =}
+
+  // Update our current sea position to send to ROS
+  reaction(current_sea_position) {=
+    //printf("SEA Positions: ");
+    for (int i=0; i<7; i++) {
+      sea_position_[i] = (current_sea_position[i]->value);
+      //printf("%d", (int)(sea_position_[i] * 1000));
+    }
+    //printf("\n");
+
+  =}
+
+  reaction(motor_cmd_speed) {=
+    for (int i=0; i<7; i++) {
+      usm_motor_speeds_[i] = (motor_cmd_speed[i]->value);
+    }
+  =}
+
+  reaction(motor_duty_cycle) {=
+    for (int i=0; i<7; i++) {
+      usm_duty_cycle_copy_[i] = (motor_duty_cycle[i]->value);
+    }
+  =}
+  
+  /*##### 
+    # Output reactions
+    #####*/
+  
+  reaction(trigger_send) -> uart_handler.state_msg{=
+
+    fill_extra_array();
+    int time_stamp = HAL_GetTick();
+    //printf("Time stamp: %d\n", time_stamp);
+    construct_state_message(&self->state_msg_, current_behavior_mode_,
+                            encoder_position_, encoder_velocity_,
+                            sea_position_, extra_array_,
+                            time_stamp, self->send_message_index++);
+    self->send_message_index = self->send_message_index % 256;
+    //printf("About to send state_message: \n");
+    //print_state_message_int(&self->state_msg_);
+
+    lf_set(uart_handler.state_msg, self->state_msg_);
+  =}
+
+  reaction(uart_handler.cmd_msg) -> set_mode_change, target_pos_ext, target_vel_ext, sea_offset{=
+    //printf("Received command message: \n");
+    //print_command_message_int(&uart_handler.cmd_msg->value);
+
+    self->cmd_msg_ = uart_handler.cmd_msg->value;
+
+    // sets the internal variables for updating the other reactors. If it's in run mode and there's not a fresh value from ROS, iterate the coutner
+    if (!set_newest_command(self->scaled_joint_pos, self->scaled_joint_vel, self->scaled_sea_offset, &self->staged_behavior_mode, self->cmd_msg_)){
+      if ((current_behavior_mode_ == SET_RUN_POS) || (current_behavior_mode_ == SET_RUN_VEL)){
+        self->set_command_failed_counter += 1;
+      }
+    }
+    
+
+    if (flag_update_set_mode_change){
+      //printf("self->staged_behavior_mode: %d\n", self->staged_behavior_mode);
+      lf_set(set_mode_change, self->staged_behavior_mode);
+    }
+
+    for (int i = 0; i < DOF_NUMBER; i++){
+      target_joint_pos_[i] = self->scaled_joint_pos[i];
+      lf_set(target_pos_ext[i], self->scaled_joint_pos[i]);   // Update target positions
+      lf_set(target_vel_ext[i], self->scaled_joint_vel[i]);   // Update target velocities
+      lf_set(sea_offset[i], self->scaled_sea_offset[i]);      // Update sea offset values
+    }
+    
+  =}
+
+  reaction(uart_handler.not_receiving_error) -> set_mode_change{=
+    if (uart_handler.not_receiving_error->value == true){
+      self->staged_behavior_mode = SET_IDLE;
+      lf_set(set_mode_change, self->staged_behavior_mode);
+    }
+    =}
+}
+

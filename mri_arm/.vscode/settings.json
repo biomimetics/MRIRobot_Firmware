@@ -1,4 +1,5 @@
 {
     "cmake.sourceDirectory": "/Users/naichenzhao/Desktop/BML/MRIRobotProject/MRIRobot/Firmware/MRI_arm/src-gen/Main",
-    "commentTranslate.hover.enabled": false
+    "commentTranslate.hover.enabled": false,
+    "makefile.configureOnOpen": true
 }
