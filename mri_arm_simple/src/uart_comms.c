@@ -1,4 +1,4 @@
-#include "../src/stm_comms.h"
+#include "../include/stm_comms.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>

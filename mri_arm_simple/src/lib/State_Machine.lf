@@ -20,7 +20,19 @@ preamble {=
 =}
 
 reactor StateMachine (slow_refresh_period: time = 20 ms, status_refresh_period: time = 1000 ms){
-    input 
+    // inputs from serial
+
+    // inputs from encoders
+
+    // inputs from usm
+
+    // outputs to serial
+
+    // outputs to encoders
+
+    // outputs to usm
+
+    
     output reset_qdec: bool
 
     output enable_homing_command: bool

@@ -6,6 +6,8 @@
         "span": "c",
         "errno.h": "c",
         "stm_comms.h": "c",
-        "cstddef": "c"
+        "cstddef": "c",
+        "string.h": "c",
+        "linux_comms.h": "c"
     }
 }

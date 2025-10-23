@@ -1,5 +1,5 @@
-#include "../src/stm_comms.h"
-#include "../src/linux_comms.h"
+#include "../include/stm_comms.h"
+#include "../include/linux_comms.h"
 
 
 
