@@ -15,6 +15,10 @@ preamble{=
   #include <stdlib.h>
   #include <ctype.h>
 
+    #include <stddef.h>
+    #include <stdint.h>
+    #include <assert.h>
+    
   #include "stm_comms.h"
 
   #define PRINT_UART 0

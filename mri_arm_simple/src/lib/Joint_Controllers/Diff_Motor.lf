@@ -1,0 +1,105 @@
+target C {
+    single-threaded: true,
+    platform: {
+      name: "stm32",
+      board: "F446RE"
+    }
+  }
+
+import SEAController from "SEA.lf"
+
+
+preamble {=
+    #include "stm32f4xx_hal.h"
+    #include <stdio.h>
+    #include <../../../include_c/motor_config.h>
+=}
+
+reactor Diff_Motor (
+    motor_ID0: int = 0, 
+    motor_ID1: int = 0
+) {
+    /*
+    [Differential Gear Driver]
+    - motor space: position of the indivial USMs
+    - joint space: position of the differential gear modules    
+    
+    */
+    input[2] current_pos: float             // Current position in      [motor space]
+    input[2] sea_pos: float                 // Current SEA position     [motor space]
+    input[2] target_joint: float            // Target positionin        [joint space]
+
+
+    input[2] sea_offset: float              // sea spring offset        [joint space]
+    input[2] sea_lim: float                 // sea error limit          [joint space]
+    
+    output[2] pos_joint: float              // Current position in      [joint space]
+    output[2] pos_sea: float                // Current sea position in  [joint space]
+    output[2] speed_out: float              // Speed out in             [motor space]
+
+    state target_motors: float[2] = {0, 0}
+
+    control_u0 = new SEAController()
+    control_u1 = new SEAController()
+
+    reaction(startup) -> control_u0.constants, control_u1.constants {=
+        // Control Constants [Kp, Kd, Ki]
+        lf_set(control_u0.constants[0], motor_configs[self->motor_ID0]-> Kp);
+        lf_set(control_u0.constants[1], motor_configs[self->motor_ID0]-> Kd);
+        lf_set(control_u0.constants[2], 0);
+        lf_set(control_u0.constants[3], motor_configs[self->motor_ID0]-> Ks);
+
+        lf_set(control_u1.constants[0], motor_configs[self->motor_ID1]-> Kp);
+        lf_set(control_u1.constants[1], motor_configs[self->motor_ID1]-> Kd);
+        lf_set(control_u1.constants[2], 0);
+        lf_set(control_u1.constants[3], motor_configs[self->motor_ID1]-> Ks);
+        
+    =}
+
+    // Forward SEA positions and output speeds
+    current_pos -> control_u0.current_pos, control_u1.current_pos
+    sea_pos -> control_u0.sea_pos, control_u1.sea_pos
+    sea_lim -> control_u0.sea_lim, control_u1.sea_lim
+    control_u0.out, control_u1.out -> speed_out
+
+
+    // +-------------------------------------------------------------------------+
+    // | Perform any transformations between [joint space] and [motor space]
+    // |    [Joint Pitch]:   target_joint[0]
+    // |    [Joint Roll ]:   target_joint[1]
+    // +-------------------------------------------------------------------------+
+
+    // Comvert the targets in [joint space] -> [motor space]
+    reaction(target_joint) -> control_u0.target_pos, control_u1.target_pos {=
+        lf_set(control_u0.target_pos, target_joint[1]->value - target_joint[0]->value);
+        lf_set(control_u1.target_pos, target_joint[1]->value + target_joint[0]->value);
+    =}
+
+    // Comvert the SEA offsets in [joint space] -> [motor space]
+    reaction(sea_offset) -> control_u0.sea_offset, control_u1.sea_offset {=
+        lf_set(control_u0.sea_offset, sea_offset[1]->value - sea_offset[0]->value);
+        lf_set(control_u1.sea_offset, sea_offset[1]->value + sea_offset[0]->value);
+    =}
+
+// --------------------- Passthrough values  --------------------- 
+    // Convert the current positions in [motor space] -> [joint space]
+    reaction(current_pos) -> pos_joint {=
+        lf_set(pos_joint[0], (current_pos[0]->value - current_pos[1]->value)/2);
+        lf_set(pos_joint[1], (current_pos[0]->value + current_pos[1]->value)/2);
+    =}
+
+    // Convert the current sea positions in [motor space] -> [joint space]
+    reaction(sea_pos) -> pos_sea {=
+        lf_set(pos_sea[0], (sea_pos[0]->value - sea_pos[1]->value)/2);
+        lf_set(pos_sea[1], (sea_pos[0]->value + sea_pos[1]->value)/2);
+    =}
+
+}
+
+
+
+
+
+
+
+

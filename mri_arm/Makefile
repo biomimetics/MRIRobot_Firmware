@@ -82,3 +82,6 @@ comms_logger:
 
 comms_listener:
 	gcc src_c/uart_comms_listener.c src_c/linux_comms.c src_c/stm_comms.c -o uart_listener
+
+cobs_comms:
+	gcc src_c/uart_comms_cobs_example.c src_c/uart_comms_lib.c -o uart_comms_cobs_example
