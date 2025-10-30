@@ -9,7 +9,16 @@ target C {
 preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
-  #include <../../../src/motor_config.h>
+  #include <../../../include_c/motor_config.h>
+
+  #define PRINT_ENCODER 0
+
+  #define DO_INTERVAL_OVERRIDE 0
+  #define OVERRIDE_INTERVAL 0.005
+
+  #define TWO_PI 6.28318
+  #define NSEC_TO_SEC 0.000000001
+  #define MSEC_TO_SEC 0.001
   
 =}
 
@@ -149,16 +158,21 @@ reactor QDEC(sample_period: time = 5 ms){
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
-      self->qdec_convert_motor_to_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr);
-      //self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio) * motor_configs[i]->dir;
+      self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio) * motor_configs[i]->dir;
     }
 
-
+    /*
+    // Get values for SEA encoders
+    for (int i=0; i<7; i++) {
+      float sea_raw = ((float) (sea_counts[i])) * magic_sea_count_conv[i] * (1 / motor_configs[i]->sea_cpr );
+      float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
+      lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
+    }
+    */
 
     for (int i = 0; i<7; i++){
       //self->qdec_convert_sea_to_joint_rad_[i] = (TWO_PI / 360.0) * magic_sea_count_conv[i] * (motor_configs[i]->sea_gear_ratio) / (motor_configs[i]->gear_ratio * motor_configs[i]->sea_cpr);
-      self->qdec_convert_sea_to_rad_[i] = (TWO_PI) / (motor_configs[i]->sea_cpr); // should convert from sea counts to radians
-      //self->qdec_convert_sea_to_joint_rad_[i] = (TWO_PI) * (motor_configs[i]->sea_gear_ratio) / (motor_configs[i]->gear_ratio * motor_configs[i]->sea_cpr); // should convert from sea counts to radians
+      self->qdec_convert_sea_to_joint_rad_[i] = (TWO_PI) * (motor_configs[i]->sea_gear_ratio) / (motor_configs[i]->gear_ratio * motor_configs[i]->sea_cpr); // should convert from sea counts to radians
     }
 
     self->prev_time = lf_time_physical(); //lf_time_physical(); //lf_time_physical_elapsed
@@ -223,7 +237,10 @@ reactor QDEC(sample_period: time = 5 ms){
     
     // Get values for SEA encoders
     for (int i=0; i<7; i++) {
-      float sea_value = ((float) sea_counts[i]) * self->qdec_convert_sea_to_rad_[i]; // - motor_configs[i]->sea_offset;
+      //float sea_raw = ((float) (sea_counts[i])) * magic_sea_count_conv[i] * (1 / motor_configs[i]->sea_cpr );
+      //float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
+      //lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
+      float sea_value = ((float) sea_counts[i]) * self->qdec_convert_sea_to_joint_rad_[i]; // - motor_configs[i]->sea_offset;
 
       lf_set(sea_out[i],  sea_value);
     }
@@ -231,7 +248,7 @@ reactor QDEC(sample_period: time = 5 ms){
     // Get values for USM encoders
     for (int i=7; i<14; i++) {
       self->qdec_pos_last_[i-7] = self->qdec_pos_[i-7]; // save last position
-      self->qdec_pos_[i-7] = ((float) (count[i])) * self->qdec_convert_motor_to_rad_[i-7]; // update the new position
+      self->qdec_pos_[i-7] = ((float) (count[i])) * self->qdec_convert_motor_to_joint_rad_[i-7]; // update the new position
       self->qdec_vel_est_[i-7] = (self->qdec_pos_[i-7] - self->qdec_pos_last_[i-7]) / (self->interval_sec); //(interval_sec); // estimate velocity from different of positions over the time between positions
 
       lf_set(qdec_out[i-7],  self->qdec_pos_[i-7]); // should be units of radians
@@ -268,4 +285,37 @@ reactor QDEC(sample_period: time = 5 ms){
   =}
 
 
+  /*
+  reaction(enable) {=
+    volatile int read_switch = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_2);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, read_switch);
+
+    if (read_switch && !last_switch) {
+      HAL_UART_Transmit(&huart3, qdec_disable, 1, HAL_MAX_DELAY);
+      printf("Disabling Encoders\r\n");
+    } else if(!read_switch && last_switch) {
+      HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
+      printf("Enabling Encoders\r\n");
+    }
+    last_switch = read_switch;
+
+  =}
+  */
 }
+// OLD GET SEA VALUE CODE, KEEP THIS! // verify this code is correct, count[6-i] and motor_configs[i] is suspicious when used together.
+    // Get values for SEA encoders
+    /*
+    for (int i=0; i<4; i++) {
+      // 0.5644 = 25.4/45
+      float sea_raw = ((float) (count[6-i])) * 0.5644 * (1 / motor_configs[i]->sea_cpr ); 
+      float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
+      lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
+    }
+
+    for (int i=4; i<7; i++) {
+      // 0.362 = 25.4/70
+      float sea_raw = ((float) (count[6-i])) * 0.3624 * (1 / motor_configs[i]->sea_cpr );
+      float sea_input = ((motor_configs[i]->sea_gear_ratio) * sea_raw);
+      lf_set(sea_out[i],  ((sea_input*100)/motor_configs[i]->gear_ratio) - motor_configs[i]->sea_offset );
+    }
+    */
