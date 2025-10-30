@@ -18,34 +18,35 @@ preamble {=
 
   #define PRINT_MODE 0
   #define PRINT_MODE_STATUS 0
+
+  #define MESSAGE_INDEX_MOD 256
 =}
 
 reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: time = 1000 ms, update_state_message_period: time = 10 ms){
     // inputs from serial
     input command_message: CommandMessage
 
+    // outputs to serial
+    output state_message: StateMessage
+
     // inputs from encoders
     input[7] motor_encoder_positions: float
     input[7] motor_encoder_velocities: float
     input[7] sea_encoder_positions: float
 
-    // inputs from usm
-    input[7] usm_duty_cycles: float
-
-    // outputs to serial
-    output state_message: StateMessage
-
     // outputs to encoders
     output enable_qdec: bool
     output reset_qdec: bool
-    
+
+    // inputs from usm
+    input[7] usm_duty_cycles: float
+
     // outputs to usm
     output[7] commanded_motor_velocities: float
     output enable_motor_command: bool // triggered when we're in the right state
-    output force_disable_motor_pins: bool // emergency disable of motor pins
+    output[7] force_disable_motor_pins: bool // used to disable specific motors if they've hit convergence or for safety reasons.
 
-    // internal copies of inputs
-    
+    // internal copies of inputs    
     state motor_encoder_positions_: float[7]
     state motor_encoder_velocities_: float[7]
     state sea_encoder_positions_: float[7]
@@ -54,7 +55,10 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     // internal copies of staged outputs
     state state_msg_: StateMessage
     state cmd_msg_: CommandMessage
-    state staged_commanded_motor_velocities_: float[7]
+    state staged_commanded_motor_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state last_staged_commanded_motor_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
+    state enable_motor_command_: bool = false
 
     // helper states
     state send_message_index: int = 0
@@ -71,6 +75,10 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
 
     =}
     
+    method commanded_velocity_santiy_checks(index: int) {=
+      
+    =}
+
     reaction(startup) -> enable_qdec, reset_qdec{=
       lf_set(enable_qdec, true); // turn the encoders on right at the start
       lf_set(reset_qdec, true)
@@ -78,7 +86,7 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     
     reaction(slow_status_tick) {=
       if (PRINT_MODE_STATUS){
-        //printModeStatus();
+        printf("In state: %d", self->current_behavior_mode_);
       }
       //toggleStatusLED();
     =}
@@ -93,42 +101,77 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
       // get the behavior mode and see if we need to handle a behavior change
       if (self->current_behavior_mode != self->cmd_msg_.behavior_mode){
         if (self->cmd_msg_.behavior_mode == SET_IDLE){
-          lf_set(enable_motor_command, false);
+          self->enable_motor_command_ = false;
+          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+          printf("Switching to Idle state...\n");
         }
         else if (self->cmd_msg_.behavior_mode == SET_RUN){
-          lf_set(enable_motor_command, true);
+          self->enable_motor_command_ = true;
+          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+          printf("Switching to Run state...\n");
         }
         else if (self->cmd_msg_.behavior_mode == SET_ERROR){ // externally triggered error state. means something went wrong on ROS side and we need to shut down for safety reasons.
-          lf_set(enable_motor_command, false);
+          self->enable_motor_command_ = false;
+          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+          printf("Switching to Error state...\n");
         }
         else{
           // bad value!
-          lf_set(enable_motor_command, false);
+          self->enable_motor_command_ = false;
+          self->current_behavior_mode_ = SET_IDLE;
         }
       }
 
-      // ignore the positions for now... could be used for bounds checking?
+      // ignore the positions for now, use for bounds checking
 
       // velocities are most important!
       for (int i = 0; i<DOF_NUMBER; i++){
         self->staged_commanded_motor_velocities_[i] = self->cmd_msg_.velocities[i];
       }
 
-      // do sanity check on staged velocities here!
-
-      // set staged velocities after inputs are clamped
+      // do sanity check on staged velocities here! move these to method after we've made sure they work correctly
       for (int i = 0; i<DOF_NUMBER; i++){
-        lf_set(commanded_motor_velocities[i]->value, self->staged_commanded_motor_velocities_[i]);
-      }
+        // clamp the values to be in a small region around the last velocity to prevent high accelerations at startup
+        if (self->staged_commanded_motor_velocities_[i] <  (self->last_staged_commanded_motor_velocities_[i] - MOTOR_VELOCITY_MAX_CHANGE)){
+          self->staged_commanded_motor_velocities_[i] = self->last_staged_commanded_motor_velocities_[i] - MOTOR_VELOCITY_MAX_CHANGE;
+        }
+        else if ((self->last_staged_commanded_motor_velocities_[i] + MOTOR_VELOCITY_MAX_CHANGE) < self->staged_commanded_motor_velocities_[i]){
+          self->staged_commanded_motor_velocities_[i] = self->last_staged_commanded_motor_velocities_[i] + MOTOR_VELOCITY_MAX_CHANGE;
+        }
 
+        // apply the deadband here before we try any filtering. if deadband is applied, set that channel's motor enable pin to be off.
+        if (self->staged_commanded_motor_velocities_[i] < MOTOR_VELOCITY_DEADBAND_LIMIT) && ((-MOTOR_VELOCITY_DEADBAND_LIMIT < self->staged_commanded_motor_velocities_[i])){
+          self->staged_commanded_motor_velocities_[i] = 0.0;
+          self->force_disable_motor_pins_[i] = true;
+        }
+        else{
+          self->force_disable_motor_pins_[i] = false;
+        }
+
+        // apply a light filter to keep things smooth even with the clamping and deadbands
+        self->staged_commanded_motor_velocities_[i] = (MOTOR_EXP_FILTER_ALPHA) * self->staged_commanded_motor_velocities_[i] + (1.0 - MOTOR_EXP_FILTER_ALPHA) * self->last_staged_commanded_motor_velocities_[i];
+        
+        // save the clamped, smooth commands for the next loop
+        self->last_staged_commanded_motor_velocities_[i] = self->staged_commanded_motor_velocities_[i];
+
+      }
+      
       // ignore sea position terms
 
       // check to see if we've missed a message somewhere. we should always expect this number to increase by 1 every loop.
       if (self->last_received_message_index != (self->cmd_msg_.message_index - 1)){
         self->missed_message_counter++;
       }
-      self->last_received_message_index = self->cmd_msg_.message_index;
+      self->last_received_message_index = self->cmd_msg_.message_index % MESSAGE_INDEX_MOD;
 
+      // set all outputs at the end of reaction
+      
+      for (int i = 0; i<DOF_NUMBER; i++){
+        lf_set(commanded_motor_velocities[i]->value, self->staged_commanded_motor_velocities_[i]);
+        lf_set(force_disable_motor_pins[i]->value, self->force_disable_motor_pins_[i]);
+      }
+
+      lf_set(enable_motor_command, self->enable_motor_command_);
     =}
 
     // TODO: Add sanity checks to the encoder readings to ensure that there isn't a connection error or something.
@@ -174,7 +217,7 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
                               self->motor_encoder_positions_, self->motor_encoder_velocities_,
                               self->sea_encoder_positions_, extra_array_,
                               time_stamp, self->send_message_index++);
-      self->send_message_index = self->send_message_index % 256;
+      self->send_message_index = self->send_message_index % MESSAGE_INDEX_MOD;
 
       lf_set(state_message, self->state_msg_);
     =}

@@ -4,7 +4,7 @@ target C {
     name: "STM32",
     board: "F446RE"
   },
-  files: ["/include_c/stm_comms.h", "/src_c/stm_comms.c"],
+  files: ["/include/stm_comms.h", "/src/stm_comms.c"],
 }
 
 preamble{=

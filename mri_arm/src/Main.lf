@@ -9,7 +9,7 @@ target C {
 import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import StateMachine from "lib/State_Machine.lf"
-import SerialInterface from "lib/Serial_Interface.lf"
+import UART_Handler from "lib/Drivers/UART.lf"
 
 preamble {=
   #include <stdio.h>
@@ -109,54 +109,40 @@ main reactor {
     }
 
   =}
-  
-  timer sys_tick(0 ms, 10 ms)           // Main system clock we will use inside main
-  timer switch_motor(0 ms, 1000 ms)     // Switch moto position state
 
   qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
   usm = new USM()                            // Ultrasonic motor controllers
   //ros_controller = new SerialInterface(send_period = 20 ms, receive_period = 20 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
-  ros_controller = new SerialInterface(send_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
-  mode_machine = new StateMachine()            // Used to trigger other reactors behavior
+  uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
+  state_machine = new StateMachine(update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
 
-  // Route encoder information to relevant reactors
-  qdec.qdec_out -> motor_controller.qdec_pos
-  qdec.qdec_vel_out -> motor_controller.qdec_vel
+  // route all the inputs/outputs here
+
+  // uart
+  uart.cmd_msg -> state_machine.command_message
+
+  state_machine.state_message -> uart.state_msg after 0;
+
+  // encoders
+  qdec.qdec_out -> state_machine.motor_encoder_positions
+  qdec.qdec_vel_out -> state_machine.motor_encoder_velocities
+  qdec.sea_out -> state_machine.sea_encoder_positions
+
+  state_machine.enable_qdec -> qdec.enable_qdec
+  state_machine.reset_qdec -> qdec.reset_qdec
+
+  // usm
+  usm.commanded_duty_cycle -> state_machine.usm_duty_cycles
+
+  state_machine.commanded_motor_velocities -> usm.speed
+  state_machine.enable_motor_command -> usm.enable_motor_command
+  state_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
+
+
+  /*
   qdec.sea_out -> motor_controller.qdec_sea
   qdec.qdec_out -> ros_controller.current_motor_position after 0;
-  qdec.qdec_vel_out -> ros_controller.current_motor_velocity
-  qdec.sea_out -> ros_controller.current_sea_position after 0;
-
-  motor_controller.speed -> ros_controller.motor_cmd_speed after 1 us;
-  usm.commanded_duty_cycle -> ros_controller.motor_duty_cycle after 1 us;
-
-  // Route joint targets/information
-  //motor_controller.current_joint -> ros_controller.current_joint after 0; // make ros read these from qdec!
-  //motor_controller.current_joint_sea -> ros_controller.current_joint_sea after 0;
-  motor_controller.current_joint -> home_controller.current_pos after 0;
-  motor_controller.current_joint_sea -> home_controller.sea_pos after 0;
-  motor_controller.speed -> usm.speed
-  ros_controller.target_pos_ext -> motor_controller.target_pos_ext
-  ros_controller.target_vel_ext -> motor_controller.target_vel_ext
-
-  ros_controller.sea_offset -> motor_controller.sea_offset
-  ros_controller.sea_lim -> motor_controller.sea_lim
-  
-  
-  ros_controller.set_mode_change -> mode_machine.set_mode_change after 0;
-  
-
-  mode_machine.reset_qdec -> qdec.reset_qdec after 0;
-  mode_machine.enable_motor_command -> motor_controller.enable_motor_command
-  mode_machine.enable_homing_command -> home_controller.enable_homing_command
-  mode_machine.motor_controller_internal_external_target_mode -> motor_controller.target_mode
-  mode_machine.motor_controller_target_sel -> motor_controller.target_sel
-  mode_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
-  mode_machine.current_mode_status -> ros_controller.current_mode_status
-
-  home_controller.is_home -> mode_machine.is_homing_finished after 0;
-  home_controller.motor_speed -> motor_controller.target_vel_int
-
+  */
   reaction(startup) {=
     // Prep all GPIO values
     //MX_GPIO_Init();

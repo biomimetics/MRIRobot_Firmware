@@ -9,7 +9,7 @@ target C {
 preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
-  #include <../../../src/motor_config.h>
+  #include <../../../include/motor_config.h>
   
 =}
 
@@ -216,8 +216,8 @@ reactor QDEC(sample_period: time = 5 ms){
     for (int i=0; i<7; i++){
       sea_counts[i] = count[6-i]; // they're stored backwards for the seas
     }
-    for (int i=7; i<14; i++){
-      usm_counts[i] = count[i];
+    for (int i=0; i<7; i++){
+      usm_counts[i] = count[i+7];
     }
 
     
@@ -229,15 +229,14 @@ reactor QDEC(sample_period: time = 5 ms){
     }
 
     // Get values for USM encoders
-    for (int i=7; i<14; i++) {
-      self->qdec_pos_last_[i-7] = self->qdec_pos_[i-7]; // save last position
-      self->qdec_pos_[i-7] = ((float) (count[i])) * self->qdec_convert_motor_to_rad_[i-7]; // update the new position
-      self->qdec_vel_est_[i-7] = (self->qdec_pos_[i-7] - self->qdec_pos_last_[i-7]) / (self->interval_sec); //(interval_sec); // estimate velocity from different of positions over the time between positions
+    for (int i=0; i<7; i++) {
+      self->qdec_pos_last_[i] = self->qdec_pos_[i]; // save last position
+      self->qdec_pos_[i] = ((float) usm_counts[i]) * self->qdec_convert_motor_to_rad_[i]; // update the new position
+      self->qdec_vel_est_[i] = (self->qdec_pos_[i] - self->qdec_pos_last_[i]) / (self->interval_sec); //(interval_sec); // estimate velocity from different of positions over the time between positions
 
-      lf_set(qdec_out[i-7],  self->qdec_pos_[i-7]); // should be units of radians
-      lf_set(qdec_vel_out[i-7],  self->qdec_vel_est_[i-7]); // should be units of radians per second
+      lf_set(qdec_out[i],  self->qdec_pos_[i]); // should be units of radians
+      lf_set(qdec_vel_out[i],  self->qdec_vel_est_[i]); // should be units of radians per second
     }
-
     
     if (PRINT_ENCODER && printcnt>=printcnt_lim){
       //printf("encoder interval_sec: Got %d us.\r\n", ((int)(self->interval_sec * 1000000.0))); //self->sample_period);
@@ -269,3 +268,13 @@ reactor QDEC(sample_period: time = 5 ms){
 
 
 }
+    /*
+    for (int i=7; i<14; i++) {
+      self->qdec_pos_last_[i-7] = self->qdec_pos_[i-7]; // save last position
+      self->qdec_pos_[i-7] = ((float) (count[i])) * self->qdec_convert_motor_to_rad_[i-7]; // update the new position
+      self->qdec_vel_est_[i-7] = (self->qdec_pos_[i-7] - self->qdec_pos_last_[i-7]) / (self->interval_sec); //(interval_sec); // estimate velocity from different of positions over the time between positions
+
+      lf_set(qdec_out[i-7],  self->qdec_pos_[i-7]); // should be units of radians
+      lf_set(qdec_vel_out[i-7],  self->qdec_vel_est_[i-7]); // should be units of radians per second
+    }
+    */

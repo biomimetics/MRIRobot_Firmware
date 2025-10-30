@@ -11,17 +11,20 @@ preamble {=
   #include <stdio.h>
   #include <stdlib.h>
   #include <math.h> // need for floating point abs, or fabsf()
-  #include <../../../src/motor_config.h>
+  #include <../../../include/motor_config.h>
 
 =}
 
 reactor USM {
   input[7] speed: float
-  input force_disable_motor_pins: bool
+  input enable_motor_command: bool
+  input[7] force_disable_motor_pins: bool
+
   output[7] commanded_duty_cycle: float // only used for monitoring purposes
 
-  state force_disable_motor_pins_: bool = false
-
+  state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
+  state enable_motor_command_: bool = false
+  
   //state force_disable_motor_pins
   preamble {=
 
@@ -37,7 +40,6 @@ reactor USM {
       int ccr = ((int) (((float) ARR_PERIOD) * duty_cycle));
       return ccr; //((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
     }
-
 
     extern TIM_HandleTypeDef htim3; // used for USM PWM
     extern TIM_HandleTypeDef htim4; // used for USM PWM
@@ -173,7 +175,18 @@ reactor USM {
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   set_value);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   set_value);
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   set_value);
-      HAL_Delay(1);
+      //HAL_Delay(1);
+    }
+
+    void set_motor_enable_pins_from_array(bool *enable_values){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    enable_values[0]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    enable_values[1]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    enable_values[2]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    enable_values[3]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   enable_values[4]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   enable_values[5]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   enable_values[6]);
+      //HAL_Delay(1);
     }
 
     void enforce_speed_bounds(){
@@ -246,11 +259,9 @@ reactor USM {
     // for debugging
     reference_tick_usm = HAL_GetTick();
 
-    //
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
-
 
     MX_TIM3_Init();
     MX_TIM4_Init();
@@ -269,26 +280,24 @@ reactor USM {
   =}
 
   reaction(force_disable_motor_pins) {=
-    self->force_disable_motor_pins_ = force_disable_motor_pins->value;
-    if (PRINT_USM){printf("Set force_disable_motor_pins_ to %d given input %d.\r\n", self->force_disable_motor_pins_, force_disable_motor_pins->value);}
-    if (force_disable_motor_pins->value){
-      set_motor_enable_pins(false);
+    for (int i = 0; i<7; i++){
+      self->force_disable_motor_pins_[i] = force_disable_motor_pins[i]->value;
     }
   =}
 
+  reaction(enable_motor_command) {=
+    self->enable_motor_command_ = enable_motor_command->value;
+    set_motor_enable_pins(self->enable_motor_command_);
+    =}
+
   reaction(speed) -> commanded_duty_cycle{=
     
-    // save internal speed_ values
-    for (int i = 0; i<7; i++){
-      speed_[i] = speed[i]->value;
-    }
+    if (self->enable_motor_command_){
+      // save internal speed_ values
+      for (int i = 0; i<7; i++){
+        speed_[i] = speed[i]->value;
+      }
 
-    // Set USM values if we're not in the safey idle mode
-    if (self->force_disable_motor_pins_){
-      if (PRINT_USM){printf("USM: Force disabling all motor pins\r\n");}
-      set_motor_enable_pins(false);
-    }
-    else {
       // Set USM direction values based on sign of speed_
       set_direction_pins();
 
@@ -310,7 +319,6 @@ reactor USM {
       HAL_Delay(1); // do a HAL delay at the end to allow all the pins to update correctly
       for (int i = 0; i<7; i++) {lf_set(commanded_duty_cycle[i], usm_duty_cycle_[i]);} // usm_duty_cycle_ is set internally by set_motor_pwm_registsers
     }
-  
   =}
 
 }
