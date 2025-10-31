@@ -3,8 +3,8 @@ target C {
   platform: {
     name: "STM32",
     board: "F446RE"
-  },
-  files: ["/include/stm_comms.h", "/src/stm_comms.c"],
+  }
+  //files: ["/include_c/stm_comms.h", "/src_c/stm_comms.c"]
 }
 
 preamble{=
@@ -16,6 +16,8 @@ preamble{=
   #include <ctype.h>
 
   #include "stm_comms.h"
+  //#include "stm_comms.c"
+  #include "common.h"
 
   #define PRINT_UART 0
   #define USE_EX_DMA 0
@@ -102,7 +104,9 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
     =}
 
     reaction (startup){=
+        
         receiveToIdle_DMA_Init();
+        printf("UART has finished startup!\n");
     =}
 
     //reaction (state_msg){=

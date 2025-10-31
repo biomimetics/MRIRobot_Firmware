@@ -4,6 +4,7 @@ target C {
     name: "stm32",
     board: "F446RE"
   }
+  //files: ["/include_c/stm_comms.h", "/src_c/stm_comms.c"]
 }
 
 preamble {=
@@ -12,9 +13,11 @@ preamble {=
   #include "main.h"
   #include <stdio.h>
 
-  #include <../../../include/motor_config.h>
-  #include <../../../include/sm_config.h>
-  #include <../../../include/common_structs.h>
+  #include "motor_config.h"
+  #include "sm_config.h"
+  #include "common.h"
+  #include "stm_comms.h"
+  //#include "stm_comms.c"
 
   #define PRINT_MODE 0
   #define PRINT_MODE_STATUS 0
@@ -72,7 +75,6 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
 
     preamble {= 
       void set_power_relay(bool on_or_off){return;}; // TODO: impliment this when we get a working relay.HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    0);
-
     =}
     
     method commanded_velocity_santiy_checks(index: int) {=
@@ -81,13 +83,15 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
 
     reaction(startup) -> enable_qdec, reset_qdec{=
       lf_set(enable_qdec, true); // turn the encoders on right at the start
-      lf_set(reset_qdec, true)
+      lf_set(reset_qdec, true);
+
+      printf("State Machine has finished startup!\n");
       =}
     
     reaction(slow_status_tick) {=
-      if (PRINT_MODE_STATUS){
-        printf("In state: %d", self->current_behavior_mode_);
-      }
+      //if (PRINT_MODE_STATUS){
+      printf("In state: %d", self->current_behavior_mode_);
+      //}
       //toggleStatusLED();
     =}
 
@@ -96,10 +100,10 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     //# Input reactions
     //#####
 
-    reaction(command_message) -> enable_motor_command, commanded_motor_velocities {=
+    reaction(command_message) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities {=
       self->cmd_msg_ = command_message->value;
       // get the behavior mode and see if we need to handle a behavior change
-      if (self->current_behavior_mode != self->cmd_msg_.behavior_mode){
+      if (self->current_behavior_mode_ != self->cmd_msg_.behavior_mode){
         if (self->cmd_msg_.behavior_mode == SET_IDLE){
           self->enable_motor_command_ = false;
           self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
@@ -140,7 +144,7 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
         }
 
         // apply the deadband here before we try any filtering. if deadband is applied, set that channel's motor enable pin to be off.
-        if (self->staged_commanded_motor_velocities_[i] < MOTOR_VELOCITY_DEADBAND_LIMIT) && ((-MOTOR_VELOCITY_DEADBAND_LIMIT < self->staged_commanded_motor_velocities_[i])){
+        if ((self->staged_commanded_motor_velocities_[i] < MOTOR_VELOCITY_DEADBAND_LIMIT) && ((-MOTOR_VELOCITY_DEADBAND_LIMIT < self->staged_commanded_motor_velocities_[i]))){
           self->staged_commanded_motor_velocities_[i] = 0.0;
           self->force_disable_motor_pins_[i] = true;
         }
@@ -167,8 +171,8 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
       // set all outputs at the end of reaction
       
       for (int i = 0; i<DOF_NUMBER; i++){
-        lf_set(commanded_motor_velocities[i]->value, self->staged_commanded_motor_velocities_[i]);
-        lf_set(force_disable_motor_pins[i]->value, self->force_disable_motor_pins_[i]);
+        lf_set(commanded_motor_velocities[i], self->staged_commanded_motor_velocities_[i]);
+        lf_set(force_disable_motor_pins[i], self->force_disable_motor_pins_[i]);
       }
 
       lf_set(enable_motor_command, self->enable_motor_command_);
@@ -203,17 +207,16 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     //# Output reactions
     //#####
     reaction(update_state_message_tick) -> state_message {=
+      float extra_array_[EXTRA_LENGTH];
 
-      // depreciate the extra_array_ asap.
-      float[EXTRA_LENGTH] extra_array_;
       for (int i = 0; i<DOF_NUMBER; i++){
         extra_array_[i] = 0.0; //target_joint_pos_[i];
         extra_array_[i+7] = 0.0; //usm_motor_speeds_[i];
-        extra_array_[i+14] = usm_duty_cycle_copy_[i];
+        extra_array_[i+14] = self->usm_duty_cycles_[i];
       }
       
       int time_stamp = HAL_GetTick();
-      construct_state_message(&self->state_msg_, current_behavior_mode_,
+      construct_state_message(&self->state_msg_, self->current_behavior_mode_,
                               self->motor_encoder_positions_, self->motor_encoder_velocities_,
                               self->sea_encoder_positions_, extra_array_,
                               time_stamp, self->send_message_index++);

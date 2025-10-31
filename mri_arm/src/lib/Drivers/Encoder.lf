@@ -9,7 +9,8 @@ target C {
 preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
-  #include <../../../include/motor_config.h>
+  #include "motor_config.h"
+  #include "common.h"
   
 =}
 
@@ -34,8 +35,8 @@ reactor QDEC(sample_period: time = 5 ms){
   state qdec_pos_last_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
   state qdec_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
-  state qdec_convert_motor_to_joint_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to acutator space
-  state qdec_convert_sea_to_joint_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from sea space to acutator space
+  state qdec_convert_motor_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to acutator space
+  state qdec_convert_sea_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from sea space to acutator space
 
   state sea_pos_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
   state sea_pos_last_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
@@ -163,6 +164,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     self->prev_time = lf_time_physical(); //lf_time_physical(); //lf_time_physical_elapsed
     reference_tick = HAL_GetTick(); // gives miliseconds since last reboot
+    printf("QDEC has finished startup!\n");
   =}
 
   reaction(reset_qdec) {=
@@ -195,13 +197,15 @@ reactor QDEC(sample_period: time = 5 ms){
 
     timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
 
+    /*
     if (DO_INTERVAL_OVERRIDE){
       self->interval_sec = (float) OVERRIDE_INTERVAL;
     }
     else {
       self->interval_sec = (float) self->timer_elapsed_time_sec_;
     }
-    
+    */    
+   self->interval_sec = (float) self->timer_elapsed_time_sec_;
 
     // Prep the next request
     HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);

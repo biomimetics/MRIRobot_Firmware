@@ -75,10 +75,10 @@ clean_data:
 # For running communication debugging programs
 #######################################
 comms:
-	gcc src/uart_comms_example.c src/linux_comms.c src/stm_comms.c -o uart_comms_example
+	gcc src/uart_comms_example.c src_c/linux_comms.c src_c/stm_comms.c -o uart_comms_example
 
 comms_logger:
-	gcc src/uart_comms_logger.c src/linux_comms.c src/stm_comms.c -o uart_logger
+	gcc src/uart_comms_logger.c src_c/linux_comms.c src_c/stm_comms.c -o uart_logger
 
 comms_listener:
-	gcc src/uart_comms_listener.c src/linux_comms.c src/stm_comms.c -o uart_listener
+	gcc src/uart_comms_listener.c src_c/linux_comms.c src_c/stm_comms.c -o uart_listener

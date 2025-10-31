@@ -3,7 +3,13 @@ target C {
   platform: {
     name: "STM32",
     board: "F446RE"
-  }
+  },
+  files: ["include_c/motor_config.h", 
+          "include_c/sm_config.h",
+          "include_c/common.h",
+          "include_c/stm_comms.h", "src_c/stm_comms.c"],
+  cmake-include: [
+      "../include_c/stm_comms_cmake.cmake"]
 }
 
 import QDEC from "lib/Drivers/Encoder.lf"
@@ -42,14 +48,6 @@ main reactor {
     extern TIM_HandleTypeDef htim6; // used for timing loops
 
     //UART_HandleTypeDef huart6; // def in ROS_Interface.lf
-
-
-    // Target positions
-    float target_pos[7] =   {0, 0, 0, 0, 0, 0, 0}; // unused
-    float target_speed[7] = {0, 0, 0, 0, 0, 0, 0}; // unused
-    bool target_sel[7] =    {0, 0, 0, 0, 0, 0, 0};
-    static int at_home = 0; // unused
-
     
     int stm32_init(void){
       HAL_Init();

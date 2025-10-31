@@ -1,4 +1,4 @@
-#include "../src/stm_comms.h"
+#include "../include_c/stm_comms.h"
 #include <termios.h>
 
 
