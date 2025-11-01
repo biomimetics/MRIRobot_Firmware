@@ -327,7 +327,7 @@ reactor USM {
       compute_duty_cycles(); // updates usm_duty_cycle_ array
 
       // set motor enable pins based on deadband value of duty cycles
-      set_motor_enable_deadband(); // sets motor enable pins to be true if value is above USM_DUTY_CYCLE_MIN
+      //set_motor_enable_deadband(); // sets motor enable pins to be true if value is above USM_DUTY_CYCLE_MIN
       
       // set the pwm registers
       set_motor_pwm_registers();
@@ -338,7 +338,7 @@ reactor USM {
         }
       }
       
-      HAL_Delay(1); // do a HAL delay at the end to allow all the pins to update correctly
+      //HAL_Delay(1); // do a HAL delay at the end to allow all the pins to update correctly
       for (int i = 0; i<7; i++) {lf_set(commanded_duty_cycle[i], usm_duty_cycle_[i]);} // usm_duty_cycle_ is set internally by set_motor_pwm_registsers
     }
   =}

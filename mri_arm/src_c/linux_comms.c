@@ -1,4 +1,5 @@
 #include "stm_comms.h"
+#include "linux_comms.h"
 #include <termios.h>
 
 
@@ -116,6 +117,101 @@ int read_packet(int fd, uint8_t *buf, int max_iterations) {
     }
 }
 
+// how does this work in the other code but not here???
+int read_packet_bulk(int fd, uint8_t *buf, size_t buf_size) {
+    if (!buf || buf_size < 4) {  // PACKET_BYTE_OVERHEAD = 4
+        fprintf(stderr, "Invalid buffer\n");
+        return -1;
+    }
+
+    uint8_t byte;
+    int n;
+
+    // Step 1: Read PACKET_START_BYTE
+    while (1) {
+        if (wait_for_data(fd, SELECT_TIMEOUT_MS) <= 0)
+            return -1;
+
+        n = read(fd, &byte, 1);
+        if (n == 1 && byte == PACKET_START_BYTE) {
+            buf[0] = byte;
+            break;
+        }
+    }
+
+    // Step 2: Read LENGTH byte
+    if (wait_for_data(fd, SELECT_TIMEOUT_MS) <= 0)
+        return -1;
+
+    n = read(fd, &byte, 1);
+    if (n != 1)
+        return -1;
+
+    uint8_t length = byte;
+    buf[1] = length;
+
+    // Full packet = start(1) + length(1) + length bytes + checksum(1)
+    size_t total_packet_size = 2 + length + 1; // = length + 3
+    //size_t total_packet_size = 2 + length + 3; // changing this made it work briefly but it's still not correct
+    //size_t total_packet_size = 2 + length + 3; // changing this made it work briefly but it's still not correct
+
+    //printf("read_packet_bulk: total_packet_size: %d\n", total_packet_size);
+
+    if (total_packet_size > buf_size) {
+        fprintf(stderr, "Packet too large: %zu bytes, buffer is %zu\n", total_packet_size, buf_size);
+        return -1;
+    }
+
+    // Step 3: Read rest of the packet (type + data + checksum)
+    size_t remaining = total_packet_size - 2;
+    size_t offset = 2;
+
+    //printf("read_packet_bulk: remaining: %d\n", remaining);
+    while (remaining > 0) {
+        //printf("read_packet_bulk: remaining in loop: %d\n", remaining);
+        if (wait_for_data(fd, SELECT_TIMEOUT_MS) <= 0)
+            return -1;
+
+        n = read(fd, &buf[offset], remaining);
+        if (n <= 0)
+            continue;
+
+        offset += n;
+        remaining -= n;
+    }
+
+        // Step 4: Compute checksum: sum of buf[1] to buf[total_packet_size - 2]
+    uint8_t computed_checksum = 0;
+    for (size_t i = 1; i < total_packet_size - 1; i++) {
+        computed_checksum = (computed_checksum + buf[i]) % CHECKSUM_MOD;
+    }
+    //uint8_t checksum = 0;
+    //for (int i = 1; i < total_packet_size; ++i) {computed_checksum = (computed_checksum + buf[i]) & 0xFF;}
+
+
+    uint8_t received_checksum = buf[total_packet_size - 1];
+
+    
+
+    if (computed_checksum != received_checksum) {
+        fprintf(stderr, "Checksum mismatch: expected 0x%02X, got 0x%02X\n",
+                computed_checksum, received_checksum);
+
+        //printf("Received packet (%zu bytes):\n", total_packet_size);
+        //for (size_t i = 0; i < total_packet_size; ++i) {
+        //    printf(" %02X", buf[i]);
+        //}
+        //printf("\n");
+        printf("Checksum calculation range: buf[1] to buf[%zu]\n", total_packet_size - 2);
+        printf("Calculated checksum: 0x%02X, Received checksum: 0x%02X\n",
+                computed_checksum, received_checksum);
+        return -1;
+    }
+
+    return total_packet_size;
+}
+
+
 /*
 typedef struct {
     uint8_t start;
@@ -126,6 +222,7 @@ typedef struct {
 } Packet;
 */
 // --- Packet Reader (simple version) -
+
 
 int send_command_message(int port_id, CommandMessage* msg){
 
@@ -153,8 +250,10 @@ int read_state_message(int port_id, StateMessage* state_msg){
     uint8_t rx_buff[UART_BUFFER_SIZE];
     memset(rx_buff, 0, UART_BUFFER_SIZE);
 
-    int rx_len = read_packet(port_id, rx_buff, UART_BUFFER_SIZE);
+    //int rx_len = read_packet(port_id, rx_buff, UART_BUFFER_SIZE);
+    int rx_len = read_packet_bulk(port_id, rx_buff, UART_BUFFER_SIZE);
 
+    //printf("read_state_message: rx_len: %d\n", rx_len);
     if (0 < rx_len){
         return  (int)handle_state_message_packet(state_msg, rx_buff, rx_len);
     }
@@ -162,3 +261,21 @@ int read_state_message(int port_id, StateMessage* state_msg){
         return 0;
     }
 };
+
+static int wait_for_data(int fd, int timeout_ms) {
+    fd_set read_fds;
+    struct timeval timeout;
+
+    FD_ZERO(&read_fds);
+    FD_SET(fd, &read_fds);
+
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int result = select(fd + 1, &read_fds, NULL, NULL, &timeout);
+    if (result < 0) {
+        perror("select");
+    }
+
+    return result; // >0 = ready, 0 = timeout, <0 = error                    
+}

@@ -4,7 +4,7 @@
 #include <math.h>
 
 
-#define LONG_USLEEP_TIME 10000 //8000
+#define LONG_USLEEP_TIME 6000 //8000
 int main() {
     int fd = open_serial(SERIAL_PORT);
     int res = configure_serial_port(fd);
@@ -39,18 +39,20 @@ int main() {
     
     int message_index = 0;
 
-    int iter_num = 1000;
+    int iter_num = 500; //5000; //1000;
     int rep_num = 4;
     float iter_float = (float) iter_num;
 
+    float y_offset = 1.01; //0.55;
     for (int rep = 0; rep<rep_num; rep++){
-        for (int i = 0; i<1000; i++){
+        for (int i = 0; i<iter_num; i++){
 
-            vel_cmd[0] = sin(2.0 * 3.1416 * (((float) i) / iter_float));
+            vel_cmd[0] = sin(2.0 * 3.1416 * (((float) i) / iter_float)) + y_offset;
             //printf("sizeof(Int): %zu\n", sizeof(int)); // just making sure I wasn't going crazy
             StateMessage state_msg;
             int res = read_state_message(fd, &state_msg);
-            print_state_message_int(&state_msg);
+            //int res = read_packet_bulk(int fd, uint8_t *buf, size_t buf_size);
+            //print_state_message_int(&state_msg);
 
             fpt = fopen("uart_log.csv", "a+");
             char buffer[512];  // Make sure this is large enough
@@ -66,7 +68,118 @@ int main() {
                                 sea_fake, extra_fake,
                                 0, message_index++ % 256);
 
-            print_command_message_int(&transmit_data);
+            //print_command_message_int(&transmit_data);
+
+            send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
+            
+            
+
+            usleep(LONG_USLEEP_TIME);
+        }
+    }
+
+    iter_num = 1000; //5000; //1000;
+    iter_float = (float) iter_num;
+
+    for (int rep = 0; rep<rep_num; rep++){
+        for (int i = 0; i<iter_num; i++){
+
+            vel_cmd[0] = sin(2.0 * 3.1416 * (((float) i) / iter_float)) + y_offset;
+            //printf("sizeof(Int): %zu\n", sizeof(int)); // just making sure I wasn't going crazy
+            StateMessage state_msg;
+            int res = read_state_message(fd, &state_msg);
+            //int res = read_packet_bulk(int fd, uint8_t *buf, size_t buf_size);
+            //print_state_message_int(&state_msg);
+
+            fpt = fopen("uart_log.csv", "a+");
+            char buffer[512];  // Make sure this is large enough
+            serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
+            fprintf(fpt,"%s\n", buffer);
+            fclose(fpt);
+
+            // --- Send a STM_State Packet
+            CommandMessage transmit_data;
+
+            construct_command_message(&transmit_data, 1,
+                                pos_fake, vel_cmd,
+                                sea_fake, extra_fake,
+                                0, message_index++ % 256);
+
+            //print_command_message_int(&transmit_data);
+
+            send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
+            
+            
+
+            usleep(LONG_USLEEP_TIME);
+        }
+    }
+
+    iter_num = 2000; //5000; //1000;
+    iter_float = (float) iter_num;
+
+    for (int rep = 0; rep<rep_num; rep++){
+        for (int i = 0; i<iter_num; i++){
+
+            vel_cmd[0] = sin(2.0 * 3.1416 * (((float) i) / iter_float)) + y_offset;
+            //printf("sizeof(Int): %zu\n", sizeof(int)); // just making sure I wasn't going crazy
+            StateMessage state_msg;
+            int res = read_state_message(fd, &state_msg);
+            //int res = read_packet_bulk(int fd, uint8_t *buf, size_t buf_size);
+            //print_state_message_int(&state_msg);
+
+            fpt = fopen("uart_log.csv", "a+");
+            char buffer[512];  // Make sure this is large enough
+            serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
+            fprintf(fpt,"%s\n", buffer);
+            fclose(fpt);
+
+            // --- Send a STM_State Packet
+            CommandMessage transmit_data;
+
+            construct_command_message(&transmit_data, 1,
+                                pos_fake, vel_cmd,
+                                sea_fake, extra_fake,
+                                0, message_index++ % 256);
+
+            //print_command_message_int(&transmit_data);
+
+            send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
+            
+            
+
+            usleep(LONG_USLEEP_TIME);
+        }
+    }
+
+    iter_num = 5000; //5000; //1000;
+    iter_float = (float) iter_num;
+
+    for (int rep = 0; rep<rep_num; rep++){
+        for (int i = 0; i<iter_num; i++){
+
+            vel_cmd[0] = sin(2.0 * 3.1416 * (((float) i) / iter_float)) + y_offset;
+            //printf("sizeof(Int): %zu\n", sizeof(int)); // just making sure I wasn't going crazy
+            StateMessage state_msg;
+            int res = read_state_message(fd, &state_msg);
+            //int res = read_packet_bulk(int fd, uint8_t *buf, size_t buf_size);
+            //print_state_message_int(&state_msg);
+
+            fpt = fopen("uart_log.csv", "a+");
+            char buffer[512];  // Make sure this is large enough
+            serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
+            fprintf(fpt,"%s\n", buffer);
+            fclose(fpt);
+
+            // --- Send a STM_State Packet
+            CommandMessage transmit_data;
+
+            construct_command_message(&transmit_data, 1,
+                                pos_fake, vel_cmd,
+                                sea_fake, extra_fake,
+                                0, message_index++ % 256);
+
+            //print_command_message_int(&transmit_data);
 
             send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
             
