@@ -1,5 +1,5 @@
-#include "../include/stm_comms.h"
-#include "../include/linux_comms.h"
+#include "stm_comms.h"
+#include "linux_comms.h"
 
 #define LONG_USLEEP_TIME 1000
 int main() {

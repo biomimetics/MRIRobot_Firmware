@@ -120,7 +120,7 @@ main reactor {
   //ros_controller = new SerialInterface(send_period = 20 ms, receive_period = 20 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   ros_controller = new SerialInterface(send_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   motor_controller = new MotorController(refresh_period = 10 ms)    // Main Motor driver + controller
-  home_controller = new HomeController()      // Used to home the motors
+  //home_controller = new HomeController()      // Used to home the motors
   mode_machine = new ModeMachine()            // Used to trigger other reactors behavior
 
   // Route encoder information to relevant reactors
@@ -137,8 +137,8 @@ main reactor {
   // Route joint targets/information
   //motor_controller.current_joint -> ros_controller.current_joint after 0; // make ros read these from qdec!
   //motor_controller.current_joint_sea -> ros_controller.current_joint_sea after 0;
-  motor_controller.current_joint -> home_controller.current_pos after 0;
-  motor_controller.current_joint_sea -> home_controller.sea_pos after 0;
+  //motor_controller.current_joint -> home_controller.current_pos after 0;
+  //motor_controller.current_joint_sea -> home_controller.sea_pos after 0;
   motor_controller.speed -> usm.speed
   ros_controller.target_pos_ext -> motor_controller.target_pos_ext
   ros_controller.target_vel_ext -> motor_controller.target_vel_ext
@@ -152,14 +152,14 @@ main reactor {
 
   mode_machine.reset_qdec -> qdec.reset_qdec after 0;
   mode_machine.enable_motor_command -> motor_controller.enable_motor_command
-  mode_machine.enable_homing_command -> home_controller.enable_homing_command
+  //mode_machine.enable_homing_command -> home_controller.enable_homing_command
   mode_machine.motor_controller_internal_external_target_mode -> motor_controller.target_mode
   mode_machine.motor_controller_target_sel -> motor_controller.target_sel
   mode_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
   mode_machine.current_mode_status -> ros_controller.current_mode_status
 
-  home_controller.is_home -> mode_machine.is_homing_finished after 0;
-  home_controller.motor_speed -> motor_controller.target_vel_int
+  //home_controller.is_home -> mode_machine.is_homing_finished after 0;
+  //home_controller.motor_speed -> motor_controller.target_vel_int
 
   reaction(startup) {=
     // Prep all GPIO values

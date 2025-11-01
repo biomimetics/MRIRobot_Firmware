@@ -4,12 +4,12 @@ target C {
     name: "STM32",
     board: "F446RE"
   },
-  files: ["include_c/motor_config.h", 
-          "include_c/sm_config.h",
-          "include_c/common.h",
-          "include_c/stm_comms.h", "src_c/stm_comms.c"],
+  files: ["src_c/motor_config.h", 
+          "src_c/sm_config.h",
+          "src_c/common.h",
+          "src_c/stm_comms.h", "src_c/stm_comms.c"],
   cmake-include: [
-      "../include_c/stm_comms_cmake.cmake"]
+      "../src_c/stm_comms_cmake.cmake"]
 }
 
 import QDEC from "lib/Drivers/Encoder.lf"
@@ -22,6 +22,8 @@ preamble {=
   #include "stm32f4xx_hal.h"
   //#include "stm32_startup.h"
   #include "main.h"
+  
+  #include "stm_comms.h"
 
   extern UART_HandleTypeDef huart2;
 
@@ -31,6 +33,40 @@ preamble {=
 main reactor {
   preamble {=
   
+    /*
+    
+    //void HAL_UART_RxCallback3(){};
+
+    //void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+    void HAL_UART_RxCallback_DMA(){
+        
+        printf("In HAL_UART_RxCpltCallback, received some bytes.");
+        //uart_receive_size = (size_t)UART_BUFFER_SIZE; //(size_t)Size;
+
+        //printf("Before memcpy: \n");
+        //print_buffer(uart_rx_dma_buffer, UART_BUFFER_SIZE);
+        //memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, UART_BUFFER_SIZE); // moves the data over to a buffer that's handled in the receive update
+
+        //received_new_message = true;
+        //HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
+        printf("At end of uart's HAL_UART_RxCallback_DMA()\n");
+    }
+
+    void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+        //handle_send_packet(uart_rx_dma_buffer, Size);
+        printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
+        //if (UART_BUFFER_SIZE == Size){
+        //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
+
+        //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
+        //uart_receive_size = (size_t)Size;
+        //memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, uart_receive_size); // moves the data over to a buffer that's handled in the receive update
+        //received_new_message = true;
+        //HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
+        printf("At end of uart's HAL_UART_RxCallback_DMA()\n");
+    }
+    */
+
     /*
     int _write(int file, char *ptr, int len){
         HAL_UART_Transmit(&PRINT_UART, (uint8_t *)ptr, len, HAL_MAX_DELAY);
@@ -76,18 +112,11 @@ main reactor {
       return 0;
     }
 
+    // empty callbacks
+    void HAL_UART_RxCallback1(){};
+    void HAL_UART_TxCallback1(){};
 
-
-    // Define empty function handlers for UART callbacks
-    void HAL_UART_RxCallback_DMA();
-    void HAL_UART_RxCallback3();
-    void HAL_UART_RxCallback1();
-
-    void HAL_UART_TxCallback1();
-
-    // Define global recieve callback
-
-    
+    // Define global callbacks
     void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
       if (huart->Instance == USART3) {
         HAL_UART_RxCallback3(); // 
@@ -99,7 +128,7 @@ main reactor {
       }
     }
 
-    // Define global recieve callback
+    
     void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
       if (huart == &huart1) {
         HAL_UART_TxCallback1();
@@ -110,7 +139,6 @@ main reactor {
 
   qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
   usm = new USM()                            // Ultrasonic motor controllers
-  //ros_controller = new SerialInterface(send_period = 20 ms, receive_period = 20 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   state_machine = new StateMachine(update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
 
@@ -137,10 +165,6 @@ main reactor {
   state_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
 
 
-  /*
-  qdec.sea_out -> motor_controller.qdec_sea
-  qdec.qdec_out -> ros_controller.current_motor_position after 0;
-  */
   reaction(startup) {=
     // Prep all GPIO values
     //MX_GPIO_Init();
@@ -150,4 +174,14 @@ main reactor {
 
   =}
 
+  /*
+  //timer heartbeat(0 ms, 50 ms)
+  reaction(heartbeat){=
+    printf("Still alive...\n");
+
+    CommandMessage cmd_msg_;
+    //printf("%d", cmd_msg_.behavior_mode);
+    print_command_message(&cmd_msg_);
+  =}
+  */
 }

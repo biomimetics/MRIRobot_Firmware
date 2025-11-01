@@ -60,6 +60,7 @@ reactor USM {
       return ccr; //((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
     }
 
+
     extern TIM_HandleTypeDef htim3; // used for USM PWM
     extern TIM_HandleTypeDef htim4; // used for USM PWM
 
@@ -333,7 +334,7 @@ reactor USM {
 
       if (PRINT_USM){
         for (int i = 0; i<7;i++){
-          printf("Motor %d: Commanding %d milli rads/sec or %d Deg/s, CCR of %d.\r\n", i, (int)(1000 * speed_[i]), (int)(RAD_PER_SEC_TO_DEG_PER_SEC * speed_[i]), convert_speed_rad_per_sec_to_pwm_ccr(speed_[i]));
+          printf("Motor %d: Commanding %d milli rads/sec or %d Deg/s.\r\n", i, (int)(1000 * speed_[i]), (int)(RAD_PER_SEC_TO_DEG_PER_SEC * speed_[i]));
         }
       }
       

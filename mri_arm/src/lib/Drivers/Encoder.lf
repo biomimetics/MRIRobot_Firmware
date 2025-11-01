@@ -141,6 +141,7 @@ reactor QDEC(sample_period: time = 5 ms){
     MX_UART3_Init();
     MX_GPIO_Init();
 
+    printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");
     if (PRINT_ENCODER){printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");}
     HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
@@ -172,6 +173,7 @@ reactor QDEC(sample_period: time = 5 ms){
     if (self->reset_qdec_){
       HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
       HAL_UART_Receive_DMA(&huart3, data, 98);
+      if (PRINT_ENCODER) {printf("Resetting Encoders\r\n");}
     }
     self->reset_qdec_ = false; 
     reset_qdec->value = self->reset_qdec_;// should work if reset_qdec is mutable?
@@ -194,7 +196,7 @@ reactor QDEC(sample_period: time = 5 ms){
   // Update Encoder values
   // This function should take approximately 1ms to operate
   reaction(trigger) -> qdec_out, qdec_vel_out, sea_out {=
-
+    //printf("In QDEC's trigger reaction.\n");
     timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
 
     /*
@@ -267,7 +269,7 @@ reactor QDEC(sample_period: time = 5 ms){
       printf("\r\n\r\n");
     }
     printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
-
+    //printf("At end of QDEC's trigger reaction.\n");
   =}
 
 

@@ -1,5 +1,5 @@
-#include "../include/stm_comms.h"
-#include "../include/linux_comms.h"
+#include "stm_comms.h"
+#include "linux_comms.h"
 
 
 
@@ -60,7 +60,7 @@ int main() {
         // --- Send a STM_State Packet
         CommandMessage transmit_data;
 
-        construct_command_message(&transmit_data, 2,
+        construct_command_message(&transmit_data, 1,
                             pos_fake, vel_fake,
                             sea_fake, extra_fake,
                             0, message_index++ % 256);
@@ -74,16 +74,16 @@ int main() {
 
     /**/
     // --- Send a STM_State Packet
-        CommandMessage transmit_data;
+    CommandMessage transmit_data;
 
-        construct_command_message(&transmit_data, 0,
-                            pos_fake, vel_fake,
-                            sea_fake, extra_fake,
-                            0, message_index++ % 256);
+    construct_command_message(&transmit_data, 0,
+                        pos_fake, vel_fake,
+                        sea_fake, extra_fake,
+                        0, message_index++ % 256);
 
-        print_command_message_int(&transmit_data);
+    print_command_message_int(&transmit_data);
 
-        send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
+    send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
 
 
 

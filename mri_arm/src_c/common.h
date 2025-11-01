@@ -12,6 +12,8 @@
 // for debugging
 #define PRINT_USM 0
 #define PRINT_ENCODER 0
+#define PRINT_UART 0
+#define USE_EX_DMA 0
 
 // for communication
 #define DMA_TX_BUFFER_SIZE 400 //256//(STM_BUFFER_SIZE) //200
@@ -32,8 +34,8 @@
 #define USM_MAX_DUTY_CYCLE 0.30 //0.20 //0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
 #define USM_MIN_DUTY_CYCLE 0.000 //0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
 
-#define MOTOR_EXP_FILTER_ALPHA 0.9
-#define MOTOR_VELOCITY_DEADBAND_LIMIT 0.1309 // rad/s or 7.5 deg/s
+#define MOTOR_EXP_FILTER_ALPHA 0.5
+#define MOTOR_VELOCITY_DEADBAND_LIMIT 0.0 //0.1309 // rad/s or 7.5 deg/s
 #define MOTOR_VELOCITY_MAX_CHANGE 0.5236 // rad/s or 30 deg/s
 
 

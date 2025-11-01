@@ -4,6 +4,8 @@ target C {
     name: "stm32",
     board: "F446RE"
   }
+  //cmake-include: [
+  //    "../include_c/stm_comms_cmake.cmake"]
   //files: ["/include_c/stm_comms.h", "/src_c/stm_comms.c"]
 }
 
@@ -50,10 +52,10 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     output[7] force_disable_motor_pins: bool // used to disable specific motors if they've hit convergence or for safety reasons.
 
     // internal copies of inputs    
-    state motor_encoder_positions_: float[7]
-    state motor_encoder_velocities_: float[7]
-    state sea_encoder_positions_: float[7]
-    state usm_duty_cycles_: float[7]
+    state motor_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state motor_encoder_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state sea_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state usm_duty_cycles_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
     // internal copies of staged outputs
     state state_msg_: StateMessage
@@ -90,7 +92,7 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     
     reaction(slow_status_tick) {=
       //if (PRINT_MODE_STATUS){
-      printf("In state: %d", self->current_behavior_mode_);
+      //printf("In state: %d\n", self->current_behavior_mode_);
       //}
       //toggleStatusLED();
     =}
@@ -100,21 +102,30 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     //# Input reactions
     //#####
 
+    
     reaction(command_message) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities {=
       self->cmd_msg_ = command_message->value;
+
+      //printf("State_Machine received command_message of:\n");
+      //print_command_message_int(&self->cmd_msg_);
+
       // get the behavior mode and see if we need to handle a behavior change
+
+      //printf("Got state: %d\n", self->cmd_msg_.behavior_mode);
+      //printf("Is it different from current state?: %d\n", self->current_behavior_mode_ != self->cmd_msg_.behavior_mode);
       if (self->current_behavior_mode_ != self->cmd_msg_.behavior_mode){
-        if (self->cmd_msg_.behavior_mode == SET_IDLE){
+        //if (self->cmd_msg_.behavior_mode == SET_IDLE){
+        if (self->cmd_msg_.behavior_mode == 0){ // SET_IDLE
           self->enable_motor_command_ = false;
           self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
           printf("Switching to Idle state...\n");
         }
-        else if (self->cmd_msg_.behavior_mode == SET_RUN){
+        else if (self->cmd_msg_.behavior_mode == 1){ // SET_RUN
           self->enable_motor_command_ = true;
           self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
           printf("Switching to Run state...\n");
         }
-        else if (self->cmd_msg_.behavior_mode == SET_ERROR){ // externally triggered error state. means something went wrong on ROS side and we need to shut down for safety reasons.
+        else if (self->cmd_msg_.behavior_mode == 2){ //SET_ERROR // externally triggered error state. means something went wrong on ROS side and we need to shut down for safety reasons.
           self->enable_motor_command_ = false;
           self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
           printf("Switching to Error state...\n");
@@ -177,6 +188,7 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
 
       lf_set(enable_motor_command, self->enable_motor_command_);
     =}
+    
 
     // TODO: Add sanity checks to the encoder readings to ensure that there isn't a connection error or something.
     reaction(motor_encoder_positions) {=
@@ -186,9 +198,13 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     =}
 
     reaction(motor_encoder_velocities) {=
+      //printf("State Machine: Got velocities of:\n");
       for (int i = 0; i<DOF_NUMBER; i++){
         self->motor_encoder_velocities_[i] = motor_encoder_velocities[i]->value;
+        //printf("%d:", (int) (motor_encoder_velocities[i]->value*1000));
+        //printf("%d, ", (int) (self->motor_encoder_velocities_[i]*1000));
       }
+      //printf("\n");
     =}
 
     reaction(sea_encoder_positions) {=
@@ -206,21 +222,23 @@ reactor StateMachine(slow_refresh_period: time = 20 ms, status_refresh_period: t
     //##### 
     //# Output reactions
     //#####
+
+    
     reaction(update_state_message_tick) -> state_message {=
       float extra_array_[EXTRA_LENGTH];
 
       for (int i = 0; i<DOF_NUMBER; i++){
-        extra_array_[i] = 0.0; //target_joint_pos_[i];
+        extra_array_[i] = self->staged_commanded_motor_velocities_[i]; //target_joint_pos_[i];
         extra_array_[i+7] = 0.0; //usm_motor_speeds_[i];
         extra_array_[i+14] = self->usm_duty_cycles_[i];
       }
       
       int time_stamp = HAL_GetTick();
+      
       construct_state_message(&self->state_msg_, self->current_behavior_mode_,
                               self->motor_encoder_positions_, self->motor_encoder_velocities_,
                               self->sea_encoder_positions_, extra_array_,
                               time_stamp, self->send_message_index++);
-      self->send_message_index = self->send_message_index % MESSAGE_INDEX_MOD;
 
       lf_set(state_message, self->state_msg_);
     =}
