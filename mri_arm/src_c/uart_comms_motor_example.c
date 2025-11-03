@@ -4,7 +4,7 @@
 #include <math.h>
 
 
-#define LONG_USLEEP_TIME 6000 //8000
+#define LONG_USLEEP_TIME 8000 //8000
 int main() {
     int fd = open_serial(SERIAL_PORT);
     int res = configure_serial_port(fd);
@@ -43,7 +43,8 @@ int main() {
     int rep_num = 4;
     float iter_float = (float) iter_num;
 
-    float y_offset = 1.01; //0.55;
+    float y_offset = 0.0; //1.01; //0.55;
+    int last_message_index = 0;
     for (int rep = 0; rep<rep_num; rep++){
         for (int i = 0; i<iter_num; i++){
 
@@ -54,11 +55,15 @@ int main() {
             //int res = read_packet_bulk(int fd, uint8_t *buf, size_t buf_size);
             //print_state_message_int(&state_msg);
 
-            fpt = fopen("uart_log.csv", "a+");
-            char buffer[512];  // Make sure this is large enough
-            serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
-            fprintf(fpt,"%s\n", buffer);
-            fclose(fpt);
+            
+            if (state_msg.message_index != last_message_index){ // only save if we get new data
+                fpt = fopen("uart_log.csv", "a+");
+                char buffer[512];  // Make sure this is large enough
+                serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
+                fprintf(fpt,"%s\n", buffer);
+                fclose(fpt);
+            }
+            last_message_index = state_msg.message_index;
 
             // --- Send a STM_State Packet
             CommandMessage transmit_data;
@@ -91,11 +96,14 @@ int main() {
             //int res = read_packet_bulk(int fd, uint8_t *buf, size_t buf_size);
             //print_state_message_int(&state_msg);
 
-            fpt = fopen("uart_log.csv", "a+");
-            char buffer[512];  // Make sure this is large enough
-            serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
-            fprintf(fpt,"%s\n", buffer);
-            fclose(fpt);
+            if (state_msg.message_index != last_message_index){ // only save if we get new data
+                fpt = fopen("uart_log.csv", "a+");
+                char buffer[512];  // Make sure this is large enough
+                serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
+                fprintf(fpt,"%s\n", buffer);
+                fclose(fpt);
+            }
+            last_message_index = state_msg.message_index;
 
             // --- Send a STM_State Packet
             CommandMessage transmit_data;
@@ -128,11 +136,14 @@ int main() {
             //int res = read_packet_bulk(int fd, uint8_t *buf, size_t buf_size);
             //print_state_message_int(&state_msg);
 
-            fpt = fopen("uart_log.csv", "a+");
-            char buffer[512];  // Make sure this is large enough
-            serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
-            fprintf(fpt,"%s\n", buffer);
-            fclose(fpt);
+            if (state_msg.message_index != last_message_index){ // only save if we get new data
+                fpt = fopen("uart_log.csv", "a+");
+                char buffer[512];  // Make sure this is large enough
+                serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
+                fprintf(fpt,"%s\n", buffer);
+                fclose(fpt);
+            }
+            last_message_index = state_msg.message_index;
 
             // --- Send a STM_State Packet
             CommandMessage transmit_data;
@@ -165,11 +176,14 @@ int main() {
             //int res = read_packet_bulk(int fd, uint8_t *buf, size_t buf_size);
             //print_state_message_int(&state_msg);
 
-            fpt = fopen("uart_log.csv", "a+");
-            char buffer[512];  // Make sure this is large enough
-            serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
-            fprintf(fpt,"%s\n", buffer);
-            fclose(fpt);
+            if (state_msg.message_index != last_message_index){ // only save if we get new data
+                fpt = fopen("uart_log.csv", "a+");
+                char buffer[512];  // Make sure this is large enough
+                serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
+                fprintf(fpt,"%s\n", buffer);
+                fclose(fpt);
+            }
+            last_message_index = state_msg.message_index;
 
             // --- Send a STM_State Packet
             CommandMessage transmit_data;

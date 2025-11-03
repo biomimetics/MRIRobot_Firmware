@@ -66,6 +66,7 @@ reactor USM {
 
     volatile float speed_[7] = {0, 0, 0, 0, 0, 0, 0}; // internal copy of speed, not a reactor state because is changed inplace with preamble functions
     volatile float usm_duty_cycle_[7] = {0, 0, 0, 0, 0, 0, 0}; // not a reactor state because is changed inplace with preamble functions
+    volatile int usm_ccr_[7] = {0, 0, 0, 0, 0, 0, 0}; // not a reactor state because is changed inplace with preamble functions
 
     static void MX_TIM3_Init(void) {
       TIM_ClockConfigTypeDef sClockSourceConfig = {0};
@@ -258,13 +259,15 @@ reactor USM {
     }
 
     void set_motor_pwm_registers(){
-      TIM3->CCR1 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[0]);  // Set period for USM0
-      TIM3->CCR2 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[1]);  // Set period for USM1
-      TIM3->CCR3 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[2]);  // Set period for USM2
-      TIM3->CCR4 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[3]);  // Set period for USM3
-      TIM4->CCR1 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[4]);  // Set period for USM4
-      TIM4->CCR2 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[5]);  // Set period for USM5
-      TIM4->CCR3 = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[6]);  // Set period for USM6
+      for (int i = 0; i < 7; i++) {usm_ccr_[i] = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[i]);}
+
+      TIM3->CCR1 = usm_ccr_[0];  // Set period for USM0
+      TIM3->CCR2 = usm_ccr_[1];  // Set period for USM1
+      TIM3->CCR3 = usm_ccr_[2];  // Set period for USM2
+      TIM3->CCR4 = usm_ccr_[3];  // Set period for USM3
+      TIM4->CCR1 = usm_ccr_[4];  // Set period for USM4
+      TIM4->CCR2 = usm_ccr_[5];  // Set period for USM5
+      TIM4->CCR3 = usm_ccr_[6];  // Set period for USM6
       return;
     }
 
