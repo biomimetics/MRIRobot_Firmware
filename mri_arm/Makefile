@@ -85,3 +85,6 @@ comms_listener:
 
 comms_motor:
 	gcc src_c/uart_comms_motor_example.c src_c/linux_comms.c src_c/stm_comms.c -o uart_motor_test -lm
+
+comms_motor_ramp:
+	gcc src_c/uart_comms_motor_ramp.c src_c/linux_comms.c src_c/stm_comms.c -o uart_motor_ramp -lm

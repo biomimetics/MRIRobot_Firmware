@@ -136,6 +136,7 @@ main reactor {
       }
     }
 
+    int hal_timer = 0;
   =}
 
   qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
@@ -173,16 +174,22 @@ main reactor {
     // Initialize the STM32 peripherals
     stm32_init();
 
+    hal_timer = HAL_GetTick(); 
+
   =}
 
-  /*
-  //timer heartbeat(0 ms, 50 ms)
+  /*  
+  timer heartbeat(0 ms, 50 ms)
   reaction(heartbeat){=
     printf("Still alive...\n");
 
-    CommandMessage cmd_msg_;
+    // for verifying the onboard timers are working as expected
+    printf("HAL_GetTick() - hal_timer: %d, expected %d\n...", HAL_GetTick() - hal_timer, 50);
+    hal_timer = HAL_GetTick();
+    
+    //CommandMessage cmd_msg_;
     //printf("%d", cmd_msg_.behavior_mode);
-    print_command_message(&cmd_msg_);
+    //print_command_message(&cmd_msg_);
   =}
   */
 }

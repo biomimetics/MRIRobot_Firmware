@@ -8,6 +8,7 @@
         "stm_comms.h": "c",
         "cstddef": "c",
         "string.h": "c",
-        "linux_comms.h": "c"
+        "linux_comms.h": "c",
+        "cmath": "c"
     }
 }
