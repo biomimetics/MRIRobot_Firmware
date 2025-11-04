@@ -8,7 +8,7 @@ int main() {
     if (fd < 0) return 1;
 
     FILE *fpt;
-    fpt = fopen("uart_log.csv", "w+");
+    fpt = fopen("csv_data/uart_log.csv", "w+");
     char header_buffer[512];  // Adjust size as needed
     write_state_message_csv_header(header_buffer, sizeof(header_buffer));
     fprintf(fpt,"%s\n", header_buffer);
@@ -20,7 +20,7 @@ int main() {
         int res = read_state_message(fd, &state_msg);
         print_state_message_int(&state_msg);
 
-        fpt = fopen("uart_log.csv", "a+");
+        fpt = fopen("csv_data/uart_log.csv", "a+");
         char buffer[512];  // Make sure this is large enough
         serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
         fprintf(fpt,"%s\n", buffer);

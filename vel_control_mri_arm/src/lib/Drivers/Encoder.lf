@@ -141,7 +141,6 @@ reactor QDEC(sample_period: time = 5 ms){
     MX_UART3_Init();
     MX_GPIO_Init();
 
-    printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");
     if (PRINT_ENCODER){printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");}
     HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);

@@ -49,7 +49,7 @@ int main() {
     for (int i = 0; i<EXTRA_LENGTH; i++) extra_fake[i] = ((float)i) * ((float) i) / 1000.0;
 
     FILE *fpt;
-    fpt = fopen("uart_ramp.csv", "w+");
+    fpt = fopen("csv_data/uart_ramp.csv", "w+");
     char header_buffer[512];  // Adjust size as needed
     write_state_message_csv_header(header_buffer, sizeof(header_buffer));
     fprintf(fpt,"%s\n", header_buffer);
@@ -95,7 +95,7 @@ int main() {
                 int res = read_state_message(fd, &state_msg);
                 
                 if (state_msg.message_index != last_message_index){ // only save if we get new data
-                    fpt = fopen("uart_ramp.csv", "a+");
+                    fpt = fopen("csv_data/uart_ramp.csv", "a+");
                     char buffer[512];  // Make sure this is large enough
                     serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
                     fprintf(fpt,"%s\n", buffer);
@@ -126,7 +126,7 @@ int main() {
                 int res = read_state_message(fd, &state_msg);
                 
                 if (state_msg.message_index != last_message_index){ // only save if we get new data
-                    fpt = fopen("uart_ramp.csv", "a+");
+                    fpt = fopen("csv_data/uart_ramp.csv", "a+");
                     char buffer[512];  // Make sure this is large enough
                     serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
                     fprintf(fpt,"%s\n", buffer);
@@ -156,7 +156,7 @@ int main() {
             int res = read_state_message(fd, &state_msg);
             
             if (state_msg.message_index != last_message_index){ // only save if we get new data
-                fpt = fopen("uart_ramp.csv", "a+");
+                fpt = fopen("csv_data/uart_ramp.csv", "a+");
                 char buffer[512];  // Make sure this is large enough
                 serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
                 fprintf(fpt,"%s\n", buffer);
@@ -189,7 +189,7 @@ int main() {
                 int res = read_state_message(fd, &state_msg);
                 
                 if (state_msg.message_index != last_message_index){ // only save if we get new data
-                    fpt = fopen("uart_ramp.csv", "a+");
+                    fpt = fopen("csv_data/uart_ramp.csv", "a+");
                     char buffer[512];  // Make sure this is large enough
                     serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
                     fprintf(fpt,"%s\n", buffer);
@@ -223,7 +223,7 @@ int main() {
                 int res = read_state_message(fd, &state_msg);
                 
                 if (state_msg.message_index != last_message_index){ // only save if we get new data
-                    fpt = fopen("uart_ramp.csv", "a+");
+                    fpt = fopen("csv_data/uart_ramp.csv", "a+");
                     char buffer[512];  // Make sure this is large enough
                     serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
                     fprintf(fpt,"%s\n", buffer);

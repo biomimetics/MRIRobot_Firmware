@@ -10,6 +10,7 @@
 #include <stdbool.h>
 
 // for debugging
+#define PRINT_STATEMACHINE 0
 #define PRINT_USM 0
 #define PRINT_ENCODER 0
 #define PRINT_UART 0

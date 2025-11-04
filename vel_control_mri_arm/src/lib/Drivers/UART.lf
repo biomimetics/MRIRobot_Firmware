@@ -33,7 +33,7 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
     state cmd_msg_: CommandMessage
 
     state not_receiving_count: int = 0
-    state not_receiving_count_max: int = 1000
+    state not_receiving_count_max: int = 10
 
     //timer transmit_timer(0 ms, transmit_period)
     timer receive_timer(0 ms, receive_period)
@@ -53,37 +53,23 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
 
         uint8_t uart_tx_dma_buffer[UART_BUFFER_SIZE];
 
-        //void HAL_UART_RxCallback1(){};
-        //void HAL_UART_TxCallback1(){};
-
-
-        //void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
         void HAL_UART_RxCallback_DMA(){
             
             //printf("In HAL_UART_RxCpltCallback, received some bytes.");
             uart_receive_size = (size_t)UART_BUFFER_SIZE; //(size_t)Size;
 
-            //printf("Before memcpy: \n");
-            //print_buffer(uart_rx_dma_buffer, UART_BUFFER_SIZE);
             memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, UART_BUFFER_SIZE); // moves the data over to a buffer that's handled in the receive update
 
             received_new_message = true;
             HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
-            //printf("At end of uart's HAL_UART_RxCallback_DMA()\n");
         }
 
         void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
-            //handle_send_packet(uart_rx_dma_buffer, Size);
-            //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
-            //if (UART_BUFFER_SIZE == Size){
-            //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
 
-            //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
             uart_receive_size = (size_t)Size;
             memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, uart_receive_size); // moves the data over to a buffer that's handled in the receive update
             received_new_message = true;
             HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
-            //printf("At end of uart's HAL_UART_RxCallback_DMA()\n");
         }
         
     =}
@@ -97,7 +83,6 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
         else{
             HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
         }
-        printf("At end of uart's receiveToIdle_DMA_Init()\n");
     =}
 
     reaction (startup){=
@@ -105,10 +90,6 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
         receiveToIdle_DMA_Init();
         printf("UART has finished startup!\n");
     =}
-
-    //reaction (state_msg){=
-    //    self->state_msg_ = state_msg->value;
-    //=}
 
     reaction (state_msg){=
         //printf("In uarts's state_msg reaction...\n");
@@ -141,9 +122,14 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
             //print_command_message_int(&self->cmd_msg_);
             if (res){
                 lf_set(cmd_msg, self->cmd_msg_);
+
+                self->not_receiving_count = 0;
+                lf_set(not_receiving_error, false);
+            }
+            else{
+                self->not_receiving_count++;
             }
             received_new_message = false;
-            self->not_receiving_count = 0;
         }
         else{
             //printf("At received_new_message == false's case.\n");
@@ -156,7 +142,8 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
             lf_set(not_receiving_error, true);
         }
         else{
-            lf_set(not_receiving_error, false);
+            //lf_set(not_receiving_error, false);
+            //self->not_receiving_count = 0;
         }
         //printf("At end of uart's receive_timer reaction...\n");
 

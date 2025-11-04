@@ -34,49 +34,6 @@ preamble {=
 main reactor {
   preamble {=
   
-    /*
-    
-    //void HAL_UART_RxCallback3(){};
-
-    //void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
-    void HAL_UART_RxCallback_DMA(){
-        
-        printf("In HAL_UART_RxCpltCallback, received some bytes.");
-        //uart_receive_size = (size_t)UART_BUFFER_SIZE; //(size_t)Size;
-
-        //printf("Before memcpy: \n");
-        //print_buffer(uart_rx_dma_buffer, UART_BUFFER_SIZE);
-        //memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, UART_BUFFER_SIZE); // moves the data over to a buffer that's handled in the receive update
-
-        //received_new_message = true;
-        //HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
-        printf("At end of uart's HAL_UART_RxCallback_DMA()\n");
-    }
-
-    void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
-        //handle_send_packet(uart_rx_dma_buffer, Size);
-        printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
-        //if (UART_BUFFER_SIZE == Size){
-        //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
-
-        //printf("In HAL_UARTEx_RxEventCallback, received %d bytes.", Size);
-        //uart_receive_size = (size_t)Size;
-        //memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, uart_receive_size); // moves the data over to a buffer that's handled in the receive update
-        //received_new_message = true;
-        //HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
-        printf("At end of uart's HAL_UART_RxCallback_DMA()\n");
-    }
-    */
-
-    /*
-    int _write(int file, char *ptr, int len){
-        HAL_UART_Transmit(&PRINT_UART, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-        //HAL_UART_Transmit(&huart6, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-
-        // HAL_UART_Transmit_IT(&huart2, (uint8_t *)ptr, len);
-        return len;
-    }
-    */
     extern UART_HandleTypeDef huart1; // make sure these need to be defined here or not
     extern UART_HandleTypeDef huart3;
     extern UART_HandleTypeDef huart4;
@@ -142,12 +99,13 @@ main reactor {
   qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
   usm = new USM()                            // Ultrasonic motor controllers
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
-  state_machine = new StateMachine(update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
+  state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
 
   // route all the inputs/outputs here
 
   // uart
   uart.cmd_msg -> state_machine.command_message
+  uart.not_receiving_error -> state_machine.not_receiving_error
 
   state_machine.state_message -> uart.state_msg after 0;
 
@@ -178,7 +136,7 @@ main reactor {
 
   =}
 
-  /*  
+  /*
   timer heartbeat(0 ms, 50 ms)
   reaction(heartbeat){=
     printf("Still alive...\n");
@@ -192,4 +150,5 @@ main reactor {
     //print_command_message(&cmd_msg_);
   =}
   */
+
 }
