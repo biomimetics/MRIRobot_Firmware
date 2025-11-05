@@ -1,0 +1,345 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "STM32",
+    board: "F446RE"
+  }
+}
+
+import PIDGroup7DOF from "Joint_Controllers/PIDGroup7DOF.lf"
+
+preamble {=
+  #include <stdio.h>
+  #include "stm32f4xx_hal.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
+  #include <../../../include_c/sm_config.h>
+  #include <../../../include_c/joint_config.h>
+
+  #define PRINT_MOTOR_CONTROLLER 0
+  //state print_motor_controller: bool = true
+
+  #define USE_JOINTSPACE_CONTROLLERS 1 // set to 1 if we want to have controllers behave like jointspace controllers which output jointspace set values which then must be converted to the motor space
+  #define USE_SEA_ANGLE_WITH_POSITION_CONTROL 0
+=}
+
+// Import and/or declare reactor classes.
+reactor MotorController(refresh_period: time = 10 ms) {
+  input enable_motor_command: bool
+
+  input[7] target_sel: MOTOR_MODE
+
+  input[7] target_vel_int: float
+  input[7] target_vel_ext: float
+  input[7] target_pos_int: float
+  input[7] target_pos_ext: float
+
+  input[7] sea_offset: float
+  input[7] sea_lim: float
+
+  input[7] qdec_pos: float
+  input[7] qdec_vel: float
+  
+  input[7] qdec_sea: float
+
+  input target_mode: TARGET_SRC
+
+  output[7] speed: float
+  output[7] current_joint: float
+  output[7] current_joint_sea: float
+  
+  preamble{=
+    bool use_diff_vel_ext = true; // move this to an input/state
+    //static Timer_State timer_st_u5 = {0, 0.005};
+    =}
+    
+  state target_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state target_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state current_joint_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state current_motor_vel: float[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state target_joint_vel: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
+  state target_motor_vel: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
+
+
+  state current_motor_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state current_joint_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state target_joint_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state target_motor_pos: float[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  state speed_spc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for velocity control
+  state speed_posc: float[7] = {0, 0, 0, 0, 0, 0, 0} // speed for position control
+  state speed_cmd: float[7] = {0, 0, 0, 0, 0, 0, 0}
+  state speed_cmd_max: float = 20.0
+
+  state target_mode_: TARGET_SRC = 0
+  state enable_motor_command_: bool = false
+  state _target_sel: MOTOR_MODE[7] = {1, 1, 1, 1, 1, 1, 1}
+
+  timer trigger(0, refresh_period)
+
+
+  // ######
+  // ### Position Controllers
+  pcontrol_group = new PIDGroup7DOF(id = 0)
+
+  // ######
+  // ### Velocity Controllers
+  vcontrol_group = new PIDGroup7DOF(id = 1, do_feedforward = true)
+  
+  // ######
+  // ### Conversion Methods
+
+  // Convert the motor outputs in [joint space] -> [motor space]
+  method convertJointToMotorSpace(joint: float*, motor: float*): void {=
+    // apply jacobian
+    motor[0] = joint[0];
+    // for diff motors, w0 = pitch + roll, w1 = -pitch + roll
+    motor[1] =  (joint[1] + joint[2]); // pitch + roll
+    motor[2] = (-joint[1] + joint[2]); // -pitch + roll
+
+    motor[3] =  (joint[3] + joint[4]); // pitch + roll
+    motor[4] = (-joint[3] + joint[4]); // -pitch + roll
+
+    motor[5] =  (joint[5] + joint[6]); // pitch + roll
+    motor[6] = (-joint[5] + joint[6]); // -pitch + roll
+    return;
+  =}
+
+  // Convert the targets in [motor space] -> [joint space]
+  method convertMotorToJointSpace(motor: float*, joint: float*): void {=
+    //float joint_pos[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    joint[0] = motor[0];
+    // for diff motors, w0 = pitch + roll, w1 = -pitch + roll
+    joint[1] =  (motor[1] - motor[2]) / 2.0; // pitch + roll
+    joint[2] = (motor[1] + motor[2]) / 2.0; // -pitch + roll
+
+    joint[3] =  (motor[3] - motor[4]) / 2.0; // pitch + roll
+    joint[4] = (motor[3] + motor[4]) / 2.0; // -pitch + roll
+
+    joint[5] =  (motor[5] - motor[6]) / 2.0; // pitch + roll
+    joint[6] = (motor[5] + motor[6]) / 2.0; // -pitch + roll
+    return;
+    //return joint_pos*;
+  =}
+
+
+  reaction(startup){=
+    //printf("Motor Controller: Starting up...\r\n");
+    =}
+
+  // ######
+  // ### Current State Update Reactions 
+  
+  reaction(qdec_pos, qdec_sea) -> pcontrol_group.current_states{=
+    for (int i = 0; i<7; i++){
+        if (USE_SEA_ANGLE_WITH_POSITION_CONTROL){
+          self->current_motor_pos[i] = qdec_pos[i]->value + qdec_sea[i]->value;
+        } 
+        else {
+          self->current_motor_pos[i] = qdec_pos[i]->value;
+        }
+      }
+
+      convertMotorToJointSpace(self->current_motor_pos, self->current_joint_pos); // sets joint_pos
+
+      if (USE_JOINTSPACE_CONTROLLERS){
+        for (int i = 0; i<7; i++){lf_set(pcontrol_group.current_states[i], self->current_joint_pos[i]);}
+      }
+      else {
+        for (int i = 0; i<7; i++){lf_set(pcontrol_group.current_states[i], self->current_motor_pos[i]);}
+      }
+  =}
+
+  reaction(qdec_vel) -> vcontrol_group.current_states{=
+    for (int i = 0; i<7; i++){
+        self->current_motor_vel[i] = qdec_vel[i]->value;
+      }
+      convertMotorToJointSpace(self->current_motor_vel, self->current_joint_vel); // sets joint
+      //self->current_joint_pos = convertMotorToJointPositions(self->current_motor_pos);
+
+      if (USE_JOINTSPACE_CONTROLLERS){
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.current_states[i], self->current_joint_vel[i]);}
+      }
+      else {
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.current_states[i], self->current_motor_vel[i]);}
+      }
+  =}
+
+  // ######
+  // ### Target State Update Reactions 
+  reaction(target_pos_int) {= // this should be unused!
+    if (self->target_mode_ == MODE_INT) {
+      for(int i=0; i<7; i++) {
+        self->target_pos[i] = target_pos_int[i]->value;
+      }
+    }
+  =}
+
+  reaction(target_pos_ext) -> pcontrol_group.target_states {=
+    //printf("in target_pos_ext reaction on motor controller side... \r\n");
+    if(self->target_mode_ == MODE_EXT) {
+      if (PRINT_MOTOR_CONTROLLER) printf("target_pos_ext:\r\n");
+      for(int i=0; i<7; i++){
+        if (PRINT_MOTOR_CONTROLLER) printf("%d, ", (int)(target_pos_ext[i]->value * 1000));
+        //self->target_pos[i] = target_pos_ext[i]->value;
+        /*
+        if (USE_JOINTSPACE_CONTROLLERS){
+          self->target_joint_pos[i] = target_pos_ext[i]->value;
+        }*/
+        self->target_joint_pos[i] = target_pos_ext[i]->value;
+      }
+      if (PRINT_MOTOR_CONTROLLER) printf("\r\n");
+
+      convertJointToMotorSpace(self->target_joint_pos, self->target_motor_pos);
+      
+      if (USE_JOINTSPACE_CONTROLLERS){
+        for (int i = 0; i<7; i++){lf_set(pcontrol_group.target_states[i], self->target_joint_pos[i]);}
+      }
+      else {
+        for (int i = 0; i<7; i++){lf_set(pcontrol_group.target_states[i], self->target_motor_pos[i]);}
+      }
+
+    }
+  =}
+
+  reaction(target_vel_int) -> vcontrol_group.target_states {=
+    //printf("target_vel_ext reaction triggered!\r\n");
+    if (self->target_mode_ == MODE_INT) {
+      for(int i=0; i<7; i++){
+        //self->speed_spc[i] = target_vel_int[i]->value;
+        
+        self->target_motor_vel[i] = target_vel_int[i]->value; // sets them directly here, motor by motor, no joint
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.target_states[i], self->target_motor_vel[i]);}
+      }
+    }
+  =}
+
+  // inputs are the targets for the joints, outputs are the motor commands based on the differential joint kinematics
+  // jacobian for motors -> joints is [[0.5, -0.5], [0.5, 0.5]], inv for joints -> motors (this case) is [[1, 1], [-1, 1]]. assumes counterclockwise positive for both motors pointing in towards the center.
+  reaction(target_vel_ext) -> vcontrol_group.target_states {=
+    // save target_joint_vel from the input
+    if (self->target_mode_ == MODE_EXT) {
+      if (PRINT_MOTOR_CONTROLLER) printf("tartget_vel_ext:\r\n");
+      for (int i = 0; i<7; i++){
+        if (PRINT_MOTOR_CONTROLLER) printf("%d, ", (int)(target_vel_ext[i]->value * 1000));
+        self->target_joint_vel[i] = target_vel_ext[i]->value;
+      }
+      if (PRINT_MOTOR_CONTROLLER) printf("\r\n");
+      convertJointToMotorSpace(self->target_joint_vel, self->target_motor_vel);
+
+      if (USE_JOINTSPACE_CONTROLLERS){
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.target_states[i], self->target_joint_vel[i]);}
+      }
+      else {
+        for (int i = 0; i<7; i++){lf_set(vcontrol_group.target_states[i], self->target_motor_vel[i]);}
+      }
+    }
+
+  =}
+
+  // ######
+  // ### Behavior Switching Reactions 
+  reaction(target_mode) {=
+    self->target_mode_ = target_mode->value;
+    if (PRINT_MOTOR_CONTROLLER) printf("target_mode reaction called, setting value to %d from input %d\r\n",  self->target_mode_, target_mode->value);
+  =}
+
+  reaction(target_sel) {=
+    int old_motor_command = 0;
+    for (int i = 0; i<7; i++){
+      old_motor_command = self->_target_sel[i];
+      self->_target_sel[i] = target_sel[i]->value;
+      if (PRINT_MOTOR_CONTROLLER) printf("target_sel reaction called, setting value to from %d to new value of %d from input %d\r\n", old_motor_command,  self->_target_sel[i], target_sel[i]->value);
+    }
+  =}
+
+  reaction(enable_motor_command) -> pcontrol_group.reset_errors, vcontrol_group.reset_errors{=
+    self->enable_motor_command_ = enable_motor_command->value;
+    lf_set(pcontrol_group.reset_errors, true);
+    lf_set(vcontrol_group.reset_errors, true);
+    =}
+
+  // ######
+  // ### Stage Commands Reactions 
+  reaction(pcontrol_group.control_signals) {=
+    float cmd_value[7];
+    for (int i = 0; i<7; i++){cmd_value[i] = pcontrol_group.control_signals[i]->value;}
+
+    if (USE_JOINTSPACE_CONTROLLERS){
+      // convert joint space values to motor space values, then send
+      float motor_cmd_value[7];
+      convertJointToMotorSpace(cmd_value, motor_cmd_value);
+      for (int i = 0; i<7; i++){
+        self->speed_posc[i] = motor_cmd_value[i];
+      }
+    }
+    else{
+      for (int i = 0; i<7; i++){
+        self->speed_posc[i] = cmd_value[i];
+      }
+    }
+  =}
+
+  reaction(vcontrol_group.control_signals) {=
+    float cmd_value[7];
+    for (int i = 0; i<7; i++){cmd_value[i] = vcontrol_group.control_signals[i]->value;}
+
+    if (USE_JOINTSPACE_CONTROLLERS){
+      // convert joint space values to motor space values, then send
+      float motor_cmd_value[7];
+      convertJointToMotorSpace(cmd_value, motor_cmd_value);
+      for (int i = 0; i<7; i++){
+        self->speed_spc[i] = motor_cmd_value[i];
+      }
+    }
+    else{
+      for (int i = 0; i<7; i++){
+        self->speed_spc[i] = cmd_value[i];
+      }
+    }
+  =}
+
+  // ######
+  // ### Set Output Reactions 
+  reaction(trigger) -> speed{=
+    if (self->enable_motor_command_){
+      // We use this to set either the speed or position of the motors
+      if (PRINT_MOTOR_CONTROLLER) {printf("Motor_Controller: Setting speeds of: ");}
+      for(int i=0; i<7; i++){
+        if ((self->_target_sel[i] == MODE_POS)){
+          if (PRINT_MOTOR_CONTROLLER) {printf("p%d, ", (int)(self->speed_posc[i] * 1000));}
+          //lf_set(speed[i], self->speed_posc[i]);
+          self->speed_cmd[i] = self->speed_posc[i];
+        }
+        else if((self->_target_sel[i] == MODE_VEL)){
+          if (PRINT_MOTOR_CONTROLLER) {printf("v%d, ", (int)(self->speed_spc[i] * 1000));}
+          //lf_set(speed[i], self->speed_spc[i]);
+          self->speed_cmd[i] = self->speed_spc[i];
+        }
+        else{
+          printf("Received bad target_sel! Got %d, expected %d or %d. Not sending!", self->_target_sel[i], MODE_POS, MODE_VEL);
+          return;
+        }
+
+        // do last minute speed clamping correction in case something else went wrong.
+        if (self->speed_cmd_max < self->speed_cmd[i]){
+          self->speed_cmd[i] = self->speed_cmd_max;
+        } 
+        else if (self->speed_cmd[i] < -self->speed_cmd_max){
+          self->speed_cmd[i] = -self->speed_cmd_max;
+        }
+
+        lf_set(speed[i], self->speed_cmd[i]);
+      }
+      if (PRINT_MOTOR_CONTROLLER){printf("\r\n");}
+    }
+    else{
+      //if (PRINT_MOTOR_CONTROLLER){printf("enable motor speed is off!\r\n");}
+    }
+
+  =}
+
+}

@@ -1,0 +1,349 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <math.h> // need for floating point abs, or fabsf()
+  #include "motor_config.h"
+  #include "common.h"
+
+=}
+
+reactor USM {
+  input[7] speed: float
+  input enable_motor_command: bool
+  input[7] force_disable_motor_pins: bool
+
+  output[7] commanded_duty_cycle: float // only used for monitoring purposes
+
+  state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
+  state enable_motor_command_: bool = false
+  
+  //state force_disable_motor_pins
+  preamble {=
+
+    // for debugging
+    long reference_tick_usm = 0; //HAL_GetTick();
+
+    float apply_duty_cycle_limits(float duty_cycle){
+      duty_cycle = fabsf(duty_cycle); // force it positive
+
+      if (PRINT_USM)printf("Got duty cycle of %d%, or %d deg/s\r\n", ((int)(duty_cycle*100)), ((int) (duty_cycle * PWM_RPM_MAX * RPM_TO_DEG_PER_SEC)));
+      
+      if (USM_MAX_DUTY_CYCLE < duty_cycle){ // limit it to the max value
+        if (PRINT_USM)printf("Hit max duty cycle! Setting to %d%\r\n", ((int)(USM_MAX_DUTY_CYCLE*100)));
+        duty_cycle = USM_MAX_DUTY_CYCLE;
+      }
+
+      if (duty_cycle < USM_MIN_DUTY_CYCLE){ // limit it to the max value
+        if (PRINT_USM)printf("Hit min duty cycle! Setting to %d%\r\n", 0);
+        duty_cycle = 0.0;
+      }
+      return duty_cycle;
+      //int ccr = ((int) (((float) ARR_PERIOD) * duty_cycle));
+      //return ccr; //((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
+    }
+
+    float convert_speed_rad_per_sec_to_duty_cycle(float speed_rad_per_sec){
+      return apply_duty_cycle_limits(speed_rad_per_sec / ((float)(PWM_RAD_PER_SEC_MAX)));
+    }
+
+    int convert_duty_cycle_to_pwm_ccr(float duty_cycle){
+      int ccr = ((int) (((float) ARR_PERIOD) * duty_cycle));
+      return ccr; //((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
+    }
+
+
+    extern TIM_HandleTypeDef htim3; // used for USM PWM
+    extern TIM_HandleTypeDef htim4; // used for USM PWM
+
+    volatile float speed_[7] = {0, 0, 0, 0, 0, 0, 0}; // internal copy of speed, not a reactor state because is changed inplace with preamble functions
+    volatile float usm_duty_cycle_[7] = {0, 0, 0, 0, 0, 0, 0}; // not a reactor state because is changed inplace with preamble functions
+    volatile int usm_ccr_[7] = {0, 0, 0, 0, 0, 0, 0}; // not a reactor state because is changed inplace with preamble functions
+
+    static void MX_TIM3_Init(void) {
+      TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+      TIM_MasterConfigTypeDef sMasterConfig = {0};
+      TIM_OC_InitTypeDef sConfigOC = {0};
+
+      htim3.Instance = TIM3;
+      htim3.Init.Prescaler = 0;
+      htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+      htim3.Init.Period = ARR_PERIOD; //1000;
+      htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+      htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+      HAL_TIM_Base_Init(&htim3);
+
+      sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+      HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig);
+
+      HAL_TIM_PWM_Init(&htim3);
+
+      sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+      sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+      HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig);
+      sConfigOC.OCMode = TIM_OCMODE_PWM1;
+      sConfigOC.Pulse = 0;
+      sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+      sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+
+      HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1);
+      HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2);
+      HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3);
+      HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_4);
+      HAL_TIM_MspPostInit(&htim3);
+    }
+
+    static void MX_TIM4_Init(void)
+    {
+      TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+      TIM_MasterConfigTypeDef sMasterConfig = {0};
+      TIM_OC_InitTypeDef sConfigOC = {0};
+
+      htim4.Instance = TIM4;
+      htim4.Init.Prescaler = 0;
+      htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+      htim4.Init.Period = ARR_PERIOD; //1000
+      htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+      htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+      HAL_TIM_Base_Init(&htim4);
+      
+      sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+      HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig);
+      HAL_TIM_PWM_Init(&htim4);
+      sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+      sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+      HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig);
+      sConfigOC.OCMode = TIM_OCMODE_PWM1;
+      sConfigOC.Pulse = 0;
+      sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+      sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+      HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1);
+      HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2);
+      HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_3);
+      HAL_TIM_MspPostInit(&htim4);
+
+    }
+
+    static void USM_GPIO_Init(void) {
+      GPIO_InitTypeDef GPIO_InitStruct = {0};
+      __HAL_RCC_GPIOB_CLK_ENABLE();
+      __HAL_RCC_GPIOC_CLK_ENABLE();
+
+      //+----------------------------------------------------------------+
+      //  Name,     PWM     Direction,    Enable
+      //  USM_0,    PB4,    PC13,         PB1
+      //  USM_1,    PB5,    PC14,         PB2
+      //  USM_2,    PC8,    PC15,         PB3
+      //  USM_3,    PC9,    PC4,          PB9
+      //  USM_4,    PB6,    PC5,          PB10
+      //  USM_5,    PB7,    PB15,         PB12
+      //  USM_6,    PB8,    PB14,         PB13
+      //+----------------------------------------------------------------+
+
+      // Configure output pins (DIR/EN)
+      HAL_GPIO_WritePin(GPIOA,  GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+      
+      HAL_GPIO_WritePin(GPIOB,  GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_9|GPIO_PIN_10|
+        GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_9|GPIO_PIN_10|
+                            GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+      
+      HAL_GPIO_WritePin(GPIOC,  GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+      // Configure input pins (ON/OFF Switch) PC3
+      GPIO_InitStruct.Pin = GPIO_PIN_3;
+      GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+      // Configure output pin (Status LED)
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+      GPIO_InitStruct.Pin = GPIO_PIN_0;
+      GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+      GPIO_InitStruct.Pull = GPIO_NOPULL;
+      GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+      HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    }
+
+    void set_motor_enable_pins(bool set_value){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    set_value); // PB0 is the LED
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   set_value);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   set_value);
+      //HAL_Delay(1);
+    }
+
+    void set_motor_enable_pins_from_array(bool *enable_values){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    enable_values[0]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    enable_values[1]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    enable_values[2]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    enable_values[3]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   enable_values[4]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   enable_values[5]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   enable_values[6]);
+      //HAL_Delay(1);
+    }
+
+    void enforce_speed_bounds(){
+      for (int i = 0; i<7; i++){
+        if (speed_[i] < -motor_configs[i]->max_speed){
+          if (PRINT_USM) printf("Speed of speed_[%d]*1000 (%d) is less than --motor_configs[%d]->max_speed*1000 (%d)!\r\n", i, ((int)speed_[i]*1000), i, ((int)(-motor_configs[i]->max_speed*1000)));
+          speed_[i] = -motor_configs[i]->max_speed;
+          
+        }
+        else if (motor_configs[i]->max_speed < speed_[i]){
+          speed_[i] = motor_configs[i]->max_speed;
+          if (PRINT_USM)printf("Speed of speed_[%d]*1000 (%d) is greater than motor_configs[%d]->max_speed*1000 (%d)!\r\n", i, ((int)speed_[i]*1000), i, ((int)(motor_configs[i]->max_speed*1000)));
+        }
+        else{
+          // speed_[i] is in expected range.
+        }
+      }
+      return;
+    }
+    
+    void set_direction_pins(){
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   speed_[0] >= 0); // 1 if non-negative, 0 if negative
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    speed_[1] >= 0);
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    speed_[2] >= 0);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    speed_[3] >= 0);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    speed_[4] >= 0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   speed_[5] >= 0);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   speed_[6] >= 0);
+      return;
+    }
+
+    void compute_duty_cycles(){
+      for (int i = 0; i < 7; i++){
+        usm_duty_cycle_[i] = convert_speed_rad_per_sec_to_duty_cycle(speed_[i]);
+      }
+      return;
+    }
+
+    void set_motor_enable_deadband(){
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0,    1); // PB0 is the LED
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1,    usm_duty_cycle_[0] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2,    usm_duty_cycle_[1] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3,    usm_duty_cycle_[2] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    usm_duty_cycle_[3] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10,   usm_duty_cycle_[4] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12,   usm_duty_cycle_[5] > USM_MIN_DUTY_CYCLE);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13,   usm_duty_cycle_[6] > USM_MIN_DUTY_CYCLE);
+      return;
+    }
+
+    void set_motor_pwm_registers(){
+      for (int i = 0; i < 7; i++) {usm_ccr_[i] = convert_duty_cycle_to_pwm_ccr(usm_duty_cycle_[i]);}
+
+      TIM3->CCR1 = usm_ccr_[0];  // Set period for USM0
+      TIM3->CCR2 = usm_ccr_[1];  // Set period for USM1
+      TIM3->CCR3 = usm_ccr_[2];  // Set period for USM2
+      TIM3->CCR4 = usm_ccr_[3];  // Set period for USM3
+      TIM4->CCR1 = usm_ccr_[4];  // Set period for USM4
+      TIM4->CCR2 = usm_ccr_[5];  // Set period for USM5
+      TIM4->CCR3 = usm_ccr_[6];  // Set period for USM6
+      return;
+    }
+
+    float apply_motor_direction_change(float speed, int index){
+      return speed * ((float) motor_configs[index]->dir);
+    }
+
+  =}
+
+
+  reaction(startup) {=
+    // for debugging
+    reference_tick_usm = HAL_GetTick();
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+
+    MX_TIM3_Init();
+    MX_TIM4_Init();
+    USM_GPIO_Init();
+
+    // Initially set all enable values to 0
+    set_motor_enable_pins(false);
+
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);   // USM_0, PB4
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);   // USM_1, PB5
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);   // USM_2, PC8
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);   // USM_3, PC9
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);   // USM_4, PB6
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);   // USM_5, PB7
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);   // USM_5, PB8
+
+    printf("USM has finished startup!\n");
+  =}
+
+  reaction(force_disable_motor_pins) {=
+    for (int i = 0; i<7; i++){
+      self->force_disable_motor_pins_[i] = force_disable_motor_pins[i]->value;
+    }
+  =}
+
+  reaction(enable_motor_command) {=
+    self->enable_motor_command_ = enable_motor_command->value;
+    set_motor_enable_pins(self->enable_motor_command_);
+    =}
+
+  reaction(speed) -> commanded_duty_cycle{=
+    
+    if (self->enable_motor_command_){
+      // save internal speed_ values
+      for (int i = 0; i<7; i++){
+        speed_[i] = speed[i]->value;
+      }
+
+      // Set USM direction values based on sign of speed_
+      set_direction_pins();
+
+      // compute the duty cycles used for later logic
+      compute_duty_cycles(); // updates usm_duty_cycle_ array
+
+      // set motor enable pins based on deadband value of duty cycles
+      //set_motor_enable_deadband(); // sets motor enable pins to be true if value is above USM_DUTY_CYCLE_MIN
+      
+      // set the pwm registers
+      set_motor_pwm_registers();
+
+      if (PRINT_USM){
+        for (int i = 0; i<7;i++){
+          printf("Motor %d: Commanding %d milli rads/sec or %d Deg/s.\r\n", i, (int)(1000 * speed_[i]), (int)(RAD_PER_SEC_TO_DEG_PER_SEC * speed_[i]));
+        }
+      }
+      
+      //HAL_Delay(1); // do a HAL delay at the end to allow all the pins to update correctly
+      for (int i = 0; i<7; i++) {lf_set(commanded_duty_cycle[i], usm_duty_cycle_[i]);} // usm_duty_cycle_ is set internally by set_motor_pwm_registsers
+    }
+  =}
+
+}

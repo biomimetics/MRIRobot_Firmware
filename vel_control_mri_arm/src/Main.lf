@@ -1,0 +1,154 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "STM32",
+    board: "F446RE"
+  },
+  files: ["src_c/motor_config.h", 
+          "src_c/sm_config.h",
+          "src_c/common.h",
+          //"src_c/stm_linux_comms.h", "src_c/stm_linux_comms.c"],
+          "src_c/stm_comms.h", "src_c/stm_comms.c"],
+  cmake-include: [
+      "../src_c/stm_comms_cmake.cmake"]
+}
+
+import QDEC from "lib/Drivers/Encoder.lf"
+import USM from "lib/Drivers/USM.lf"
+import StateMachine from "lib/State_Machine.lf"
+import UART_Handler from "lib/Drivers/UART.lf"
+
+preamble {=
+  #include <stdio.h>
+  #include "stm32f4xx_hal.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
+  
+  #include "stm_comms.h"
+
+  extern UART_HandleTypeDef huart2;
+
+  =}
+
+// Import and/or declare reactor classes.
+main reactor {
+  preamble {=
+  
+    extern UART_HandleTypeDef huart1; // make sure these need to be defined here or not
+    extern UART_HandleTypeDef huart3;
+    extern UART_HandleTypeDef huart4;
+    extern UART_HandleTypeDef huart5;
+
+    extern TIM_HandleTypeDef htim6; // used for timing loops
+
+    //UART_HandleTypeDef huart6; // def in ROS_Interface.lf
+    
+    int stm32_init(void){
+      HAL_Init();
+
+      SystemClock_Config();
+
+      MX_GPIO_Init();
+      MX_DMA_Init();
+      MX_UART4_Init();
+      MX_USART1_UART_Init();
+      MX_USART3_UART_Init();
+      MX_USART6_UART_Init();
+      MX_TIM3_Init();
+      MX_TIM4_Init();
+      MX_TIM6_Init();
+      HAL_TIM_Base_Start(&htim6); // added!
+      MX_RTC_Init();
+      MX_USART2_UART_Init();
+
+      printf("\r\n");
+      printf("~~~ STM32 START ~~~ \r\n");
+      printf("\r\n");
+
+      //HAL_START_DMA(); // not sure if needed
+      //main();
+      return 0;
+    }
+
+    // empty callbacks
+    void HAL_UART_RxCallback1(){};
+    void HAL_UART_TxCallback1(){};
+
+    // Define global callbacks
+    void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+      if (huart->Instance == USART3) {
+        HAL_UART_RxCallback3(); // 
+      } else if (huart->Instance == USART1) {
+        //HAL_UART_RxCallback_DMA();
+        HAL_UART_RxCallback1();
+      } else if (huart->Instance == UART4) { // UART4 // DMA_UART
+        HAL_UART_RxCallback_DMA();
+      }
+    }
+
+    
+    void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+      if (huart == &huart1) {
+        HAL_UART_TxCallback1();
+      }
+    }
+
+    int hal_timer = 0;
+  =}
+
+  qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
+  usm = new USM()                            // Ultrasonic motor controllers
+  uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
+  state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
+
+  // route all the inputs/outputs here
+
+  // uart
+  uart.cmd_msg -> state_machine.command_message
+  uart.not_receiving_error -> state_machine.not_receiving_error
+
+  state_machine.state_message -> uart.state_msg after 0;
+
+  // encoders
+  qdec.qdec_out -> state_machine.motor_encoder_positions
+  qdec.qdec_vel_out -> state_machine.motor_encoder_velocities
+  qdec.sea_out -> state_machine.sea_encoder_positions
+
+  state_machine.enable_qdec -> qdec.enable_qdec
+  state_machine.reset_qdec -> qdec.reset_qdec
+
+  // usm
+  usm.commanded_duty_cycle -> state_machine.usm_duty_cycles
+
+  state_machine.commanded_motor_velocities -> usm.speed
+  state_machine.enable_motor_command -> usm.enable_motor_command
+  state_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
+
+
+  reaction(startup) {=
+    // Prep all GPIO values
+    //MX_GPIO_Init();
+
+    // Initialize the STM32 peripherals
+    stm32_init();
+
+    hal_timer = HAL_GetTick(); 
+
+  =}
+
+  /*
+  timer heartbeat(0 ms, 50 ms)
+  reaction(heartbeat){=
+    printf("Still alive...\n");
+
+    // for verifying the onboard timers are working as expected
+    printf("HAL_GetTick() - hal_timer: %d, expected %d\n...", HAL_GetTick() - hal_timer, 50);
+    hal_timer = HAL_GetTick();
+    
+    //CommandMessage cmd_msg_;
+    //printf("%d", cmd_msg_.behavior_mode);
+    //print_command_message(&cmd_msg_);
+  =}
+  */
+
+}

@@ -1,0 +1,289 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+  //cmake-include: [
+  //    "../include_c/stm_comms_cmake.cmake"]
+  //files: ["/include_c/stm_comms.h", "/src_c/stm_comms.c"]
+}
+
+preamble {=
+  #include "stm32f4xx_hal.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
+  #include <stdio.h>
+
+  #include "motor_config.h"
+  #include "sm_config.h"
+  #include "common.h"
+  #include "stm_comms.h"
+  //#include "stm_comms.c"
+
+  #define PRINT_MODE 0
+  #define PRINT_MODE_STATUS 0
+
+  #define MESSAGE_INDEX_MOD 256
+=}
+
+reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: time = 1000 ms, update_state_message_period: time = 10 ms){
+    // inputs from serial
+    input command_message: CommandMessage
+    input not_receiving_error: bool
+
+    // outputs to serial
+    output state_message: StateMessage
+
+    // inputs from encoders
+    input[7] motor_encoder_positions: float
+    input[7] motor_encoder_velocities: float
+    input[7] sea_encoder_positions: float
+
+    // outputs to encoders
+    output enable_qdec: bool
+    output reset_qdec: bool
+
+    // inputs from usm
+    input[7] usm_duty_cycles: float
+
+    // outputs to usm
+    output[7] commanded_motor_velocities: float
+    output enable_motor_command: bool // triggered when we're in the right state
+    output[7] force_disable_motor_pins: bool // used to disable specific motors if they've hit convergence or for safety reasons.
+
+    // internal copies of inputs    
+    state motor_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state motor_encoder_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state sea_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state usm_duty_cycles_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
+    // internal copies of staged outputs
+    state state_msg_: StateMessage
+    state cmd_msg_: CommandMessage
+    state staged_commanded_motor_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state last_staged_commanded_motor_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
+    state enable_motor_command_: bool = false
+
+    state not_receiving_error_: bool = false
+    
+    // helper states
+    state send_message_index: int = 0
+    state current_behavior_mode_: int = 0 // 0 for idle, 1 for run, 2 for error
+    state last_received_message_index: int = 0
+    state missed_message_counter: int = 0
+
+    timer update_state_message_tick(0 ms, update_state_message_period)
+    timer motor_command_tick(0 ms, motor_command_period)
+    timer slow_status_tick(0 ms, status_refresh_period)
+
+    preamble {= 
+      void set_power_relay(bool on_or_off){return;}; // TODO: impliment this when we get a working relay.HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,    0);
+    =}
+    
+    // clamp the values to be in a small region around the last velocity to prevent high accelerations at startup
+    method clamp_velocity_to_safe_region(index: int){=
+        if (self->staged_commanded_motor_velocities_[index] <  (self->last_staged_commanded_motor_velocities_[index] - MOTOR_VELOCITY_MAX_CHANGE)){
+          self->staged_commanded_motor_velocities_[index] = self->last_staged_commanded_motor_velocities_[index] - MOTOR_VELOCITY_MAX_CHANGE;
+        }
+        else if ((self->last_staged_commanded_motor_velocities_[index] + MOTOR_VELOCITY_MAX_CHANGE) < self->staged_commanded_motor_velocities_[index]){
+          self->staged_commanded_motor_velocities_[index] = self->last_staged_commanded_motor_velocities_[index] + MOTOR_VELOCITY_MAX_CHANGE;
+        }
+    =}
+
+    method apply_velocity_deadband(index: int){=
+      if ((self->staged_commanded_motor_velocities_[index] < MOTOR_VELOCITY_DEADBAND_LIMIT) && ((-MOTOR_VELOCITY_DEADBAND_LIMIT < self->staged_commanded_motor_velocities_[index]))){
+          self->staged_commanded_motor_velocities_[index] = 0.0;
+          self->force_disable_motor_pins_[index] = true;
+        }
+        else{
+          self->force_disable_motor_pins_[index] = false;
+        }
+    =}
+
+    method apply_velocity_filter(index: int){=
+      // apply a light filter to keep things smooth even with the clamping and deadbands
+      self->staged_commanded_motor_velocities_[index] = (MOTOR_EXP_FILTER_ALPHA) * self->staged_commanded_motor_velocities_[index] + (1.0 - MOTOR_EXP_FILTER_ALPHA) * self->last_staged_commanded_motor_velocities_[index];
+        
+      // save the clamped, smooth commands for the next loop
+      self->last_staged_commanded_motor_velocities_[index] = self->staged_commanded_motor_velocities_[index];
+    =}
+
+    method commanded_velocity_safety_checks() {=
+
+      for (int i = 0; i<DOF_NUMBER; i++){
+        // clamp the values to be in a small region around the last velocity to prevent high accelerations at startup
+        clamp_velocity_to_safe_region(i);
+
+        // apply a deadband near zero velocity to keep the motors from jumping too often
+        apply_velocity_deadband(i);
+
+        // apply a filter to the staged velocities to keep whatever imputs we pass it reasonably continuous
+        apply_velocity_filter(i);
+        
+      }
+
+    =}
+
+    reaction(startup) -> enable_qdec, reset_qdec{=
+      lf_set(enable_qdec, true); // turn the encoders on right at the start
+      lf_set(reset_qdec, true);
+
+      printf("State Machine has finished startup!\n");
+      =}
+    
+    reaction(slow_status_tick) {=
+      //if (PRINT_MODE_STATUS){
+      //printf("In state: %d\n", self->current_behavior_mode_);
+      //}
+      //toggleStatusLED();
+    =}
+
+    // this output reaction is placed here to 
+    reaction(motor_command_tick) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities {=  
+      
+      // ignore the positions for now, use for bounds checking
+
+     commanded_velocity_safety_checks();
+      
+
+      // check to see if we've missed a message somewhere. we should always expect this number to increase by 1 every loop.
+      if (self->last_received_message_index != (self->cmd_msg_.message_index - 1)){
+        self->missed_message_counter++;
+      }
+      self->last_received_message_index = self->cmd_msg_.message_index % MESSAGE_INDEX_MOD;
+
+
+      // set all outputs at the end of reaction
+      if (PRINT_STATEMACHINE) printf("Motor command tick reaction: vels: \n");
+      for (int i = 0; i<DOF_NUMBER; i++){
+        if (PRINT_STATEMACHINE) printf("%d, ", ((int) (self->staged_commanded_motor_velocities_[i] * 1000)));
+        lf_set(commanded_motor_velocities[i], self->staged_commanded_motor_velocities_[i]);
+        lf_set(force_disable_motor_pins[i], self->force_disable_motor_pins_[i]);
+      }
+      if (PRINT_STATEMACHINE) printf("\n");
+      lf_set(enable_motor_command, self->enable_motor_command_);
+      
+    =}
+    
+
+    //##### 
+    //# Input reactions
+    //#####
+    reaction(not_receiving_error){=
+      self->not_receiving_error_ = not_receiving_error->value;
+      if (PRINT_STATEMACHINE) printf("StateMachine got not_receiving_error of %d\n", not_receiving_error->value);
+
+      if (self->not_receiving_error_){
+        if (self->current_behavior_mode_ == 1){
+          printf("Running but not receiving data! Switching to Idle state...\n");
+        }
+        self->enable_motor_command_ = false;
+        self->current_behavior_mode_ = SET_IDLE;
+        
+        for (int i = 0; i<DOF_NUMBER; i++){
+          self->staged_commanded_motor_velocities_[i] = 0.0; // staging a zero velocity lets the filter bring the value to zero quickly but not harshly enough to hurt the motors. consider changing this if it's unsafe.
+        }
+      }
+
+    =}
+
+    reaction(command_message) {=
+      self->cmd_msg_ = command_message->value;
+
+      //printf("State_Machine received command_message of:\n");
+      //print_command_message_int(&self->cmd_msg_);
+
+      // get the behavior mode and see if we need to handle a behavior change
+
+      if (self->current_behavior_mode_ != self->cmd_msg_.behavior_mode){
+        //if (self->cmd_msg_.behavior_mode == SET_IDLE){
+        if (self->cmd_msg_.behavior_mode == 0){ // SET_IDLE
+          self->enable_motor_command_ = false;
+          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+          printf("Switching to Idle state...\n");
+        }
+        else if (self->cmd_msg_.behavior_mode == 1){ // SET_RUN
+          self->enable_motor_command_ = true;
+          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+          printf("Switching to Run state...\n");
+        }
+        else if (self->cmd_msg_.behavior_mode == 2){ //SET_ERROR // externally triggered error state. means something went wrong on ROS side and we need to shut down for safety reasons.
+          self->enable_motor_command_ = false;
+          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+          printf("Switching to Error state...\n");
+        }
+        else{
+          // bad value!
+          self->enable_motor_command_ = false;
+          self->current_behavior_mode_ = SET_IDLE;
+          printf("Unrecognized behavior mode! Got %d but expected (0: IDLE), (1: RUN), (2: ERROR). \n", self->cmd_msg_.behavior_mode);
+          return;
+        }
+      }
+
+      // velocities are most important!
+      for (int i = 0; i<DOF_NUMBER; i++){
+        self->staged_commanded_motor_velocities_[i] = self->cmd_msg_.velocities[i];
+      }
+
+
+    =}
+    
+
+    // TODO: Add sanity checks to the encoder readings to ensure that there isn't a connection error or something.
+    reaction(motor_encoder_positions) {=
+      for (int i = 0; i<DOF_NUMBER; i++){
+        self->motor_encoder_positions_[i] = motor_encoder_positions[i]->value;
+      }
+    =}
+
+    reaction(motor_encoder_velocities) {=
+      //printf("State Machine: Got velocities of:\n");
+      for (int i = 0; i<DOF_NUMBER; i++){
+        self->motor_encoder_velocities_[i] = motor_encoder_velocities[i]->value;
+        //printf("%d:", (int) (motor_encoder_velocities[i]->value*1000));
+        //printf("%d, ", (int) (self->motor_encoder_velocities_[i]*1000));
+      }
+      //printf("\n");
+    =}
+
+    reaction(sea_encoder_positions) {=
+      for (int i = 0; i<DOF_NUMBER; i++){ 
+        self->sea_encoder_positions_[i] = sea_encoder_positions[i]->value;
+      }
+    =}
+
+    reaction(usm_duty_cycles) {=
+      for (int i = 0; i<DOF_NUMBER; i++){ 
+        self->usm_duty_cycles_[i] = usm_duty_cycles[i]->value;
+      }
+    =}
+
+    //##### 
+    //# Output reactions
+    //#####
+    
+    reaction(update_state_message_tick) -> state_message {=
+      float extra_array_[EXTRA_LENGTH];
+
+      for (int i = 0; i<DOF_NUMBER; i++){
+        extra_array_[i] = self->staged_commanded_motor_velocities_[i]; //target_joint_pos_[i];
+        extra_array_[i+7] = 0.0; //usm_motor_speeds_[i];
+        extra_array_[i+14] = self->usm_duty_cycles_[i];
+      }
+      
+      int time_stamp = HAL_GetTick();
+      
+      construct_state_message(&self->state_msg_, self->current_behavior_mode_,
+                              self->motor_encoder_positions_, self->motor_encoder_velocities_,
+                              self->sea_encoder_positions_, extra_array_,
+                              time_stamp, self->send_message_index++);
+
+      lf_set(state_message, self->state_msg_);
+    =}
+
+    
+    
+}
