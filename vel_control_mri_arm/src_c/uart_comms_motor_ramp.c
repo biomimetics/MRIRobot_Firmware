@@ -22,7 +22,7 @@ int main() {
     float rpm_velocity_setpoint_max = 32.0f;
     const int rpm_velocity_setpoint_num = 9;
 
-    int hold_iters = 3000; //3000;
+    int hold_iters = 500; //3000;
     int ramp_iters = 1000; // 1000;
 
     // init
