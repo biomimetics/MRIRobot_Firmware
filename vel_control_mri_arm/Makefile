@@ -88,3 +88,6 @@ comms_motor:
 
 comms_motor_ramp:
 	gcc src_c/uart_comms_motor_ramp.c src_c/linux_comms.c src_c/stm_comms.c -o bin_c/uart_motor_ramp -lm
+
+comms_prime:
+	gcc src_c/uart_comms_prime.c src_c/linux_comms.c src_c/stm_comms.c -o bin_c/primer -lm
