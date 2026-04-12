@@ -150,7 +150,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
-      self->qdec_convert_motor_to_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr);
+      self->qdec_convert_motor_to_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr) * CPR_RATIO; // TODO update qdec_cpr to reflect the real cpr and don't rely on the CPR_RATIO term for this. Check it after we verify the FPGA code.
       //self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio) * motor_configs[i]->dir;
     }
 
@@ -198,14 +198,6 @@ reactor QDEC(sample_period: time = 5 ms){
     //printf("In QDEC's trigger reaction.\n");
     timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
 
-    /*
-    if (DO_INTERVAL_OVERRIDE){
-      self->interval_sec = (float) OVERRIDE_INTERVAL;
-    }
-    else {
-      self->interval_sec = (float) self->timer_elapsed_time_sec_;
-    }
-    */    
    self->interval_sec = (float) self->timer_elapsed_time_sec_;
 
     // Prep the next request
