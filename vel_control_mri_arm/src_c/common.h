@@ -32,7 +32,7 @@
 #define PWM_DEG_PER_SEC_MAX 1500.0 // 250 RPM = 1500 deg/s
 
 // safety limits
-#define USM_MAX_DUTY_CYCLE 0.30 //0.20 //0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
+#define USM_MAX_DUTY_CYCLE 0.70//0.30 //0.20 //0.30 //0.06 //0.5 // only higher than 6% for PWM pin testing //0.06 // 6% duty cycle
 #define USM_MIN_DUTY_CYCLE 0.00 //0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
 
 #define MOTOR_EXP_FILTER_ALPHA 0.8
