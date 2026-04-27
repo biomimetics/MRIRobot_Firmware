@@ -32,14 +32,22 @@
 #define RPM_TO_DEG_PER_SEC 6.0
 
 // USM constants
+
 #define INITIAL_CPR 1440.0
 #define REAL_CPR 2000.0
 #define CPR_RATIO (INITIAL_CPR / REAL_CPR) // REAL_CPR is higher, so this should scale the max rpm down and also the encoder velocities down.
+#define REAL_CPR_BASE 10000.0
+#define CPR_RATIO_BASE (INITIAL_CPR / REAL_CPR_BASE)
 
 #define INITIAL_PWM_RPM_MAX 250.0
 #define PWM_RPM_MAX (INITIAL_PWM_RPM_MAX * CPR_RATIO)
 #define PWM_RAD_PER_SEC_MAX (PWM_RPM_MAX * RPM_TO_RAD_PER_SEC)
 #define PWM_DEG_PER_SEC_MAX (PWM_RPM_MAX * RPM_TO_DEG_PER_SEC)
+
+#define PWM_RPM_MAX_BASE (INITIAL_PWM_RPM_MAX * CPR_RATIO_BASE)
+#define PWM_RAD_PER_SEC_MAX_BASE (PWM_RPM_MAX * RPM_TO_RAD_PER_SEC)
+#define PWM_DEG_PER_SEC_MAX_BASE (PWM_RPM_MAX * RPM_TO_DEG_PER_SEC) // this should all get moved somewhere else I think. motor_config.h?
+
 
 #define ARR_PERIOD 2000 //2000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
 

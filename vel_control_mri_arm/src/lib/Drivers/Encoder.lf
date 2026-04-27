@@ -150,7 +150,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
-      self->qdec_convert_motor_to_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr) * CPR_RATIO; // TODO update qdec_cpr to reflect the real cpr and don't rely on the CPR_RATIO term for this. Check it after we verify the FPGA code.
+      self->qdec_convert_motor_to_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr); // motor_config should be updated for this, no CPR_RATIO scale needed here.
       //self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio) * motor_configs[i]->dir;
     }
 
@@ -263,15 +263,4 @@ reactor QDEC(sample_period: time = 5 ms){
     //printf("At end of QDEC's trigger reaction.\n");
   =}
 
-
 }
-    /*
-    for (int i=7; i<14; i++) {
-      self->qdec_pos_last_[i-7] = self->qdec_pos_[i-7]; // save last position
-      self->qdec_pos_[i-7] = ((float) (count[i])) * self->qdec_convert_motor_to_rad_[i-7]; // update the new position
-      self->qdec_vel_est_[i-7] = (self->qdec_pos_[i-7] - self->qdec_pos_last_[i-7]) / (self->interval_sec); //(interval_sec); // estimate velocity from different of positions over the time between positions
-
-      lf_set(qdec_out[i-7],  self->qdec_pos_[i-7]); // should be units of radians
-      lf_set(qdec_vel_out[i-7],  self->qdec_vel_est_[i-7]); // should be units of radians per second
-    }
-    */

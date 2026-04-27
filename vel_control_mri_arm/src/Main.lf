@@ -136,19 +136,5 @@ main reactor {
 
   =}
 
-  /*
-  timer heartbeat(0 ms, 50 ms)
-  reaction(heartbeat){=
-    printf("Still alive...\n");
-
-    // for verifying the onboard timers are working as expected
-    printf("HAL_GetTick() - hal_timer: %d, expected %d\n...", HAL_GetTick() - hal_timer, 50);
-    hal_timer = HAL_GetTick();
-    
-    //CommandMessage cmd_msg_;
-    //printf("%d", cmd_msg_.behavior_mode);
-    //print_command_message(&cmd_msg_);
-  =}
-  */
 
 }
