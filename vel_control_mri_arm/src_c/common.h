@@ -33,7 +33,7 @@
 
 // USM constants
 
-#define INITIAL_CPR 1440.0
+#define INITIAL_CPR 5760.0 //1440.0
 #define REAL_CPR 2000.0
 #define CPR_RATIO (INITIAL_CPR / REAL_CPR) // REAL_CPR is higher, so this should scale the max rpm down and also the encoder velocities down.
 #define REAL_CPR_BASE 10000.0

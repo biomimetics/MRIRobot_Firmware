@@ -68,6 +68,8 @@ reactor USM {
     volatile float usm_duty_cycle_[7] = {0, 0, 0, 0, 0, 0, 0}; // not a reactor state because is changed inplace with preamble functions
     volatile int usm_ccr_[7] = {0, 0, 0, 0, 0, 0, 0}; // not a reactor state because is changed inplace with preamble functions
 
+    volatile bool motor_directions_[7] = {true, true, true, true, true, true, true};
+
     static void MX_TIM3_Init(void) {
       TIM_ClockConfigTypeDef sClockSourceConfig = {0};
       TIM_MasterConfigTypeDef sMasterConfig = {0};
@@ -228,6 +230,26 @@ reactor USM {
       return;
     }
     
+    void compute_directions_from_speeds(){
+      for (int i = 0; i<7; i++){
+        motor_directions_[i] = (speed_[i] >= 0); // 1 if non-negative, 0 if negative (+ or - dir respectively)
+      }
+      return;
+    }
+
+    void set_direction_pins(){
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   motor_directions_[0]); // 1 if non-negative, 0 if negative
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    motor_directions_[1]);
+      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    motor_directions_[2]);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    motor_directions_[3]);
+      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    motor_directions_[4]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   motor_directions_[5]);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   motor_directions_[6]);
+      return;
+    }
+    
+    /*
+    // old version of function
     void set_direction_pins(){
       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   speed_[0] >= 0); // 1 if non-negative, 0 if negative
       HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    speed_[1] >= 0);
@@ -238,6 +260,7 @@ reactor USM {
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   speed_[6] >= 0);
       return;
     }
+    */
 
     void compute_duty_cycles(){
       for (int i = 0; i < 7; i++){
@@ -302,6 +325,9 @@ reactor USM {
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);   // USM_5, PB7
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);   // USM_5, PB8
 
+    compute_directions_from_speeds();
+    set_direction_pins();
+
     printf("USM has finished startup!\n");
   =}
 
@@ -326,7 +352,8 @@ reactor USM {
       }
 
       // Set USM direction values based on sign of speed_
-      set_direction_pins();
+      compute_directions_from_speeds(); // computes the directions
+      set_direction_pins(); // sets the directions to the pins
 
       // compute the duty cycles used for later logic
       compute_duty_cycles(); // updates usm_duty_cycle_ array
