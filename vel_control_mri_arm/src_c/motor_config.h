@@ -41,11 +41,11 @@ static Motor_Config motor0_config = {
 static Motor_Config motor1_config = {
     1,          // dir              - Motor direction
     0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
-    8000,      // qdec_cpr         - motor encoder count per rotation // (2000 base cpr, 2k * 4 = 8k after x4 counts scaling.)
+    40000,      // qdec_cpr         - motor encoder count per rotation // (2000 base cpr, 2k * 4 = 8k after x4 counts scaling.)
     22252,       // sea_cpr          - sea encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
     0.3,        // sea_offset       - sea reset offset
-    PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
+    PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
     1.0,        // speed_ratio      - motor speed ration 
     21.0,       // gear_ratio       - motor gear box gear ratio
 };
@@ -54,11 +54,11 @@ static Motor_Config motor1_config = {
 static Motor_Config motor2_config = {
     1,          // dir              - Motor direction
     0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
-    8000,      // qdec_cpr         - motor encoder count per rotation
+    40000,      // qdec_cpr         - motor encoder count per rotation
     22252,       // sea_cpr          - sea encoder count per rotation
     20.0,       // sea_gear_ratio   - sea motor gear ratio
     -0.15,      // sea_offset       - sea reset offset
-    PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
+    PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
     1.0,        // speed_ratio      - motor speed ration 
     21.0,       // gear_ratio       - motor gear box gear ratio
 };
