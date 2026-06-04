@@ -14,11 +14,11 @@ INCL = include
 
 UNAME_S := $(shell uname -s)
 OPENOCD_PATH 		:= 
-	ifeq ($(UNAME_S),Darwin) 
-		OPENOCD_PATH = /Users/$(USER)/openocd
+	ifeq ($(UNAME_S),Darwin)
+		OPENOCD_PATH = ../resources/openocd
 	endif
 	ifeq ($(UNAME_S),Linux)
-		OPENOCD_PATH = /home/$(USER)/openocd
+		OPENOCD_PATH = ../resources/openocd
 	endif
 
 #######################################
@@ -38,7 +38,7 @@ build_dev:
 	lfc-dev src/Main.lf
 
 build:
-	lfc src/Main.lf
+	lfc-dev src/Main.lf # note that this used to be lfc src/Main.lf, but lfc-dev is only included for this lf checkout.
 
 #######################################
 # run everything
