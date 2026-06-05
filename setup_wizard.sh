@@ -19,6 +19,11 @@ fi
 cd "$LF_DIR"
 echo "Getting the right checkout..."
 git checkout 60d9eacaa5ceb17587a3118e86d15e99b258b679
+git submodule update --init --recursive
+echo "Applying prescalar patch for 84MHz clock..."
+cd "$SCRIPT_DIR"
+bash prescalar_patch.sh
+cd "$LF_DIR"
 echo "Building Lingua Franca compiler (this may take a few minutes)..."
 ./gradlew assemble
 

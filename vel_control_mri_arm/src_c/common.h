@@ -57,7 +57,7 @@
 #define USM_MIN_DUTY_CYCLE 0.00 //0.005 // if below this amount, we don't expect the motors to be able to move smoothly on their own based on bench testing.
 
 #define MOTOR_EXP_FILTER_ALPHA 0.8
-#define MOTOR_VELOCITY_DEADBAND_LIMIT 0.00 //0.0 //0.1309 // rad/s or 7.5 deg/s
+#define MOTOR_VELOCITY_DEADBAND_LIMIT 0.00 //0.0 //0.1309 // rad/s or 7.5 deg/s ## DEPRECATED
 #define MOTOR_VELOCITY_MAX_CHANGE 0.5236 // rad/s or 30 deg/s
 
 // observer safety limits (NOT YET IMPLIMENTED)

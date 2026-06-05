@@ -92,6 +92,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         }
     =}
 
+    // NO LONGER USED
     method apply_velocity_deadband(index: int){=
       if ((self->staged_commanded_motor_velocities_[index] < MOTOR_VELOCITY_DEADBAND_LIMIT) && ((-MOTOR_VELOCITY_DEADBAND_LIMIT < self->staged_commanded_motor_velocities_[index]))){
           self->staged_commanded_motor_velocities_[index] = 0.0;
@@ -117,7 +118,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         clamp_velocity_to_safe_region(i);
 
         // apply a deadband near zero velocity to keep the motors from jumping too often
-        apply_velocity_deadband(i);
+        // apply_velocity_deadband(i); // don't use the deadband for now, it might be creating odd hardware issues
 
         // apply a filter to the staged velocities to keep whatever imputs we pass it reasonably continuous
         apply_velocity_filter(i);

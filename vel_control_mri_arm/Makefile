@@ -91,3 +91,11 @@ comms_motor_ramp:
 
 comms_prime:
 	gcc src_c/uart_comms_prime.c src_c/linux_comms.c src_c/stm_comms.c -o bin_c/primer -lm
+
+all:
+	make comms
+	make comms_logger
+	make comms_listener
+	make comms_motor
+	make comms_motor_ramp
+	make comms_prime

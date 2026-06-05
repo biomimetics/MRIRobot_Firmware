@@ -12,6 +12,7 @@ This code is written for a STM32 f466re that's mounted onto a custom PCB that en
 This process **should** be automated for Ubuntu by the setup wizard.
 ``` # bash
 chmod +x setup_wizard.sh
+chmod +x prescalar_patch.sh
 ./setup_wizard.sh
 ```
 However, if it doesn't work for some reason please see the manual setup instructions.
@@ -25,6 +26,9 @@ cd resources
 git clone -b stm32_2 https://github.com/lf-lang/lingua-franca.git
 cd lingua-franca
 git checkout 60d9eacaa5ceb17587a3118e86d15e99b258b679
+git submodule update --init --recursive
+./prescalar_patch.sh
+./gradlew assemble
 ```
 
 Then add the binaries to your path by appending this to your .bashrc file (assuming you're using Ubuntu and git clone was run in your home directory) to be able to run the make files correctly.
@@ -66,3 +70,8 @@ To allow it, run this with the correct Superuser permissions and then try again.
 ```
 sudo chmod 777 /dev/tty/ACM0
 ```
+
+### Prescalar Patch
+The prescalar_patch.sh is a patch onto the lingua franca stm32 support code that lets the real system use the correct prescalar to handling the timings correctly. If this isn't included, the system will not run correctly and show a small army of odd bugs and mysterious behaviors that are hard to track down.
+
+Make sure it's run and the patch is applied before running ./gradlew assemble
