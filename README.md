@@ -33,7 +33,7 @@ git submodule update --init --recursive
 
 Then add the binaries to your path by appending this to your .bashrc file (assuming you're using Ubuntu and git clone was run in your home directory) to be able to run the make files correctly.
 ```
-export PATH="$PATH:~/lingua-franca/bin"
+export PATH="$PATH:~/{path-to-this-repo}/resources/lingua-franca/bin"
 ```
 
 To install the required compiler, run:
@@ -72,6 +72,6 @@ sudo chmod 777 /dev/tty/ACM0
 ```
 
 ### Prescalar Patch
-The prescalar_patch.sh is a patch onto the lingua franca stm32 support code that lets the real system use the correct prescalar to handling the timings correctly. If this isn't included, the system will not run correctly and show a small army of odd bugs and mysterious behaviors that are hard to track down.
+The prescalar_patch.sh is a patch onto the Lingua Franca STM32 support code makes sure timer 5 (TIM5) has the correct prescalar (TIM5->PSC) value set so that Lingua Franca's timing alings with the real world clock time. If this isn't included, the system will not run correctly and show a small army of odd bugs and mysterious behaviors that are hard to track down.
 
 Make sure it's run and the patch is applied before running ./gradlew assemble
