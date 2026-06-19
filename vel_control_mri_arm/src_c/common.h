@@ -31,13 +31,18 @@
 #define RPM_TO_RAD_PER_SEC (1.0 / RAD_PER_SEC_TO_RPM)
 #define RPM_TO_DEG_PER_SEC 6.0
 
-// USM constants
+// USM constants for external encoder handling
 
-#define INITIAL_CPR 5760.0 //1440.0
+#define INITIAL_CPR 1440.0 //5760.0 //1440.0
+#define INITIAL_INTERP_FACTOR 4.0 // either 1, 2, or 4
+
 #define REAL_CPR 2000.0
-#define CPR_RATIO (INITIAL_CPR / REAL_CPR) // REAL_CPR is higher, so this should scale the max rpm down and also the encoder velocities down.
+#define L2_INTERP_FACTOR 1.0
+#define CPR_RATIO ((INITIAL_CPR * INITIAL_INTERP_FACTOR) / (REAL_CPR * L2_INTERP_FACTOR))
+
 #define REAL_CPR_BASE 10000.0
-#define CPR_RATIO_BASE (INITIAL_CPR / REAL_CPR_BASE)
+#define E2_INTERP_FACTOR 1.0
+#define CPR_RATIO_BASE ((INITIAL_CPR * INITIAL_INTERP_FACTOR) / (REAL_CPR_BASE * E2_INTERP_FACTOR))
 
 #define INITIAL_PWM_RPM_MAX 250.0
 #define PWM_RPM_MAX (INITIAL_PWM_RPM_MAX * CPR_RATIO)
@@ -45,8 +50,8 @@
 #define PWM_DEG_PER_SEC_MAX (PWM_RPM_MAX * RPM_TO_DEG_PER_SEC)
 
 #define PWM_RPM_MAX_BASE (INITIAL_PWM_RPM_MAX * CPR_RATIO_BASE)
-#define PWM_RAD_PER_SEC_MAX_BASE (PWM_RPM_MAX * RPM_TO_RAD_PER_SEC)
-#define PWM_DEG_PER_SEC_MAX_BASE (PWM_RPM_MAX * RPM_TO_DEG_PER_SEC) // this should all get moved somewhere else I think. motor_config.h?
+#define PWM_RAD_PER_SEC_MAX_BASE (PWM_RPM_MAX_BASE * RPM_TO_RAD_PER_SEC)
+#define PWM_DEG_PER_SEC_MAX_BASE (PWM_RPM_MAX_BASE * RPM_TO_DEG_PER_SEC) // this should all get moved somewhere else I think. motor_config.h?
 
 
 #define ARR_PERIOD 2000 //2000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
@@ -60,6 +65,6 @@
 #define MOTOR_VELOCITY_DEADBAND_LIMIT 0.00 //0.0 //0.1309 // rad/s or 7.5 deg/s ## DEPRECATED
 #define MOTOR_VELOCITY_MAX_CHANGE 0.5236 // rad/s or 30 deg/s
 
-// observer safety limits (NOT YET IMPLIMENTED)
+// observer safety limits (NOT YET IMPLIMENTED - MOVED TO ROS-SIDE)
 #define VEL_DIFFERENCE_THRESHOLD_RAD_PER_SEC 0.785 // 0.785 rad/s ~= 45 deg/s
 

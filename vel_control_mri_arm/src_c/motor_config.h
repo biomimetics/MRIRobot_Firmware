@@ -22,6 +22,20 @@ typedef struct { /* __MOTOR_CONFIG_H */
     float gear_ratio;       // motor gear box gear ratio
    } Motor_Config;
 
+/*   
+   static Motor_Config motor0_config = {
+    1,          // dir              - Motor direction
+    0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s // APPLY THESE BEFORE GEAR REDUCTION
+    40000,      // qdec_cpr         - motor encoder count per rotation // 10,000 base cpr * 4 scaling = 40,000
+    31614,       // sea_cpr          - sea encoder count per rotation // see sea encoder scratch spreadsheet for derivation, basically 8000 (lines/inch) / 25.4(mm/inch) = 314.96 lines/mm --> 314.96 lines/mm * 1000 mm/meter / 0.2826 circ/meter = 1,114,508.138 lines/circ which is counts per revolution. I'm sleep deprvied so hopefully that's not wrong, check it soon.
+    22.0,       // sea_gear_ratio   - sea motor gear ratio
+    -0.5,       // sea_offset       - sea reset offset
+    PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
+    1.0,        // speed_ratio      - motor speed ration 
+    21.0,       // gear_ratio       - motor gear box gear ratio
+};
+*/
+
 // --------------------------------------- Base joint --------------------------------------- 
 static Motor_Config motor0_config = {
     1,          // dir              - Motor direction

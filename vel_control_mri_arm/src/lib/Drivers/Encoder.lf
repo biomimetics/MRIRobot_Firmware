@@ -12,7 +12,7 @@ preamble {=
   #include "motor_config.h"
   #include "common.h"
   
-  #define USE_OLD_SEA_CONVERSION 1
+  #define USE_OLD_SEA_CONVERSION 0
 =}
 
 reactor QDEC(sample_period: time = 5 ms){
