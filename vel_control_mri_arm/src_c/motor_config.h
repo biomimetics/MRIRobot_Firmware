@@ -41,7 +41,7 @@ static Motor_Config motor0_config = {
     1,          // dir              - Motor direction
     0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s // APPLY THESE BEFORE GEAR REDUCTION
     40000,      // qdec_cpr         - motor encoder count per rotation // 10,000 base cpr * 4 scaling = 40,000
-    31614,       // sea_cpr          - sea encoder count per rotation // see sea encoder scratch spreadsheet for derivation, basically 8000 (lines/inch) / 25.4(mm/inch) = 314.96 lines/mm --> 314.96 lines/mm * 1000 mm/meter / 0.2826 circ/meter = 1,114,508.138 lines/circ which is counts per revolution. I'm sleep deprvied so hopefully that's not wrong, check it soon.
+    126456,       // sea_cpr          - sea encoder count per rotation // see sea encoder scratch spreadsheet for derivation, 31614 * 4 scaling = 12646
     22.0,       // sea_gear_ratio   - sea motor gear ratio
     -0.5,       // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
@@ -54,7 +54,7 @@ static Motor_Config motor1_config = {
     1,          // dir              - Motor direction
     0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
     40000,      // qdec_cpr         - motor encoder count per rotation // (2000 base cpr, 2k * 4 = 8k after x4 counts scaling.)
-    31614,       // sea_cpr          - sea encoder count per rotation
+    126456,       // sea_cpr          - sea encoder count per rotation
     22.0,       // sea_gear_ratio   - sea motor gear ratio
     0.3,        // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
@@ -67,7 +67,7 @@ static Motor_Config motor2_config = {
     1,          // dir              - Motor direction
     0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
     40000,      // qdec_cpr         - motor encoder count per rotation
-    31614,       // sea_cpr          - sea encoder count per rotation
+    126456,       // sea_cpr          - sea encoder count per rotation
     20.0,       // sea_gear_ratio   - sea motor gear ratio
     -0.15,      // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
@@ -84,7 +84,7 @@ static Motor_Config motor3_config = {
     -1, //1,          // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     8000,      // qdec_cpr         - motor encoder count per rotation
-    22251,       // sea_cpr          - sea encoder count per rotation
+    126456,       // sea_cpr          - sea encoder count per rotation
     13.0,       // sea_gear_ratio   - sea motor gear ratio
     2,       // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
@@ -97,7 +97,7 @@ static Motor_Config motor4_config = {
     -1, //1,          // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     8000,      // qdec_cpr         - motor encoder count per rotation
-    22251,       // sea_cpr          - sea encoder count per rotation
+    126456,       // sea_cpr          - sea encoder count per rotation
     15.0,       // sea_gear_ratio   - sea motor gear ratio
     0,         // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
@@ -114,7 +114,7 @@ static Motor_Config motor5_config = {
     -1,         // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     8000,      // qdec_cpr         - motor encoder count per rotation
-    22251,       // sea_cpr          - sea encoder count per rotati--1---on
+    126456,       // sea_cpr          - sea encoder count per rotati--1---on
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
     0.3,        // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
@@ -127,7 +127,7 @@ static Motor_Config motor6_config = {
     -1,         // dir              - Motor direction
     0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
     8000,      // qdec_cpr         - motor encoder count per rotation
-    22251,       // sea_cpr          - sea encoder count per rotation
+    126456,       // sea_cpr          - sea encoder count per rotation
     36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
     -0.2,       // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
