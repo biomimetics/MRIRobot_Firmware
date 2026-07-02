@@ -1,0 +1,213 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+preamble {=
+  #include <stdio.h>
+  #include "common.h"
+  #include "motor_config.h"
+=}
+
+// DIAGNOSTIC reactor -- NOT part of normal operation, kept around (not
+// wired in by default) for re-verifying the USM/SEA channel <-> physical
+// joint mapping in the future, e.g. after any FPGA-side fix to the
+// channel_index rotation bug documented in fpga_comms_potential_issues.md.
+//
+// WHAT IT DOES: drives each of the 7 motors, one at a time, at a small
+// constant velocity for a ~1s pulse (well above the ~5% duty cycle floor
+// these motors need for consistent electrical behavior -- see
+// duty_cycle_fraction below), with a rest gap between motors, and prints
+// how much each of the 14 encoder channels (7 USM position + 7 SEA
+// position) moved during that pulse. The channel with the largest delta
+// for motor N's pulse is the one actually wired to joint N. Original run
+// (2026-07-02) confirmed a clean identity mapping (motor N -> channel N)
+// once Encoder.lf's channel_index-based placement fix was in place with no
+// extra reversal -- see fpga_comms_potential_issues.md for the full data
+// and how a "0 mapped to 6" mis-report happened (physical compliance:
+// moving the base joint visibly nudges the wrist joints too).
+//
+// HOW TO USE IT AGAIN:
+//   1. In Main.lf: uncomment the `import MotorCalibration ...` line, the
+//      `motor_calib = new MotorCalibration()` instantiation, and the
+//      motor_calib.* connection block (swap it in for the three
+//      state_machine -> usm lines directly above it, which must be
+//      commented out first -- LF doesn't allow two writers on one input).
+//   2. Make sure the robot is powered, motors enabled, and clear of
+//      obstructions/people -- this WILL move every joint a small but real
+//      amount, one at a time, as soon as the board boots.
+//   3. Build+flash (this resets the board, which starts the sequence
+//      immediately via reaction(startup) -- there's no separate "arm" step):
+//        cd vel_control_mri_arm && make flash
+//   4. Watch the STM32's debug UART to see the results (see below for how).
+//      Total runtime is 7 * (step_period + rest_period) plus boot time --
+//      about 17-18s at the defaults.
+//   5. When done, re-comment everything from step 1 to restore normal
+//      operation (state_machine driving usm directly).
+//
+// MONITORING SERIAL OUTPUT: this project has two separate serial links,
+// each with its own saved PuTTY/plink session (see `plink -load <name>`):
+//   - `stm_comms_print_reader` -- the STM32's own printf/debug UART
+//     (USART2, 230400 baud). This is where MotorCalibration's own
+//     "pulsing motor N" / "motor N results" / "DONE" lines show up,
+//     interleaved with Encoder.lf's periodic debug prints.
+//   - `fpga_comms_reader` -- the FPGA's separate USB debug UART
+//     (115200 baud, see debug_status_reporter.v), a human-readable
+//     per-channel status dump independent of the STM32 link. Useful for
+//     cross-checking the FPGA's own view of counts/velocity/diagnostics
+//     without going through the STM32 parsing path at all.
+//   Since the calibration sequence starts immediately on reset/reflash, a
+//   plain `plink -load stm_comms_print_reader` started AFTER flashing will
+//   likely miss the start (or all) of it -- start the capture first, THEN
+//   flash, e.g.:
+//     timeout 30 plink -load stm_comms_print_reader > out.txt 2>&1 &
+//     sleep 2 && make flash
+//     wait
+//   Encoder.lf's PRINT_ENCODER debug block is throttled to ~10Hz
+//   (printcnt_lim) specifically so these captures stay a manageable size
+//   over a multi-second run like this one; if it's ever bumped back up for
+//   other debugging, expect much larger log files during a calibration run.
+//
+// Wiring when active (see Main.lf): REPLACES state_machine's normal
+// connections to usm.speed / usm.enable_motor_command /
+// usm.force_disable_motor_pins, and reads qdec.qdec_out / qdec.sea_out
+// directly.
+reactor MotorCalibration(
+  step_period: time = 1000 ms,         // pulse duration per motor
+  rest_period: time = 1500 ms,         // gap between motors, for visual/settling separation
+  // Below ~5% duty cycle these motors are electrically inconsistent (out of
+  // scope to fix today) -- earlier runs at a single fixed rad/s value moved
+  // motors 0-2 clearly but produced no signal at all for 3-6, which have a
+  // different (smaller) pwm_rad_per_sec_max, so the same rad/s was too weak
+  // a duty cycle for them. Driving as a duty-cycle FRACTION of each motor's
+  // own pwm_rad_per_sec_max (see the tick reaction below) instead of a
+  // single shared rad/s value keeps every motor comfortably above threshold
+  // regardless of its individual scaling. 0.06 = 6%, a bit of margin above
+  // the 5% floor.
+  duty_cycle_fraction: float = 0.06
+) {
+  input[7] qdec_in: float   // from qdec.qdec_out -- USM position, rad
+  input[7] sea_in: float    // from qdec.sea_out -- SEA position, rad
+
+  output[7] speed: float
+  output enable_motor_command: bool
+  output[7] force_disable_motor_pins: bool
+
+  // Fast tick used to time the ACTIVE/REST phases -- must divide evenly
+  // into both step_period and rest_period so ticks_in_phase comparisons
+  // below land on exact boundaries.
+  timer tick(0, 20 ms)
+
+  state phase: int = 0            // 0 = ACTIVE (pulsing), 1 = REST
+  state ticks_in_phase: int = 0
+  state current_motor: int = 0
+  state done: bool = false
+
+  state last_qdec_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state last_sea_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state baseline_qdec_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state baseline_sea_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
+  // Keep the latest encoder readings available to the tick reaction below
+  // without making qdec_in/sea_in triggers of it (same pattern Encoder.lf
+  // uses for reset_qdec/enable_qdec -- a small dedicated reaction per input
+  // that just caches the value into state).
+  reaction(qdec_in) {=
+    for (int i = 0; i < 7; i++) {
+      self->last_qdec_[i] = qdec_in[i]->value;
+    }
+  =}
+
+  reaction(sea_in) {=
+    for (int i = 0; i < 7; i++) {
+      self->last_sea_[i] = sea_in[i]->value;
+    }
+  =}
+
+  reaction(startup) {=
+    // %f/%lld are avoided here -- this build's printf (newlib-nano, no
+    // float/long-long format support) silently drops/misaligns those
+    // specifiers, which is why the very first calibration run's startup
+    // line printed as garbage ("at  rad/s ... for ld ms"). Scale to
+    // int-sized milli-units instead, matching how the rest of this
+    // codebase (e.g. Encoder.lf's mRad prints) already works around this.
+    printf("MotorCalibration: STARTING -- will pulse motors 0-6 one at a time at %d%% duty cycle for %d ms each, %d ms apart.\r\n",
+           (int) (self->duty_cycle_fraction * 100), (int) (self->step_period / 1000000), (int) (self->rest_period / 1000000));
+  =}
+
+  reaction(tick) -> speed, enable_motor_command, force_disable_motor_pins {=
+    for (int i = 0; i < 7; i++) {
+      lf_set(force_disable_motor_pins[i], false);
+    }
+
+    if (self->done) {
+      for (int i = 0; i < 7; i++) {
+        lf_set(speed[i], 0.0);
+      }
+      lf_set(enable_motor_command, false);
+      return;
+    }
+
+    lf_set(enable_motor_command, true);
+
+    if (self->phase == 0) {
+      // ACTIVE: pulsing self->current_motor. Speed is derived from THIS
+      // motor's own pwm_rad_per_sec_max so every motor gets driven at the
+      // same duty-cycle fraction (see duty_cycle_fraction's comment above)
+      // regardless of how their individual pwm_rad_per_sec_max differs.
+      float this_motor_speed = motor_configs[self->current_motor]->pwm_rad_per_sec_max * self->duty_cycle_fraction;
+
+      if (self->ticks_in_phase == 0) {
+        for (int i = 0; i < 7; i++) {
+          self->baseline_qdec_[i] = self->last_qdec_[i];
+          self->baseline_sea_[i]  = self->last_sea_[i];
+        }
+        printf("MotorCalibration: pulsing motor %d at %d mRad/s (%d%% duty)\r\n",
+               self->current_motor, (int) (this_motor_speed * 1000), (int) (self->duty_cycle_fraction * 100));
+      }
+
+      for (int i = 0; i < 7; i++) {
+        lf_set(speed[i], (i == self->current_motor) ? this_motor_speed : 0.0);
+      }
+
+      self->ticks_in_phase++;
+      if (self->ticks_in_phase * 20000000LL >= self->step_period) {
+        self->phase = 1;
+        self->ticks_in_phase = 0;
+      }
+    } else {
+      // REST: motor commanded to zero, watching for the pulse's effect to
+      // fully settle before printing deltas and moving on.
+      for (int i = 0; i < 7; i++) {
+        lf_set(speed[i], 0.0);
+      }
+
+      if (self->ticks_in_phase == 0) {
+        printf("MotorCalibration: motor %d results:\r\n", self->current_motor);
+        printf("  qdec (USM) delta [mRad]: ");
+        for (int i = 0; i < 7; i++) {
+          printf("%d:%d  ", i, (int) ((self->last_qdec_[i] - self->baseline_qdec_[i]) * 1000));
+        }
+        printf("\r\n  sea  (SEA) delta [mRad]: ");
+        for (int i = 0; i < 7; i++) {
+          printf("%d:%d  ", i, (int) ((self->last_sea_[i] - self->baseline_sea_[i]) * 1000));
+        }
+        printf("\r\n");
+      }
+
+      self->ticks_in_phase++;
+      if (self->ticks_in_phase * 20000000LL >= self->rest_period) {
+        self->phase = 0;
+        self->ticks_in_phase = 0;
+        self->current_motor++;
+        if (self->current_motor >= 7) {
+          self->done = true;
+          printf("MotorCalibration: DONE -- all 7 motors pulsed. Compare each 'pulsing motor N' block's deltas above to find which qdec/sea index actually moved.\r\n");
+        }
+      }
+    }
+  =}
+}
