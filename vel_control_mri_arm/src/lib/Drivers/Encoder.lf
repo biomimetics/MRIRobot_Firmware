@@ -165,18 +165,10 @@ reactor QDEC(sample_period: time = 5 ms){
     static long usm_counts[7];
     static long sea_counts[7];
 
-    // Previous cycle's counts, kept only for the position-anomaly check
-    // below (2026-07-02: chasing single-sample sign flips on position that
-    // don't show up on the FPGA's independently-computed velocity, so this
-    // deliberately looks at raw position deltas rather than trusting
-    // velocity_q20_11 to catch it).
-    static long prev_sea_counts[7] = {0, 0, 0, 0, 0, 0, 0};
-    static long prev_usm_counts[7] = {0, 0, 0, 0, 0, 0, 0};
-
     // velocity_q20_11 is consumed below (scaled to rad/s for qdec_vel_out /
     // sea_vel_out); the diagnostic counters are parsed and stored here but
     // not consumed by any output yet. Declared ahead of
-    // check_position_anomaly below (which needs the type) rather than in
+    // filter_channel_update below (which needs the type) rather than in
     // its original spot further down.
     typedef struct {
       int32_t velocity_q20_11;
@@ -187,49 +179,99 @@ reactor QDEC(sample_period: time = 5 ms){
     static encoder_channel_meta_t sea_meta[ENCODER_CHANNELS_PER_GROUP];
     static encoder_channel_meta_t usm_meta[ENCODER_CHANNELS_PER_GROUP];
 
-    // Threshold for the anomaly check: an implied speed (from one sample to
-    // the next) above this is treated as suspicious. 2 deg/s is well below
-    // anything these motors do on purpose over one ~10ms sample period, so
-    // while the arm is otherwise at rest this should only fire on genuine
-    // glitches -- raise it if it starts firing during intentional motion.
+    // TEMPORARY FIX (2026-07-02) -- see fpga_comms_potential_issues.md's
+    // "whole USM burst occasionally becomes an exact copy of SEA's data"
+    // section. These hold the last ACCEPTED (i.e. actually used downstream)
+    // count/meta per channel -- deliberately separate from sea_counts/
+    // usm_counts above, which always hold whatever was most recently
+    // parsed, good or bad. filter_channel_update() below only copies a
+    // freshly-parsed reading into these when it looks sane, so a single-cycle
+    // whole-burst bank swap (or any other single-sample glitch) never reaches
+    // qdec_out/sea_out/qdec_vel_out/sea_vel_out at all -- downstream just
+    // keeps seeing the last good value for that one cycle instead.
+    static long sea_counts_accepted[7] = {0, 0, 0, 0, 0, 0, 0};
+    static long usm_counts_accepted[7] = {0, 0, 0, 0, 0, 0, 0};
+    static encoder_channel_meta_t sea_meta_accepted[ENCODER_CHANNELS_PER_GROUP];
+    static encoder_channel_meta_t usm_meta_accepted[ENCODER_CHANNELS_PER_GROUP];
+
+    // Consecutive-rejection counters, per channel. See
+    // ENCODER_REJECT_STREAK_LIMIT below for what these are for.
+    static int sea_reject_streak[7] = {0, 0, 0, 0, 0, 0, 0};
+    static int usm_reject_streak[7] = {0, 0, 0, 0, 0, 0, 0};
+
+    // Threshold for "does this look like a glitch": an implied speed (from
+    // the last ACCEPTED sample to this one) above this is treated as
+    // suspicious. 2 deg/s is well below anything these motors do on purpose
+    // over one ~10ms sample period, so while the arm is otherwise at rest
+    // this should only fire on genuine glitches -- raise it if it starts
+    // firing during intentional motion.
     #define ENCODER_ANOMALY_THRESHOLD_DEG_PER_SEC 2.0f
+
+    // A channel that looks suspicious this many consecutive cycles in a row
+    // is treated as having genuinely changed (e.g. someone issued an FPGA
+    // reset, or actually moved the joint at a speed above the threshold
+    // above) rather than glitching -- the observed whole-burst bank-swap
+    // bug has only ever been seen to last exactly one cycle before
+    // reverting, so 10 in a row is well past that and shouldn't false-fire
+    // on the glitch itself, while still recovering within ~100ms of a real
+    // change instead of getting stuck rejecting it forever.
+    #define ENCODER_REJECT_STREAK_LIMIT 10
 
     // Unthrottled (unlike everything gated by group_print_throttle/
     // printcnt above) on purpose -- this is specifically trying to catch a
     // single anomalous sample, which the normal ~10Hz-throttled prints
-    // could easily land between and miss entirely. Reports both the raw
-    // count delta and the implied deg/s so it's directly comparable to
-    // known real motion (e.g. MotorCalibration's pulses) to help tell a
-    // genuine glitch apart from an intentional fast motion.
+    // could easily land between and miss entirely. Reports the raw count
+    // delta, the implied deg/s (directly comparable to known real motion,
+    // e.g. MotorCalibration's pulses, to help tell a genuine glitch apart
+    // from an intentional fast motion), this channel's own diagnostic
+    // fields straight from its metadata word (rate_reject/
+    // illegal_transition/index_status/velocity -- the first anomaly caught
+    // this way correlated directly with rate_limit_rejects saturated at 255
+    // on the glitching channel), and the current reject streak.
     //
-    // Also reports this channel's own diagnostic fields (rate_reject/
-    // illegal_transition/index_status/velocity) straight from its metadata
-    // word, since the first real anomaly caught this way (2026-07-02)
-    // turned out to correlate directly with rate_limit_rejects being
-    // saturated at 255 on the glitching channel -- i.e. a burst of
-    // implausibly-fast (likely electrical noise, not real motion)
-    // quadrature transitions on that channel's A/B lines, not a UART/CRC
-    // issue (the frame that produced it passed CRC-8 fine). Including
-    // these fields directly in the alert means that correlation doesn't
-    // depend on the separately-throttled raw-burst dump happening to land
-    // on the same cycle, which was a lucky coincidence the first time.
-    static void check_position_anomaly(const char *group_name, int channel,
-                                        long new_count, long prev_count,
-                                        float convert_rad_per_count, float interval_sec,
-                                        encoder_channel_meta_t meta) {
-      if (interval_sec <= 0.0f) {
-        return;
+    // Decides accept vs. reject: compares the new reading against the last
+    // ACCEPTED value (not just "last received", so a run of rejected
+    // readings doesn't drift the comparison baseline along with them). If
+    // suspicious and the streak is still within ENCODER_REJECT_STREAK_LIMIT,
+    // *accepted_count/*accepted_meta are left untouched (rejected) and the
+    // streak increments; once the streak exceeds the limit, or the reading
+    // isn't suspicious at all, the new value is written into
+    // *accepted_count/*accepted_meta (accepted) and the streak resets to 0.
+    static void filter_channel_update(const char *group_name, int channel,
+                                       long new_count, encoder_channel_meta_t new_meta,
+                                       long *accepted_count, encoder_channel_meta_t *accepted_meta,
+                                       int *reject_streak,
+                                       float convert_rad_per_count, float interval_sec) {
+      bool suspicious = false;
+      if (interval_sec > 0.0f) {
+        float delta_counts  = (float)(new_count - *accepted_count);
+        float implied_deg_s = (delta_counts * convert_rad_per_count / interval_sec) * RAD_PER_SEC_TO_DEG_PER_SEC;
+        suspicious = fabsf(implied_deg_s) > ENCODER_ANOMALY_THRESHOLD_DEG_PER_SEC;
+
+        if (suspicious && PRINT_ENCODER) {
+          bool will_accept = (*reject_streak + 1) > ENCODER_REJECT_STREAK_LIMIT;
+          printf("Encoder.lf: !!! POSITION ANOMALY !!! %s ch%d: prev=%ld new=%ld delta=%ld implied=%d deg/s (interval %d us) "
+                 "| rate_reject=%u illegal=%u index_status=%u velocity_q20_11=%ld | reject_streak=%d %s\r\n",
+                 group_name, channel, *accepted_count, new_count, new_count - *accepted_count,
+                 (int) implied_deg_s, (int) (interval_sec * 1000000.0f),
+                 (unsigned) new_meta.rate_limit_rejects, (unsigned) new_meta.illegal_transition_rejects,
+                 (unsigned) new_meta.index_status, (long) new_meta.velocity_q20_11,
+                 *reject_streak + 1, will_accept ? "-- ACCEPTING as real change" : "-- REJECTING, holding previous value");
+        }
       }
-      float delta_counts  = (float)(new_count - prev_count);
-      float implied_deg_s = (delta_counts * convert_rad_per_count / interval_sec) * RAD_PER_SEC_TO_DEG_PER_SEC;
-      if (fabsf(implied_deg_s) > ENCODER_ANOMALY_THRESHOLD_DEG_PER_SEC) {
-        printf("Encoder.lf: !!! POSITION ANOMALY !!! %s ch%d: prev=%ld new=%ld delta=%ld implied=%d deg/s (interval %d us) "
-               "| rate_reject=%u illegal=%u index_status=%u velocity_q20_11=%ld\r\n",
-               group_name, channel, prev_count, new_count, new_count - prev_count,
-               (int) implied_deg_s, (int) (interval_sec * 1000000.0f),
-               (unsigned) meta.rate_limit_rejects, (unsigned) meta.illegal_transition_rejects,
-               (unsigned) meta.index_status, (long) meta.velocity_q20_11);
+
+      if (suspicious) {
+        (*reject_streak)++;
+        if (*reject_streak <= ENCODER_REJECT_STREAK_LIMIT) {
+          return; // reject: leave *accepted_count/*accepted_meta as they were
+        }
+        // else: streak exceeded the limit -- fall through and accept this
+        // as a real change instead of a glitch.
       }
+
+      *reject_streak = 0;
+      *accepted_count = new_count;
+      *accepted_meta = new_meta;
     }
 
     // NOTE: read_fpga_example.c's comment claims big-endian/MSB-first count
@@ -649,8 +691,9 @@ reactor QDEC(sample_period: time = 5 ms){
     if (sea_rx_ok) {
       parse_encoder_group(sea_burst, sea_counts, sea_meta, "SEA");
       for (int i = 0; i < 7; i++) {
-        check_position_anomaly("SEA", i, sea_counts[i], prev_sea_counts[i], self->qdec_convert_sea_to_rad_[i], self->interval_sec, sea_meta[i]);
-        prev_sea_counts[i] = sea_counts[i];
+        filter_channel_update("SEA", i, sea_counts[i], sea_meta[i],
+                               &sea_counts_accepted[i], &sea_meta_accepted[i], &sea_reject_streak[i],
+                               self->qdec_convert_sea_to_rad_[i], self->interval_sec);
       }
       sea_packets_ok++;
     } else {
@@ -664,8 +707,9 @@ reactor QDEC(sample_period: time = 5 ms){
     if (usm_rx_ok) {
       parse_encoder_group(usm_burst, usm_counts, usm_meta, "USM");
       for (int i = 0; i < 7; i++) {
-        check_position_anomaly("USM", i, usm_counts[i], prev_usm_counts[i], self->qdec_convert_motor_to_rad_[i], self->interval_sec, usm_meta[i]);
-        prev_usm_counts[i] = usm_counts[i];
+        filter_channel_update("USM", i, usm_counts[i], usm_meta[i],
+                               &usm_counts_accepted[i], &usm_meta_accepted[i], &usm_reject_streak[i],
+                               self->qdec_convert_motor_to_rad_[i], self->interval_sec);
       }
       usm_packets_ok++;
     } else {
@@ -684,14 +728,18 @@ reactor QDEC(sample_period: time = 5 ms){
       // values..." section. The last three motors' (indices 4-6) real USM
       // (motor) data was landing on the SEA channel readout instead; with
       // ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE set, sea_out[4..6] now pulls
-      // its DATA from usm_counts/usm_meta instead of sea_counts/sea_meta
-      // (still applying the SEA conversion factor -- only the raw source is
-      // swapped, not the physical-unit conversion), which correctly gives
-      // near-zero SEA readings again. KEEP until the FPGA-side cross-routing
-      // bug is actually fixed; do not remove speculatively.
+      // its DATA from usm_counts_accepted/usm_meta_accepted instead of
+      // sea_counts_accepted/sea_meta_accepted (still applying the SEA
+      // conversion factor -- only the raw source is swapped, not the
+      // physical-unit conversion), which correctly gives near-zero SEA
+      // readings again. Reads the _accepted (glitch-filtered, see
+      // filter_channel_update above) arrays, not sea_counts/usm_counts
+      // directly, so this swap operates on already-cleaned data. KEEP until
+      // the FPGA-side cross-routing bug is actually fixed; do not remove
+      // speculatively.
       bool swap_this_channel = ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE && (i >= 4);
-      long sea_source_count = swap_this_channel ? usm_counts[i] : sea_counts[i];
-      encoder_channel_meta_t sea_source_meta = swap_this_channel ? usm_meta[i] : sea_meta[i];
+      long sea_source_count = swap_this_channel ? usm_counts_accepted[i] : sea_counts_accepted[i];
+      encoder_channel_meta_t sea_source_meta = swap_this_channel ? usm_meta_accepted[i] : sea_meta_accepted[i];
 
       float sea_value = ((float) sea_source_count) * self->qdec_convert_sea_to_rad_[i]; // - motor_configs[i]->sea_offset;
       float sea_vel_counts_per_sec = ((float) sea_source_meta.velocity_q20_11) / ENCODER_VELOCITY_SCALE;
@@ -708,14 +756,16 @@ reactor QDEC(sample_period: time = 5 ms){
     for (int i=0; i<7; i++) {
       // TEMPORARY FIX, confirmed on-robot -- mirror image of the SEA-side
       // swap above: for the last three motors, qdec_out/qdec_vel_out now
-      // pull their DATA from sea_counts/sea_meta instead (still applying
-      // the motor conversion factor), which correctly recovers sane motor
-      // position/velocity for these channels instead of the near-zero they
-      // showed before this fix. KEEP until the FPGA-side cross-routing bug
-      // is actually fixed; do not remove speculatively.
+      // pull their DATA from sea_counts_accepted/sea_meta_accepted instead
+      // (still applying the motor conversion factor), which correctly
+      // recovers sane motor position/velocity for these channels instead of
+      // the near-zero they showed before this fix. Reads the _accepted
+      // (glitch-filtered) arrays, same reasoning as the SEA side above.
+      // KEEP until the FPGA-side cross-routing bug is actually fixed; do not
+      // remove speculatively.
       bool swap_this_channel = ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE && (i >= 4);
-      long usm_source_count = swap_this_channel ? sea_counts[i] : usm_counts[i];
-      encoder_channel_meta_t usm_source_meta = swap_this_channel ? sea_meta[i] : usm_meta[i];
+      long usm_source_count = swap_this_channel ? sea_counts_accepted[i] : usm_counts_accepted[i];
+      encoder_channel_meta_t usm_source_meta = swap_this_channel ? sea_meta_accepted[i] : usm_meta_accepted[i];
 
       self->qdec_pos_[i] = ((float) usm_source_count) * self->qdec_convert_motor_to_rad_[i]; // update the new position
       float usm_vel_counts_per_sec = ((float) usm_source_meta.velocity_q20_11) / ENCODER_VELOCITY_SCALE;

@@ -475,6 +475,46 @@ reproduce this frequently, to find the actual mechanism that lets one
 bank's already-read data get delivered again in response to a fire for the
 *other* bank.
 
+### Update (2026-07-02, STM32-side mitigation added): reject-and-hold filter with an auto-recovery streak limit
+
+Added `filter_channel_update()` to `Encoder.lf`, replacing the previous
+alert-only `check_position_anomaly()`. Per channel, per group (SEA/USM
+independently), it compares each freshly-parsed reading against the last
+*accepted* value (not just the last-received one) using the same >2 deg/s
+implied-speed threshold as before. Two new arrays,
+`sea_counts_accepted`/`usm_counts_accepted` (+ matching `..._meta_accepted`
+structs), hold what's actually fed to `qdec_out`/`sea_out`/`qdec_vel_out`/
+`sea_vel_out` downstream -- `sea_counts`/`usm_counts` (raw, whatever was
+just parsed) are left alone as before.
+
+- **Suspicious reading**: `*_counts_accepted`/`*_meta_accepted` are left
+  untouched (downstream keeps seeing the last good value for that one
+  cycle) and a per-channel `reject_streak` counter increments.
+- **10 suspicious readings in a row** (`ENCODER_REJECT_STREAK_LIMIT`): the
+  channel gives up rejecting and accepts the new value as a real change
+  (e.g. an actual FPGA reset, or the robot genuinely being moved faster
+  than the threshold) rather than continuing to hold a stale value forever.
+  The observed whole-burst bank-swap bug has only ever lasted exactly one
+  cycle before reverting on its own, so 10 in a row is well clear of that
+  while still recovering within ~100ms of a genuine change.
+- A non-suspicious reading always accepts immediately and resets the streak
+  to 0.
+
+The `POSITION ANOMALY` alert now also prints the current `reject_streak`
+and whether this specific occurrence is being rejected or (having exceeded
+the limit) accepted, so the accept/reject decision is visible in the log
+without needing to infer it.
+
+**Status: mitigated STM32-side, confirmed working on-robot (2026-07-02)**
+(this is a filter on top of the swap fix above --
+`ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE`'s relabeling now reads from the
+`_accepted` arrays, i.e. operates on already-glitch-filtered data). User
+tested on the physical robot after flashing and confirmed the filter works
+as expected. Root cause is still the unidentified FPGA-internal issue
+described above; this only prevents single-cycle glitches from reaching the
+rest of the firmware, it doesn't fix why they happen -- keep this filter in
+place until that's found and fixed.
+
 ## Confirmed + mitigated STM32-side: SEA channels 4-6 read large values while corresponding USM channels stay near zero
 
 Live monitoring (2026-07-02, robot at rest) showed `SEA counts: -42 -4 28 17
@@ -567,6 +607,40 @@ unidentified -- see the two hypotheses above; "active FPGA-internal bug" is
 now the confirmed direction, just not yet localized to a specific line)
 would need simulation/waveform tracing of `USM_Block`'s `count`/`count_arr`
 for channels 4-6 against `SEA_Block`'s to pin down exactly where they merge.
+
+## Open: some SEA channels also appear swapped with each other (newly noticed 2026-07-02)
+
+Separate from the SEA<->USM cross-group swap above (channels 4-6's real USM
+data landing on the SEA readout, now mitigated via
+`ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE`), the user has now also noticed that
+some SEA channels appear to be swapped **with each other** -- i.e. within
+the SEA group itself, not just across the SEA/USM boundary. This wasn't
+caught by the earlier `MotorCalibration.lf` per-motor pulse testing or the
+channel-4-6 investigation above, so it's a distinct, previously-undetected
+issue.
+
+Not yet root-caused or even fully characterized -- no specific channel
+pairs, reproduction steps, or supporting log data have been captured for
+this one yet (unlike the channel-4-6 issue and the whole-burst bank swap
+above, both of which have concrete worked examples in this file). Given how
+the earlier issues were pinned down, the same approach likely applies here
+too: re-run (or re-purpose) `MotorCalibration.lf`'s per-motor pulse test and
+check which `sea_out`/`sea_counts` index actually responds to each motor's
+pulse, specifically looking for two SEA indices whose responses are swapped
+relative to each other (as opposed to one of them just being silent, which
+was the channel-4-6 symptom).
+
+Whether this is the same underlying FPGA-internal mechanism as the other
+two issues above (e.g. `qdec_arbiter`/`packet_framer` state confusion
+extending to within-group channel ordering too) or a separate bug entirely
+is unknown. Worth checking once reproduced whether it's connected to the
+already-documented `channel_index` `+4` rotation (see "Open: channel_index
+is consistently rotated by a fixed offset" above) -- that fix already
+reorders channels based on the embedded self-check byte rather than word
+position, so if this new swap is happening at a layer the `channel_index`
+fix doesn't cover (e.g. actually swapped in the FPGA's own `count_arr`
+before the metadata `ch` label is even attached), the existing fix would
+not catch it and could even make it harder to notice.
 
 ## Confirmed working correctly
 
