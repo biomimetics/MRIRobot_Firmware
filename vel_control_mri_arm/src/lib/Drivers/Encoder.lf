@@ -23,6 +23,9 @@ reactor QDEC(sample_period: time = 5 ms){
   output[7] sea_out: float
 
   output[7] qdec_vel_out: float
+  // FPGA-derived SEA velocity, radians/sec. Not wired to any other
+  // reactor yet -- exposed for a future pass to consume.
+  output[7] sea_vel_out: float
 
   timer trigger(0, sample_period)
   timer enable(0, 20 ms)
@@ -33,7 +36,8 @@ reactor QDEC(sample_period: time = 5 ms){
 
   // internal copies of joint and sea encoder values to use
   state qdec_pos_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-  state qdec_pos_last_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  // USM velocity, radians/sec -- from the FPGA's own velocity estimate (see
+  // trigger reaction below), not differenced from position anymore.
   state qdec_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
   state qdec_convert_motor_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to acutator space
@@ -41,7 +45,8 @@ reactor QDEC(sample_period: time = 5 ms){
 
   state sea_pos_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
   state sea_pos_last_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
-  state sea_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
+  // SEA velocity, radians/sec -- from the FPGA's own velocity estimate.
+  state sea_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
   state prev_time: time = 0
 
@@ -65,15 +70,117 @@ reactor QDEC(sample_period: time = 5 ms){
     uint8_t qdec_reset[1]= {0x01};            // Reset QDEC values
     uint8_t qdec_disable[1]= {0x02};          // Disable encoders
     uint8_t qdec_enable[1]= {0x03};           // Enable encoders
-    uint8_t req_qdec[2]=  {0x04, 0x05};       // Request data
+
+    // SEA and USM banks are fired independently now (mri_encoder_reader.v);
+    // each fire returns its own 112-byte, 7-channel burst. See
+    // read_fpga_example.c for the authoritative protocol description.
+    #define ENCODER_CHANNELS_PER_GROUP 7u
+    #define ENCODER_BYTES_PER_CHANNEL  16u  /* 8B count word + 8B metadata word */
+    #define ENCODER_BYTES_PER_BURST    (ENCODER_CHANNELS_PER_GROUP * ENCODER_BYTES_PER_CHANNEL)
+    uint8_t qdec_fire_sea[1] = {0x04};
+    uint8_t qdec_fire_usm[1] = {0x05};
+
+    static uint8_t sea_burst[ENCODER_BYTES_PER_BURST];
+    static uint8_t usm_burst[ENCODER_BYTES_PER_BURST];
+
+    // Must match qdec_params.vh's QDEC_VELOCITY_FRAC_BITS (11 -> Q20.11).
+    #define ENCODER_VELOCITY_FRAC_BITS 11u
+    #define ENCODER_VELOCITY_SCALE     ((float)(1 << ENCODER_VELOCITY_FRAC_BITS))
+
+    // Bounded timeout for the blocking burst reads below. 112 bytes at
+    // 921600 baud (8N1) takes ~1.2ms on the wire; this leaves generous
+    // margin while still bounding worst-case reaction time if a group
+    // doesn't respond, instead of hanging forever like HAL_MAX_DELAY would.
+    #define ENCODER_UART_RX_TIMEOUT_MS 5u
+
+    // Diagnostics-only throttle for the debug prints below.
+    static int group_print_throttle = 0;
 
     float pi = 3.14159;
-    static uint8_t data[200];
-    static long count[14];
 
     // for storing usm and sea encoder counts
     static long usm_counts[7];
     static long sea_counts[7];
+
+    // velocity_q20_11 is consumed below (scaled to rad/s for qdec_vel_out /
+    // sea_vel_out); the diagnostic counters are parsed and stored here but
+    // not consumed by any output yet.
+    typedef struct {
+      int32_t velocity_q20_11;
+      uint8_t illegal_transition_rejects;
+      uint8_t rate_limit_rejects;
+      uint8_t index_status;
+    } encoder_channel_meta_t;
+    static encoder_channel_meta_t sea_meta[ENCODER_CHANNELS_PER_GROUP];
+    static encoder_channel_meta_t usm_meta[ENCODER_CHANNELS_PER_GROUP];
+
+    // NOTE: read_fpga_example.c's comment claims big-endian/MSB-first count
+    // and metadata words, but empirically (verified against a live capture:
+    // decoding little-endian yields a clean sequential channel_index 0-6
+    // and sane small count/velocity values, while big-endian yields garbage
+    // channel_index bytes like 255 and huge nonsense velocities) the FPGA
+    // actually sends each 64-bit word little-endian (LSB byte first).
+    static uint64_t read_le64(const uint8_t *p) {
+      uint64_t v = 0;
+      for (int i = 7; i >= 0; i--) {
+        v = (v << 8) | p[i];
+      }
+      return v;
+    }
+
+    // Parses a just-completed 112-byte burst (7 records, 16 bytes each,
+    // count word then metadata word -- see read_fpga_example.c section 3).
+    // Channel identity comes from WORD POSITION in the burst (record index
+    // == channel), not from the embedded channel_index byte -- per
+    // read_fpga_example.c section 5, channel_index is "only a self-check
+    // that detects desync after the fact, not a recovery mechanism," so it
+    // must not be used to relocate/drop data. (An earlier version of this
+    // function did exactly that -- placed records at counts_out[channel_index]
+    // and skipped any record whose self-check byte looked wrong -- which
+    // silently dropped good positional data whenever that byte was corrupt.)
+    // group_name is only used for the throttled debug prints below.
+    static void parse_encoder_group(const uint8_t *burst, long *counts_out,
+                                     encoder_channel_meta_t *meta_out,
+                                     const char *group_name) {
+      bool do_print = PRINT_ENCODER && (group_print_throttle == 0);
+
+      if (do_print) {
+        printf("Encoder.lf: %s raw burst: ", group_name);
+        for (int b = 0; b < (int)ENCODER_BYTES_PER_BURST; b++) {
+          printf("%02X ", burst[b]);
+        }
+        printf("\r\n");
+      }
+
+      for (int ch = 0; ch < (int)ENCODER_CHANNELS_PER_GROUP; ch++) {
+        const uint8_t *record = burst + ch * ENCODER_BYTES_PER_CHANNEL;
+        uint64_t count_word    = read_le64(record);
+        uint64_t metadata_word = read_le64(record + 8);
+        uint8_t channel_index  = (uint8_t)(metadata_word);
+
+        if (channel_index != (uint8_t)ch && PRINT_ENCODER) {
+          printf("Encoder.lf: %s record %d self-check mismatch, channel_index=%d\r\n", group_name, ch, channel_index);
+        }
+
+        counts_out[ch] = (long)(int64_t)count_word;
+        meta_out[ch].velocity_q20_11            = (int32_t)(metadata_word >> 32);
+        meta_out[ch].illegal_transition_rejects = (uint8_t)(metadata_word >> 24);
+        meta_out[ch].rate_limit_rejects          = (uint8_t)(metadata_word >> 16);
+        meta_out[ch].index_status                = (uint8_t)(metadata_word >> 8);
+      }
+
+      if (do_print) {
+        printf("Encoder.lf: %s counts: ", group_name);
+        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
+          printf("%ld ", counts_out[i]);
+        }
+        printf("| vel_q20_11: ");
+        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
+          printf("%ld ", (long) meta_out[i].velocity_q20_11);
+        }
+        printf("\r\n");
+      }
+    }
 
     // unexplained conversion factors found in the code applied to the sea counts before the sea gear reduction
     // all I know is "// 0.362 = 25.4/70" and "// 0.5644 = 25.4/45", so maybe 25.4 is mm and 70/45 are degrees? Maybe this factor converts the counts per inch to counts per degree? 
@@ -123,10 +230,12 @@ reactor QDEC(sample_period: time = 5 ms){
       HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     }
 
-    // Recieve callback function
-    void HAL_UART_RxCallback3() {
-      HAL_UART_Receive_DMA(&huart3, data, 98);
-    }
+    // No longer used for encoder reception -- SEA/USM bursts are now read
+    // synchronously (blocking Transmit+Receive) in the trigger reaction
+    // below, not via DMA. Kept as an empty stub since Main.lf's
+    // HAL_UART_RxCpltCallback dispatcher still references it unconditionally
+    // for USART3.
+    void HAL_UART_RxCallback3() {}
 
     static int last_switch = 0;
     long reference_tick = 0;
@@ -144,9 +253,8 @@ reactor QDEC(sample_period: time = 5 ms){
     if (PRINT_ENCODER){printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");}
     HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
-
-    HAL_UART_Receive_DMA(&huart3, data, 98);
-    HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
+    // SEA/USM bursts are now fetched synchronously each trigger cycle
+    // (blocking Transmit+Receive below); no DMA arming needed here.
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
@@ -178,7 +286,6 @@ reactor QDEC(sample_period: time = 5 ms){
     self->reset_qdec_ = reset_qdec->value;
     if (self->reset_qdec_){
       HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
-      HAL_UART_Receive_DMA(&huart3, data, 98);
       if (PRINT_ENCODER) {printf("Resetting Encoders\r\n");}
     }
     self->reset_qdec_ = false; 
@@ -201,42 +308,55 @@ reactor QDEC(sample_period: time = 5 ms){
 
   // Update Encoder values
   // This function should take approximately 1ms to operate
-  reaction(trigger) -> qdec_out, qdec_vel_out, sea_out {=
+  reaction(trigger) -> qdec_out, qdec_vel_out, sea_out, sea_vel_out {=
     //printf("In QDEC's trigger reaction.\n");
     timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
 
    self->interval_sec = (float) self->timer_elapsed_time_sec_;
 
-    // Prep the next request
-    HAL_UART_Transmit(&huart3, req_qdec, 2, HAL_MAX_DELAY);
-
-    // Shift over relevant data
-    for(int i=0; i<14; i++) {
-      count[i] = data[0+(i*7)] + (data[1+(i*7)]<<8) + (data[2+(i*7)]<<16) + (data[3+(i*7)]<<24) 
-                               + (data[4+(i*7)]<<32) + (data[5+(i*7)]<<40) + (data[6+(i*7)]<<48);
-    }
-    
-    // unpack the count array into sea and usm counts
-    for (int i=0; i<7; i++){
-      sea_counts[i] = count[6-i]; // they're stored backwards for the seas
-    }
-    for (int i=0; i<7; i++){
-      usm_counts[i] = count[i+7];
+    // Fire and blocking-read each group in turn. A bounded timeout (rather
+    // than HAL_MAX_DELAY) means a non-responding group can't hang the whole
+    // single-threaded runtime forever -- it just leaves that group's counts
+    // at their last known value for this cycle.
+    HAL_UART_Transmit(&huart3, qdec_fire_sea, 1, HAL_MAX_DELAY);
+    HAL_StatusTypeDef sea_rx_status = HAL_UART_Receive(&huart3, sea_burst, ENCODER_BYTES_PER_BURST, ENCODER_UART_RX_TIMEOUT_MS);
+    if (sea_rx_status == HAL_OK) {
+      parse_encoder_group(sea_burst, sea_counts, sea_meta, "SEA");
+    } else if (PRINT_ENCODER && group_print_throttle == 0) {
+      printf("Encoder.lf: SEA HAL_UART_Receive failed, status=%d\r\n", (int) sea_rx_status);
     }
 
-    
-    // Get values for SEA encoders
+    HAL_UART_Transmit(&huart3, qdec_fire_usm, 1, HAL_MAX_DELAY);
+    HAL_StatusTypeDef usm_rx_status = HAL_UART_Receive(&huart3, usm_burst, ENCODER_BYTES_PER_BURST, ENCODER_UART_RX_TIMEOUT_MS);
+    if (usm_rx_status == HAL_OK) {
+      parse_encoder_group(usm_burst, usm_counts, usm_meta, "USM");
+    } else if (PRINT_ENCODER && group_print_throttle == 0) {
+      printf("Encoder.lf: USM HAL_UART_Receive failed, status=%d\r\n", (int) usm_rx_status);
+    }
+
+    group_print_throttle = (group_print_throttle >= printcnt_lim) ? 0 : group_print_throttle + 1;
+
+    // Get values for SEA encoders -- position from counts, velocity from the
+    // FPGA's own Q20.11 counts/sec estimate, both scaled by the same
+    // counts->radians conversion factor. sea_vel_out isn't consumed by any
+    // other reactor yet; it's exposed here for a future pass to wire up.
     for (int i=0; i<7; i++) {
       float sea_value = ((float) sea_counts[i]) * self->qdec_convert_sea_to_rad_[i]; // - motor_configs[i]->sea_offset;
+      float sea_vel_counts_per_sec = ((float) sea_meta[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
+      self->sea_vel_est_[i] = sea_vel_counts_per_sec * self->qdec_convert_sea_to_rad_[i]; // radians per second
 
       lf_set(sea_out[i],  sea_value);
+      lf_set(sea_vel_out[i], self->sea_vel_est_[i]);
     }
 
-    // Get values for USM encoders
+    // Get values for USM encoders -- position from counts, velocity from the
+    // FPGA's own Q20.11 counts/sec estimate, rather than differencing
+    // position (the FPGA's estimate is more robust -- see
+    // encoder_robustness_plan.md).
     for (int i=0; i<7; i++) {
-      self->qdec_pos_last_[i] = self->qdec_pos_[i]; // save last position
       self->qdec_pos_[i] = ((float) usm_counts[i]) * self->qdec_convert_motor_to_rad_[i]; // update the new position
-      self->qdec_vel_est_[i] = (self->qdec_pos_[i] - self->qdec_pos_last_[i]) / (self->interval_sec); //(interval_sec); // estimate velocity from different of positions over the time between positions
+      float usm_vel_counts_per_sec = ((float) usm_meta[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
+      self->qdec_vel_est_[i] = usm_vel_counts_per_sec * self->qdec_convert_motor_to_rad_[i]; // radians per second
 
       lf_set(qdec_out[i],  self->qdec_pos_[i]); // should be units of radians
       lf_set(qdec_vel_out[i],  self->qdec_vel_est_[i]); // should be units of radians per second
@@ -263,7 +383,13 @@ reactor QDEC(sample_period: time = 5 ms){
         printf("%d  ", (int) (qdec_vel_out[i]->value*1000));
       }
       printf("\r\ninterval [ms] %d, [us]: %d", (int) (self->interval_sec * 1000), (int) (self->interval_sec * 1000000));
-        
+
+      // UART3 sanity check: sea_rx_status/usm_rx_status show whether this
+      // cycle's blocking reads actually completed (HAL_OK) or timed out.
+      printf("\r\nUART3 gState=0x%X RxState=0x%X HAL_error=0x%lX sea_rx_status=%d usm_rx_status=%d",
+             huart3.gState, huart3.RxState, (unsigned long) HAL_UART_GetError(&huart3),
+             (int) sea_rx_status, (int) usm_rx_status);
+
       printf("\r\n\r\n");
     }
     printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
