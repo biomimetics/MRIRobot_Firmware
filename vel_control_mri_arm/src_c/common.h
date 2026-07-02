@@ -12,7 +12,7 @@
 // for debugging
 #define PRINT_STATEMACHINE 0
 #define PRINT_USM 0
-#define PRINT_ENCODER 0
+#define PRINT_ENCODER 1
 #define PRINT_UART 0
 #define USE_EX_DMA 0
 

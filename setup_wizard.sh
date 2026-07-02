@@ -61,4 +61,51 @@ else
     echo "OpenOCD already present at $OPENOCD_DIR. Skipping clone."
 fi
 
+# Build and install OpenOCD from the cloned source. The Makefile's just_flash
+# target loads tcl/interface and tcl/target scripts straight out of this repo
+# checkout, and those scripts use syntax (e.g. "adapter usb vid_pid") that is
+# newer than the openocd package in apt (0.12.0 on Ubuntu), so a distro
+# package won't work — we need a binary built from this exact tree.
+echo "Building OpenOCD..."
+cd "$OPENOCD_DIR"
+if ! command -v openocd &>/dev/null || ! openocd --version 2>&1 | grep -q "0.12.0+dev"; then
+    echo "Installing OpenOCD build dependencies via apt..."
+    sudo apt install -y libusb-1.0-0-dev libtool autoconf automake pkg-config texinfo libhidapi-dev
+    git submodule update --init --recursive
+    ./bootstrap with-submodules
+    ./configure --enable-stlink --enable-internal-jimtcl
+    make -j"$(nproc)"
+    sudo make install
+    echo "OpenOCD built and installed successfully."
+else
+    echo "Matching OpenOCD build already installed. Skipping build."
+fi
+cd "$SCRIPT_DIR"
+
+# Install udev rules so ST-Link USB access doesn't require sudo/root.
+echo "Installing OpenOCD udev rules..."
+UDEV_RULES_SRC="$OPENOCD_DIR/contrib/60-openocd.rules"
+UDEV_RULES_DST="/etc/udev/rules.d/60-openocd.rules"
+if [ -f "$UDEV_RULES_SRC" ]; then
+    if [ ! -f "$UDEV_RULES_DST" ] || ! diff -q "$UDEV_RULES_SRC" "$UDEV_RULES_DST" &>/dev/null; then
+        sudo cp "$UDEV_RULES_SRC" "$UDEV_RULES_DST"
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger
+        echo "Installed udev rules. Unplug and replug the ST-Link/board for permissions to take effect."
+    else
+        echo "OpenOCD udev rules already installed. Skipping."
+    fi
+else
+    echo "Warning: udev rules not found at $UDEV_RULES_SRC. Skipping."
+fi
+
+# Make sure the current user can access USB debug adapters (plugdev group).
+if ! id -nG "$USER" | grep -qw plugdev; then
+    echo "Adding $USER to the plugdev group for USB adapter access..."
+    sudo usermod -aG plugdev "$USER"
+    echo "Added $USER to plugdev. Log out and back in for this to take effect."
+else
+    echo "$USER is already in the plugdev group. Skipping."
+fi
+
 echo "=== Setup complete ==="

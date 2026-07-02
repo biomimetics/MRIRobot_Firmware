@@ -65,7 +65,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     //static int PRINT_ENCODER = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;
-    static int printcnt_lim = 10;//100; // print every nth time
+    static int printcnt_lim = 5;//100; // print every nth time
 
 
     // QDEC Commands
@@ -122,6 +122,16 @@ reactor QDEC(sample_period: time = 5 ms){
 
     // Diagnostics-only throttle for the debug prints below.
     static int group_print_throttle = 0;
+
+    // Packet counters used by the print_timer heartbeat below to give an
+    // unambiguous "are we actually getting FPGA packets" signal -- unlike
+    // the per-frame debug prints above, this fires on a wall-clock cadence
+    // regardless of whether any frames arrived, so silence in the log means
+    // silence on the wire, not just a throttled-out print.
+    static uint32_t sea_packets_ok = 0;
+    static uint32_t sea_packets_bad = 0;
+    static uint32_t usm_packets_ok = 0;
+    static uint32_t usm_packets_bad = 0;
 
     float pi = 3.14159;
 
@@ -317,6 +327,23 @@ reactor QDEC(sample_period: time = 5 ms){
           printf("%ld ", (long) meta_out[i].velocity_q20_11);
         }
         printf("\r\n");
+
+        // Per-channel metadata word -- illegal/rate-limit reject counters and
+        // index_status straight off the FPGA, as an additional sanity check
+        // independent of the position/velocity math above.
+        printf("Encoder.lf: %s meta: illegal_rej=", group_name);
+        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
+          printf("%u ", (unsigned) meta_out[i].illegal_transition_rejects);
+        }
+        printf("| rate_limit_rej=");
+        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
+          printf("%u ", (unsigned) meta_out[i].rate_limit_rejects);
+        }
+        printf("| index_status=");
+        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
+          printf("%u ", (unsigned) meta_out[i].index_status);
+        }
+        printf("\r\n");
       }
     }
 
@@ -427,6 +454,26 @@ reactor QDEC(sample_period: time = 5 ms){
     printf("QDEC has finished startup!\n");
   =}
 
+  // Wall-clock heartbeat confirming FPGA packets are actually arriving --
+  // fires every 5s regardless of the trigger reaction's print throttling, so
+  // a dead FPGA link shows up as visibly stalled counters instead of just
+  // an absence of the (throttled) per-frame prints above.
+  reaction(print_timer) {=
+    printf("Encoder.lf: heartbeat SEA ok=%lu bad=%lu, USM ok=%lu bad=%lu\r\n",
+           (unsigned long) sea_packets_ok, (unsigned long) sea_packets_bad,
+           (unsigned long) usm_packets_ok, (unsigned long) usm_packets_bad);
+
+    // UART/DMA link status, printed unconditionally on the same 5s cadence --
+    // unlike the counters above, this is visible even when zero packets have
+    // ever decoded, so it can distinguish "UART never armed/receiving" from
+    // "bytes arriving but failing COBS/CRC" (which would show up as bad>0).
+    // gState/RxState per stm32f4xx_hal_uart.h: RxState 0x22 == HAL_UART_STATE_BUSY_RX
+    // (idle-DMA receive armed and waiting), 0x20 == HAL_UART_STATE_READY (not armed).
+    printf("Encoder.lf: heartbeat UART3 gState=0x%X RxState=0x%X HAL_error=0x%lX pending_group=%s\r\n",
+           huart3.gState, huart3.RxState, (unsigned long) HAL_UART_GetError(&huart3),
+           (encoder_pending_group == ENCODER_GROUP_SEA) ? "SEA" : "USM");
+  =}
+
   reaction(reset_qdec) {=
     self->reset_qdec_ = reset_qdec->value;
     if (self->reset_qdec_){
@@ -473,6 +520,9 @@ reactor QDEC(sample_period: time = 5 ms){
       sea_rx_ok = encoder_decode_and_verify(sea_frame_captured, sea_frame_captured_len, sea_burst, "SEA");
       if (sea_rx_ok) {
         parse_encoder_group(sea_burst, sea_counts, sea_meta, "SEA");
+        sea_packets_ok++;
+      } else {
+        sea_packets_bad++;
       }
     }
 
@@ -481,6 +531,9 @@ reactor QDEC(sample_period: time = 5 ms){
       usm_rx_ok = encoder_decode_and_verify(usm_frame_captured, usm_frame_captured_len, usm_burst, "USM");
       if (usm_rx_ok) {
         parse_encoder_group(usm_burst, usm_counts, usm_meta, "USM");
+        usm_packets_ok++;
+      } else {
+        usm_packets_bad++;
       }
     }
 
