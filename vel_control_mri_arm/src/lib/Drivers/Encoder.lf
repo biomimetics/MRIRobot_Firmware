@@ -9,9 +9,11 @@ target C {
 preamble {=
   #include "stm32f4xx_hal.h"
   #include <stdio.h>
+  #include <stddef.h>
+  #include <string.h>
   #include "motor_config.h"
   #include "common.h"
-  
+
   #define USE_OLD_SEA_CONVERSION 0
 =}
 
@@ -72,26 +74,51 @@ reactor QDEC(sample_period: time = 5 ms){
     uint8_t qdec_enable[1]= {0x03};           // Enable encoders
 
     // SEA and USM banks are fired independently now (mri_encoder_reader.v);
-    // each fire returns its own 112-byte, 7-channel burst. See
-    // read_fpga_example.c for the authoritative protocol description.
+    // each fire returns its own 112-byte, 7-channel burst, COBS-framed with
+    // a trailing CRC-8 by packet_framer.v. See read_fpga_example.c for the
+    // authoritative protocol description (section 6 in particular).
     #define ENCODER_CHANNELS_PER_GROUP 7u
     #define ENCODER_BYTES_PER_CHANNEL  16u  /* 8B count word + 8B metadata word */
     #define ENCODER_BYTES_PER_BURST    (ENCODER_CHANNELS_PER_GROUP * ENCODER_BYTES_PER_CHANNEL)
+
+    // Payload + CRC-8 byte, before COBS encoding. Must match
+    // packet_framer.v's PAYLOAD_BYTES (112) + 1.
+    #define ENCODER_PAYLOAD_BYTES      (ENCODER_BYTES_PER_BURST + 1u)
+
+    // Worst case on-wire frame size (excluding the 0x00 delimiter) is 1 code
+    // byte + 113 data bytes = 114 bytes; rounded up with margin.
+    #define ENCODER_FRAME_MAX_BYTES    128u
+
     uint8_t qdec_fire_sea[1] = {0x04};
     uint8_t qdec_fire_usm[1] = {0x05};
 
-    static uint8_t sea_burst[ENCODER_BYTES_PER_BURST];
-    static uint8_t usm_burst[ENCODER_BYTES_PER_BURST];
+    #define ENCODER_GROUP_SEA 0
+    #define ENCODER_GROUP_USM 1
+
+    // Single shared idle-DMA receive buffer -- SEA and USM bursts are never
+    // in flight at once (one UART, ping-ponged by HAL_UART_RxEventCallback3
+    // below), so one buffer covers both.
+    static uint8_t encoder_rx_dma_buf[ENCODER_FRAME_MAX_BYTES];
+    static volatile int encoder_pending_group = ENCODER_GROUP_SEA;
+
+    // Captured frames + ready flags: written by HAL_UART_RxEventCallback3
+    // (ISR context, via UART.lf's HAL_UARTEx_RxEventCallback dispatcher) and
+    // consumed once per cycle by the trigger reaction below. Same
+    // flag-plus-buffer handoff pattern UART.lf already uses for its own
+    // received_new_message/uart_rx_dma_buffer_copy.
+    static uint8_t sea_frame_captured[ENCODER_FRAME_MAX_BYTES];
+    static uint8_t usm_frame_captured[ENCODER_FRAME_MAX_BYTES];
+    static volatile size_t sea_frame_captured_len = 0;
+    static volatile size_t usm_frame_captured_len = 0;
+    static volatile bool sea_frame_ready = false;
+    static volatile bool usm_frame_ready = false;
+
+    static uint8_t sea_burst[ENCODER_PAYLOAD_BYTES];
+    static uint8_t usm_burst[ENCODER_PAYLOAD_BYTES];
 
     // Must match qdec_params.vh's QDEC_VELOCITY_FRAC_BITS (11 -> Q20.11).
     #define ENCODER_VELOCITY_FRAC_BITS 11u
     #define ENCODER_VELOCITY_SCALE     ((float)(1 << ENCODER_VELOCITY_FRAC_BITS))
-
-    // Bounded timeout for the blocking burst reads below. 112 bytes at
-    // 921600 baud (8N1) takes ~1.2ms on the wire; this leaves generous
-    // margin while still bounding worst-case reaction time if a group
-    // doesn't respond, instead of hanging forever like HAL_MAX_DELAY would.
-    #define ENCODER_UART_RX_TIMEOUT_MS 5u
 
     // Diagnostics-only throttle for the debug prints below.
     static int group_print_throttle = 0;
@@ -126,6 +153,117 @@ reactor QDEC(sample_period: time = 5 ms){
         v = (v << 8) | p[i];
       }
       return v;
+    }
+
+    // Byte-serial CRC-8, poly 0x07, init 0x00. Must exactly match
+    // packet_framer.v's crc8_update (see read_fpga_example.c section 6).
+    static uint8_t crc8_compute(const uint8_t *data, size_t len) {
+      uint8_t crc = 0x00;
+      for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int b = 0; b < 8; b++) {
+          crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x07) : (uint8_t)(crc << 1);
+        }
+      }
+      return crc;
+    }
+
+    // Standard COBS decode of `in` (in_len bytes, NOT including the 0x00
+    // delimiter) into `out` (capacity out_cap). Returns the decoded length,
+    // or 0 on a malformed frame. packet_framer.v never produces COBS's
+    // 0xFF forced-split case (113 bytes is well under the 254-byte span),
+    // so this decoder doesn't special-case code==0xFF either.
+    static size_t cobs_decode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_cap) {
+      size_t read_pos = 0;
+      size_t write_pos = 0;
+
+      while (read_pos < in_len) {
+        uint8_t code = in[read_pos++];
+        if (code == 0) {
+          return 0;
+        }
+        size_t run = (size_t)code - 1u;
+        if (read_pos + run > in_len || write_pos + run > out_cap) {
+          return 0;
+        }
+        for (size_t i = 0; i < run; i++) {
+          out[write_pos++] = in[read_pos++];
+        }
+        if (read_pos < in_len) {
+          if (write_pos >= out_cap) {
+            return 0;
+          }
+          out[write_pos++] = 0x00;
+        }
+      }
+      return write_pos;
+    }
+
+    // COBS-decodes a captured `frame` (frame_len bytes, NOT including the
+    // 0x00 delimiter -- that's already been stripped by the idle-DMA
+    // reception in HAL_UART_RxEventCallback3) into `payload_out`
+    // (ENCODER_PAYLOAD_BYTES capacity: 112 payload bytes + 1 CRC-8 byte) and
+    // verifies its CRC-8. Returns true only on a fully valid frame; on any
+    // failure the caller just keeps the previous cycle's counts -- framing
+    // is explicit now, so a corrupted frame doesn't desync anything.
+    static bool encoder_decode_and_verify(const uint8_t *frame, size_t frame_len,
+                                           uint8_t *payload_out, const char *group_name) {
+      size_t decoded_len = cobs_decode(frame, frame_len, payload_out, ENCODER_PAYLOAD_BYTES);
+      if (decoded_len != ENCODER_PAYLOAD_BYTES) {
+        if (PRINT_ENCODER && group_print_throttle == 0) {
+          printf("Encoder.lf: %s malformed COBS frame, decoded_len=%d\r\n", group_name, (int) decoded_len);
+        }
+        return false;
+      }
+
+      uint8_t crc = crc8_compute(payload_out, ENCODER_BYTES_PER_BURST);
+      if (crc != payload_out[ENCODER_BYTES_PER_BURST]) {
+        if (PRINT_ENCODER && group_print_throttle == 0) {
+          printf("Encoder.lf: %s CRC-8 mismatch, computed=0x%02X received=0x%02X\r\n", group_name, crc, payload_out[ENCODER_BYTES_PER_BURST]);
+        }
+        return false;
+      }
+
+      return true;
+    }
+
+    static void encoder_arm_next_receive(void) {
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart3, encoder_rx_dma_buf, ENCODER_FRAME_MAX_BYTES);
+    }
+
+    // Fires one group's burst readout and records which group's response
+    // the freshly-armed receive is now waiting for.
+    static void encoder_fire_group(int group) {
+      encoder_pending_group = group;
+      HAL_UART_Transmit(&huart3, (group == ENCODER_GROUP_SEA) ? qdec_fire_sea : qdec_fire_usm, 1, HAL_MAX_DELAY);
+    }
+
+    // Called (from UART.lf's HAL_UARTEx_RxEventCallback, which dispatches by
+    // huart->Instance) whenever huart3's idle-DMA reception completes -- one
+    // COBS-framed SEA or USM burst response has landed in
+    // encoder_rx_dma_buf, delimiter already stripped by the idle-line
+    // hardware detection (unlike a fixed-length DMA receive, this correctly
+    // handles the frame's variable length; see read_fpga_example.c section
+    // 6). Runs in interrupt context: stashes the frame for the trigger
+    // reaction to decode later, re-arms the receive, then immediately fires
+    // the OTHER group so SEA/USM keep ping-ponging continuously, independent
+    // of this reactor's sample_period. The 1-byte blocking HAL_UART_Transmit
+    // here costs ~10us at 921600 baud -- an acceptable bounded cost inside
+    // the ISR.
+    void HAL_UART_RxEventCallback3(UART_HandleTypeDef *huart, uint16_t Size) {
+      if (encoder_pending_group == ENCODER_GROUP_SEA) {
+        memcpy(sea_frame_captured, encoder_rx_dma_buf, Size);
+        sea_frame_captured_len = (size_t) Size;
+        sea_frame_ready = true;
+        encoder_arm_next_receive();
+        encoder_fire_group(ENCODER_GROUP_USM);
+      } else {
+        memcpy(usm_frame_captured, encoder_rx_dma_buf, Size);
+        usm_frame_captured_len = (size_t) Size;
+        usm_frame_ready = true;
+        encoder_arm_next_receive();
+        encoder_fire_group(ENCODER_GROUP_SEA);
+      }
     }
 
     // Parses a just-completed 112-byte burst (7 records, 16 bytes each,
@@ -230,11 +368,12 @@ reactor QDEC(sample_period: time = 5 ms){
       HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     }
 
-    // No longer used for encoder reception -- SEA/USM bursts are now read
-    // synchronously (blocking Transmit+Receive) in the trigger reaction
-    // below, not via DMA. Kept as an empty stub since Main.lf's
-    // HAL_UART_RxCpltCallback dispatcher still references it unconditionally
-    // for USART3.
+    // Not used for encoder reception -- huart3 now exclusively uses
+    // HAL_UARTEx_ReceiveToIdle_DMA (see HAL_UART_RxEventCallback3 above),
+    // whose completions/idle events funnel through HAL_UARTEx_RxEventCallback,
+    // not this HAL_UART_RxCpltCallback path. Kept as an empty stub since
+    // Main.lf's HAL_UART_RxCpltCallback dispatcher still references it
+    // unconditionally for USART3.
     void HAL_UART_RxCallback3() {}
 
     static int last_switch = 0;
@@ -253,8 +392,14 @@ reactor QDEC(sample_period: time = 5 ms){
     if (PRINT_ENCODER){printf("Encoder.lf: startup: Reseting and enableing qdec...\r\n");}
     HAL_UART_Transmit(&huart3, qdec_reset, 1, HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart3, qdec_enable, 1, HAL_MAX_DELAY);
-    // SEA/USM bursts are now fetched synchronously each trigger cycle
-    // (blocking Transmit+Receive below); no DMA arming needed here.
+
+    // Arm the idle-DMA receive and kick off the SEA/USM ping-pong loop --
+    // HAL_UART_RxEventCallback3 (called from UART.lf's
+    // HAL_UARTEx_RxEventCallback dispatcher) keeps it running continuously
+    // from here on, independent of this reactor's sample_period. The
+    // trigger reaction below just consumes whatever's ready each cycle.
+    encoder_arm_next_receive();
+    encoder_fire_group(ENCODER_GROUP_SEA);
 
     // computing conversions from motor/encoder space to joint space
     for (int i = 0; i<7; i++){
@@ -314,24 +459,29 @@ reactor QDEC(sample_period: time = 5 ms){
 
    self->interval_sec = (float) self->timer_elapsed_time_sec_;
 
-    // Fire and blocking-read each group in turn. A bounded timeout (rather
-    // than HAL_MAX_DELAY) means a non-responding group can't hang the whole
-    // single-threaded runtime forever -- it just leaves that group's counts
-    // at their last known value for this cycle.
-    HAL_UART_Transmit(&huart3, qdec_fire_sea, 1, HAL_MAX_DELAY);
-    HAL_StatusTypeDef sea_rx_status = HAL_UART_Receive(&huart3, sea_burst, ENCODER_BYTES_PER_BURST, ENCODER_UART_RX_TIMEOUT_MS);
-    if (sea_rx_status == HAL_OK) {
-      parse_encoder_group(sea_burst, sea_counts, sea_meta, "SEA");
-    } else if (PRINT_ENCODER && group_print_throttle == 0) {
-      printf("Encoder.lf: SEA HAL_UART_Receive failed, status=%d\r\n", (int) sea_rx_status);
+    // SEA/USM fire+receive now runs continuously in the background via the
+    // idle-DMA ping-pong (HAL_UART_RxEventCallback3), independent of this
+    // reactor's sample_period. Just consume whatever frame(s) the ISR has
+    // captured since the last cycle -- if a group hasn't produced a new
+    // frame yet (or its frame failed CRC/COBS), its counts simply stay at
+    // their last known value for this cycle.
+    bool sea_rx_ok = false;
+    bool usm_rx_ok = false;
+
+    if (sea_frame_ready) {
+      sea_frame_ready = false;
+      sea_rx_ok = encoder_decode_and_verify(sea_frame_captured, sea_frame_captured_len, sea_burst, "SEA");
+      if (sea_rx_ok) {
+        parse_encoder_group(sea_burst, sea_counts, sea_meta, "SEA");
+      }
     }
 
-    HAL_UART_Transmit(&huart3, qdec_fire_usm, 1, HAL_MAX_DELAY);
-    HAL_StatusTypeDef usm_rx_status = HAL_UART_Receive(&huart3, usm_burst, ENCODER_BYTES_PER_BURST, ENCODER_UART_RX_TIMEOUT_MS);
-    if (usm_rx_status == HAL_OK) {
-      parse_encoder_group(usm_burst, usm_counts, usm_meta, "USM");
-    } else if (PRINT_ENCODER && group_print_throttle == 0) {
-      printf("Encoder.lf: USM HAL_UART_Receive failed, status=%d\r\n", (int) usm_rx_status);
+    if (usm_frame_ready) {
+      usm_frame_ready = false;
+      usm_rx_ok = encoder_decode_and_verify(usm_frame_captured, usm_frame_captured_len, usm_burst, "USM");
+      if (usm_rx_ok) {
+        parse_encoder_group(usm_burst, usm_counts, usm_meta, "USM");
+      }
     }
 
     group_print_throttle = (group_print_throttle >= printcnt_lim) ? 0 : group_print_throttle + 1;
@@ -384,11 +534,11 @@ reactor QDEC(sample_period: time = 5 ms){
       }
       printf("\r\ninterval [ms] %d, [us]: %d", (int) (self->interval_sec * 1000), (int) (self->interval_sec * 1000000));
 
-      // UART3 sanity check: sea_rx_status/usm_rx_status show whether this
-      // cycle's blocking reads actually completed (HAL_OK) or timed out.
-      printf("\r\nUART3 gState=0x%X RxState=0x%X HAL_error=0x%lX sea_rx_status=%d usm_rx_status=%d",
+      // UART3 sanity check: sea_rx_ok/usm_rx_ok show whether this cycle's
+      // framed reads actually completed and passed their CRC-8 check.
+      printf("\r\nUART3 gState=0x%X RxState=0x%X HAL_error=0x%lX sea_rx_ok=%d usm_rx_ok=%d",
              huart3.gState, huart3.RxState, (unsigned long) HAL_UART_GetError(&huart3),
-             (int) sea_rx_status, (int) usm_rx_status);
+             (int) sea_rx_ok, (int) usm_rx_ok);
 
       printf("\r\n\r\n");
     }
