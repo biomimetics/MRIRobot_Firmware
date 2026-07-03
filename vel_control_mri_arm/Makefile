@@ -14,11 +14,11 @@ INCL = include
 
 UNAME_S := $(shell uname -s)
 OPENOCD_PATH 		:= 
-	ifeq ($(UNAME_S),Darwin) 
-		OPENOCD_PATH = /Users/$(USER)/openocd
+	ifeq ($(UNAME_S),Darwin)
+		OPENOCD_PATH = ../resources/openocd
 	endif
 	ifeq ($(UNAME_S),Linux)
-		OPENOCD_PATH = /home/$(USER)/openocd
+		OPENOCD_PATH = ../resources/openocd
 	endif
 
 #######################################
@@ -38,7 +38,7 @@ build_dev:
 	lfc-dev src/Main.lf
 
 build:
-	lfc src/Main.lf
+	lfc-dev src/Main.lf # note that this used to be lfc src/Main.lf, but lfc-dev is only included for this lf checkout.
 
 #######################################
 # run everything
@@ -91,3 +91,11 @@ comms_motor_ramp:
 
 comms_prime:
 	gcc src_c/uart_comms_prime.c src_c/linux_comms.c src_c/stm_comms.c -o bin_c/primer -lm
+
+all:
+	make comms
+	make comms_logger
+	make comms_listener
+	make comms_motor
+	make comms_motor_ramp
+	make comms_prime
