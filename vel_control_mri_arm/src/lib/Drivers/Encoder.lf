@@ -14,8 +14,6 @@ preamble {=
   #include <math.h> // fabsf, for the position-anomaly check below
   #include "motor_config.h"
   #include "common.h"
-
-  #define USE_OLD_SEA_CONVERSION 0
 =}
 
 reactor QDEC(sample_period: time = 5 ms){
@@ -84,8 +82,8 @@ reactor QDEC(sample_period: time = 5 ms){
     //static int PRINT_ENCODER = true; // move all of these to define statements in a central location. annoying to track them down.
     static int printcnt = 0;
     // Trigger cycles land around ~3ms apart in practice, so printcnt_lim=33
-    // throttles the periodic debug block (and the raw-burst/rotated/meta
-    // prints in parse_encoder_group, which share this same throttle via
+    // throttles the periodic debug block (and the raw-payload prints in
+    // parse_encoder_payload, which share this same throttle via
     // group_print_throttle) to roughly 10Hz instead of the ~66Hz a lower
     // value produces -- keeps serial captures readable/small during slower
     // things like MotorCalibration's 1s-long motor pulses.
@@ -97,54 +95,43 @@ reactor QDEC(sample_period: time = 5 ms){
     uint8_t qdec_disable[1]= {0x02};          // Disable encoders
     uint8_t qdec_enable[1]= {0x03};           // Enable encoders
 
-    // SEA and USM banks are fired independently now (mri_encoder_reader.v);
-    // each fire returns its own 112-byte, 7-channel burst, COBS-framed with
-    // a trailing CRC-8 by packet_framer.v. See read_fpga_example.c for the
-    // authoritative protocol description (section 6 in particular).
-    #define ENCODER_CHANNELS_PER_GROUP 7u
-    #define ENCODER_BYTES_PER_CHANNEL  16u  /* 8B count word + 8B metadata word */
-    #define ENCODER_BYTES_PER_BURST    (ENCODER_CHANNELS_PER_GROUP * ENCODER_BYTES_PER_CHANNEL)
+    // SEA and USM are now read in a single unified fire (mri_encoder_reader.v
+    // / qdec_burst_sequencer.v): one 0x04 atomically snapshots all 14
+    // channels (SEA 0-6 then USM 0-6) and streams them as one fixed-length,
+    // magic-header + CRC-16 framed packet -- no COBS, no delimiter, no
+    // per-record channel_index self-check byte (wire position is
+    // authoritative by construction). This replaces the old two-independent-
+    // fires (0x04=SEA / 0x05=USM) COBS+CRC-8 protocol. See
+    // read_fpga_example.c for the authoritative protocol description.
+    #define ENCODER_CHANNELS_PER_GROUP  7u
+    #define ENCODER_TOTAL_CHANNELS      14u  /* 7 SEA (0-6) + 7 USM (7-13) */
+    #define ENCODER_BYTES_PER_CHANNEL  10u   /* count(4) + velocity(4) + status(1) + diag(1), all little-endian */
+    #define ENCODER_PAYLOAD_BYTES      (ENCODER_TOTAL_CHANNELS * ENCODER_BYTES_PER_CHANNEL) /* 140 */
 
-    // Payload + CRC-8 byte, before COBS encoding. Must match
-    // packet_framer.v's PAYLOAD_BYTES (112) + 1.
-    #define ENCODER_PAYLOAD_BYTES      (ENCODER_BYTES_PER_BURST + 1u)
+    #define ENCODER_MAGIC_BYTE_0       0xAAu
+    #define ENCODER_MAGIC_BYTE_1       0x55u
 
-    // Worst case on-wire frame size (excluding the 0x00 delimiter) is 1 code
-    // byte + 113 data bytes = 114 bytes; rounded up with margin.
-    #define ENCODER_FRAME_MAX_BYTES    128u
+    // Fixed on-wire frame size: 2 magic + 140 payload + 2 CRC-16 = 144. No
+    // delimiter, no length byte -- both sides already know this length.
+    #define ENCODER_FRAME_BYTES        (2u + ENCODER_PAYLOAD_BYTES + 2u)
 
-    uint8_t qdec_fire_sea[1] = {0x04};
-    uint8_t qdec_fire_usm[1] = {0x05};
+    uint8_t qdec_fire_all[1] = {0x04};  /* was "fire SEA" in the old protocol; 0x05 ("fire USM") is retired */
 
-    // Per-byte timeout for the blocking read below. 921600 baud is ~1.1us/bit,
-    // ~10.9us/byte -- 5ms is generous margin for one byte to arrive, while
-    // still bounding worst-case blocking time if the FPGA stops responding
-    // mid-frame instead of hanging forever like HAL_MAX_DELAY would.
-    #define ENCODER_UART_RX_TIMEOUT_MS 5u
+    // Total timeout for the fixed 144-byte blocking frame read (~0.6ms on
+    // the wire at 2.5Mbaud). A tighter 5ms value was confirmed on-robot to
+    // occasionally cut off a still-in-flight response, leaving its unread
+    // tail to collide with the next cycle's frame and cause a USART
+    // overrun -- see encoder_drain_stray_bytes below for the backstop. 8ms
+    // keeps worst-case blocking well under the 10ms sample_period while
+    // giving more turnaround margin than that regression left room for.
+    #define ENCODER_FRAME_RX_TIMEOUT_MS 8u
 
-    // Single shared raw-frame buffer -- SEA and USM are read sequentially
-    // (never concurrently), so one buffer covers both.
-    static uint8_t encoder_frame_buf[ENCODER_FRAME_MAX_BYTES];
-
-    static uint8_t sea_burst[ENCODER_PAYLOAD_BYTES];
-    static uint8_t usm_burst[ENCODER_PAYLOAD_BYTES];
+    // Single shared raw-frame buffer for the unified burst read.
+    static uint8_t encoder_frame_buf[ENCODER_FRAME_BYTES];
 
     // Must match qdec_params.vh's QDEC_VELOCITY_FRAC_BITS (11 -> Q20.11).
     #define ENCODER_VELOCITY_FRAC_BITS 11u
     #define ENCODER_VELOCITY_SCALE     ((float)(1 << ENCODER_VELOCITY_FRAC_BITS))
-
-    // TEMPORARY FIX, confirmed necessary on-robot (2026-07-02) -- KEEP until
-    // the underlying FPGA-side cross-routing bug is fixed, then REMOVE. See
-    // fpga_comms_potential_issues.md's "SEA channels 4-6 read large values
-    // while USM stays near zero" section: motors 4-6's real USM (motor)
-    // data was confirmed landing on the SEA channel readout instead (or as
-    // well), not a benign CPR/gearing artifact. Swapping which raw
-    // counts/metadata feed the SEA vs. USM (motor) OUTPUTS for these three
-    // (see the trigger reaction's SEA/USM loops below) corrects it at the
-    // STM32 level without touching the FPGA. Do not remove this without
-    // first confirming the FPGA-side fix actually resolves the root cause
-    // -- otherwise the outputs will silently go back to being swapped.
-    #define ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE 0
 
     // Diagnostics-only throttle for the debug prints below.
     static int group_print_throttle = 0;
@@ -154,16 +141,10 @@ reactor QDEC(sample_period: time = 5 ms){
     // the per-frame debug prints above, this fires on a wall-clock cadence
     // regardless of whether any frames arrived, so silence in the log means
     // silence on the wire, not just a throttled-out print.
-    static uint32_t sea_packets_ok = 0;
-    static uint32_t sea_packets_bad = 0;
-    static uint32_t usm_packets_ok = 0;
-    static uint32_t usm_packets_bad = 0;
+    static uint32_t encoder_packets_ok = 0;
+    static uint32_t encoder_packets_bad = 0;
 
     float pi = 3.14159;
-
-    // for storing usm and sea encoder counts
-    static long usm_counts[7];
-    static long sea_counts[7];
 
     // velocity_q20_11 is consumed below (scaled to rad/s for qdec_vel_out /
     // sea_vel_out); the diagnostic counters are parsed and stored here but
@@ -176,8 +157,18 @@ reactor QDEC(sample_period: time = 5 ms){
       uint8_t rate_limit_rejects;
       uint8_t index_status;
     } encoder_channel_meta_t;
-    static encoder_channel_meta_t sea_meta[ENCODER_CHANNELS_PER_GROUP];
-    static encoder_channel_meta_t usm_meta[ENCODER_CHANNELS_PER_GROUP];
+
+    // The unified burst fills one combined 14-channel array per fire
+    // (records 0-6 = SEA, 7-13 = USM, see read_full_encoder_state below);
+    // sea_counts/usm_counts and sea_meta/usm_meta are views into it so the
+    // rest of this file (filter_channel_update, the trigger reaction's
+    // SEA/USM loops) can keep indexing them as plain 7-element arrays.
+    static long encoder_counts[ENCODER_TOTAL_CHANNELS];
+    static encoder_channel_meta_t encoder_meta[ENCODER_TOTAL_CHANNELS];
+    #define sea_counts (encoder_counts)
+    #define usm_counts (encoder_counts + ENCODER_CHANNELS_PER_GROUP)
+    #define sea_meta   (encoder_meta)
+    #define usm_meta   (encoder_meta + ENCODER_CHANNELS_PER_GROUP)
 
     // TEMPORARY FIX (2026-07-02) -- see fpga_comms_potential_issues.md's
     // "whole USM burst occasionally becomes an exact copy of SEA's data"
@@ -274,234 +265,159 @@ reactor QDEC(sample_period: time = 5 ms){
       *accepted_meta = new_meta;
     }
 
-    // NOTE: read_fpga_example.c's comment claims big-endian/MSB-first count
-    // and metadata words, but empirically (verified against a live capture:
-    // decoding little-endian yields a clean sequential channel_index 0-6
-    // and sane small count/velocity values, while big-endian yields garbage
-    // channel_index bytes like 255 and huge nonsense velocities) the FPGA
-    // actually sends each 64-bit word little-endian (LSB byte first).
-    static uint64_t read_le64(const uint8_t *p) {
-      uint64_t v = 0;
-      for (int i = 7; i >= 0; i--) {
-        v = (v << 8) | p[i];
+    // Reassembles a 32-bit field from 4 wire bytes, little-endian (byte[0]
+    // is the least significant byte). Same convention the old protocol used
+    // for its 64-bit words -- confirmed empirically against a live capture,
+    // see read_fpga_example.c section 4.
+    static uint32_t read_le32(const uint8_t *p) {
+      uint32_t v = 0;
+      for (int i = 0; i < 4; i++) {
+        v |= ((uint32_t)p[i]) << (8 * i);
       }
       return v;
     }
 
-    // Byte-serial CRC-8, poly 0x07, init 0x00. Must exactly match
-    // packet_framer.v's crc8_update (see read_fpga_example.c section 6).
-    static uint8_t crc8_compute(const uint8_t *data, size_t len) {
-      uint8_t crc = 0x00;
+    // Byte-serial CRC-16/CCITT-FALSE: poly 0x1021, init 0xFFFF, no
+    // reflection, xorout 0. Must exactly match packet_framer_fixed.v's
+    // crc16_update -- if it doesn't, every single frame will fail its CRC
+    // check even on a perfectly clean link. See read_fpga_example.c section 5.
+    static uint16_t crc16_compute(const uint8_t *data, size_t len) {
+      uint16_t crc = 0xFFFF;
       for (size_t i = 0; i < len; i++) {
-        crc ^= data[i];
+        crc ^= (uint16_t)data[i] << 8;
         for (int b = 0; b < 8; b++) {
-          crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x07) : (uint8_t)(crc << 1);
+          crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
         }
       }
       return crc;
     }
 
-    // Standard COBS decode of `in` (in_len bytes, NOT including the 0x00
-    // delimiter) into `out` (capacity out_cap). Returns the decoded length,
-    // or 0 on a malformed frame. packet_framer.v never produces COBS's
-    // 0xFF forced-split case (113 bytes is well under the 254-byte span),
-    // so this decoder doesn't special-case code==0xFF either.
-    static size_t cobs_decode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_cap) {
-      size_t read_pos = 0;
-      size_t write_pos = 0;
-
-      while (read_pos < in_len) {
-        uint8_t code = in[read_pos++];
-        if (code == 0) {
-          return 0;
-        }
-        size_t run = (size_t)code - 1u;
-        if (read_pos + run > in_len || write_pos + run > out_cap) {
-          return 0;
-        }
-        for (size_t i = 0; i < run; i++) {
-          out[write_pos++] = in[read_pos++];
-        }
-        if (read_pos < in_len) {
-          if (write_pos >= out_cap) {
-            return 0;
-          }
-          out[write_pos++] = 0x00;
-        }
-      }
-      return write_pos;
+    // Blocking, fixed-length read of one ENCODER_FRAME_BYTES-byte frame into
+    // `buf`. Unlike the old variable-length COBS protocol, frame length is
+    // now known a priori, so a single fixed-length blocking read suffices --
+    // no delimiter-hunting loop needed.
+    static bool encoder_read_frame(uint8_t *buf, size_t len) {
+      return HAL_UART_Receive(&huart3, buf, (uint16_t) len, ENCODER_FRAME_RX_TIMEOUT_MS) == HAL_OK;
     }
 
-    // COBS-decodes a captured `frame` (frame_len bytes, NOT including the
-    // 0x00 delimiter -- that's already been stripped by
-    // encoder_read_framed() below) into `payload_out` (ENCODER_PAYLOAD_BYTES
-    // capacity: 112 payload bytes + 1 CRC-8 byte) and verifies its CRC-8.
-    // Returns true only on a fully valid frame; on any failure the caller
-    // just keeps the previous cycle's counts -- framing is explicit now, so
-    // a corrupted frame doesn't desync anything.
-    static bool encoder_decode_and_verify(const uint8_t *frame, size_t frame_len,
-                                           uint8_t *payload_out, const char *group_name) {
-      size_t decoded_len = cobs_decode(frame, frame_len, payload_out, ENCODER_PAYLOAD_BYTES);
-      if (decoded_len != ENCODER_PAYLOAD_BYTES) {
-        if (PRINT_ENCODER && group_print_throttle == 0) {
-          printf("Encoder.lf: %s malformed COBS frame, decoded_len=%d, frame_len=%d, raw=",
-                 group_name, (int) decoded_len, (int) frame_len);
-          for (size_t i = 0; i < frame_len; i++) {
-            printf("%02X ", frame[i]);
-          }
-          printf("\r\n");
-        }
-        return false;
-      }
-
-      uint8_t crc = crc8_compute(payload_out, ENCODER_BYTES_PER_BURST);
-      if (crc != payload_out[ENCODER_BYTES_PER_BURST]) {
-        if (PRINT_ENCODER && group_print_throttle == 0) {
-          printf("Encoder.lf: %s CRC-8 mismatch, computed=0x%02X received=0x%02X\r\n", group_name, crc, payload_out[ENCODER_BYTES_PER_BURST]);
-        }
-        return false;
-      }
-
-      return true;
-    }
-
-    // Blocking, byte-at-a-time read of one COBS-framed packet into
-    // encoder_frame_buf: keeps pulling bytes until a 0x00 delimiter is seen
-    // (not included in *out_len), a per-byte read times out, or
-    // ENCODER_FRAME_MAX_BYTES is exceeded without ever seeing a delimiter
-    // (treated as desync/failure, same as read_fpga_example.c's
-    // read_encoder_group()). Deliberately simple/synchronous -- no DMA, no
-    // ISR ping-pong -- to isolate whether the packet framing itself is
-    // sound before debugging any DMA-specific issues (see Encoder_DMA.lf
-    // for the idle-DMA version).
-    static bool encoder_read_framed(size_t *out_len) {
-      size_t len = 0;
-      for (;;) {
-        if (len >= ENCODER_FRAME_MAX_BYTES) {
-          return false;
-        }
-        uint8_t b;
-        if (HAL_UART_Receive(&huart3, &b, 1, ENCODER_UART_RX_TIMEOUT_MS) != HAL_OK) {
-          return false;
-        }
-        if (b == 0x00) {
-          break;
-        }
-        encoder_frame_buf[len++] = b;
-      }
-      *out_len = len;
-      return true;
-    }
-
-    // Parses a just-completed 112-byte burst (7 records, 16 bytes each,
-    // count word then metadata word -- see read_fpga_example.c section 3).
-    //
-    // Channel identity is taken from the embedded channel_index byte, NOT
-    // from word position -- this deliberately deviates from
-    // read_fpga_example.c section 5's documented design ("channel_index is
-    // only a self-check ... not a recovery mechanism"). Live capture shows
-    // a highly consistent (not random/desync-like) rotation: SEA record N
-    // embeds channel_index=(N+4)%7 in 232/232 samples, USM in 242/243 --
-    // see fpga_comms_potential_issues.md for the full writeup. Per
-    // qdec_channel_bank.v, count_arr[ch]/metadata_arr[ch] are populated
-    // using the SAME generate-loop ch and read out via the SAME
-    // cntr_val[3:1] index one cycle apart, so whatever is rotating the
-    // readout necessarily rotates a record's count and its self-check
-    // label together -- meaning channel_index remains a reliable indicator
-    // of which physical channel a record's DATA belongs to even when word
-    // position doesn't match it. Bounds-checked and logged rather than
-    // trusted blindly, in case of genuine corruption (not just rotation).
-    //
-    // Motorized calibration (MotorCalibration.lf, 2026-07-02) confirmed this
-    // channel_index-based placement alone gives the correct joint order --
-    // an earlier report of the joints coming out backwards turned out to be
-    // physical-compliance cross-talk (moving one joint visibly nudges
-    // others), not an actual ordering bug; see
-    // fpga_comms_potential_issues.md for the full writeup. No further
-    // reversal/reordering needed here.
-    // group_name is only used for the throttled debug prints below.
-    static void parse_encoder_group(const uint8_t *burst, long *counts_out,
-                                     encoder_channel_meta_t *meta_out,
-                                     const char *group_name) {
+    // Parses the 140-byte payload (already validated -- see
+    // validate_and_parse_frame below) into all 14 channels: counts_out[0..6]/
+    // meta_out[0..6] = SEA channels 0-6, counts_out[7..13]/meta_out[7..13] =
+    // USM channels 0-6, straight from wire position -- there is no
+    // channel_index self-check field in this format (unlike the old
+    // protocol's +4-rotated one), so wire position is trusted directly. See
+    // read_fpga_example.c sections 3/4/6.
+    static void parse_encoder_payload(const uint8_t *payload, long *counts_out,
+                                       encoder_channel_meta_t *meta_out) {
       bool do_print = PRINT_ENCODER && (group_print_throttle == 0);
 
       if (do_print) {
-        printf("Encoder.lf: %s raw burst: ", group_name);
-        for (int b = 0; b < (int)ENCODER_BYTES_PER_BURST; b++) {
-          printf("%02X ", burst[b]);
+        printf("Encoder.lf: raw payload: ");
+        for (int b = 0; b < (int)ENCODER_PAYLOAD_BYTES; b++) {
+          printf("%02X ", payload[b]);
         }
         printf("\r\n");
       }
 
-      for (int rec = 0; rec < (int)ENCODER_CHANNELS_PER_GROUP; rec++) {
-        const uint8_t *record = burst + rec * ENCODER_BYTES_PER_CHANNEL;
-        uint64_t count_word    = read_le64(record);
-        uint64_t metadata_word = read_le64(record + 8);
-        uint8_t channel_index  = (uint8_t)(metadata_word);
+      for (int ch = 0; ch < (int)ENCODER_TOTAL_CHANNELS; ch++) {
+        const uint8_t *record = payload + ch * ENCODER_BYTES_PER_CHANNEL;
+        uint8_t diag = record[9];
 
-        if (channel_index >= ENCODER_CHANNELS_PER_GROUP) {
-          if (PRINT_ENCODER) {printf("Encoder.lf: %s bad channel_index %d in record %d, dropping\r\n", group_name, channel_index, rec);}
-          continue;
-        }
-        if (channel_index != (uint8_t)rec && PRINT_ENCODER && group_print_throttle == 0) {
-          printf("Encoder.lf: %s record %d rotated, channel_index=%d\r\n", group_name, rec, channel_index);
-        }
-
-        counts_out[channel_index] = (long)(int64_t)count_word;
-        meta_out[channel_index].velocity_q20_11            = (int32_t)(metadata_word >> 32);
-        meta_out[channel_index].illegal_transition_rejects = (uint8_t)(metadata_word >> 24);
-        meta_out[channel_index].rate_limit_rejects          = (uint8_t)(metadata_word >> 16);
-        meta_out[channel_index].index_status                = (uint8_t)(metadata_word >> 8);
+        counts_out[ch]                         = (long)(int32_t)read_le32(record);
+        meta_out[ch].velocity_q20_11            = (int32_t)read_le32(record + 4);
+        meta_out[ch].index_status               = record[8];
+        meta_out[ch].illegal_transition_rejects = (uint8_t)(diag >> 4);
+        meta_out[ch].rate_limit_rejects         = (uint8_t)(diag & 0x0F);
       }
 
       if (do_print) {
-        printf("Encoder.lf: %s counts: ", group_name);
-        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
-          printf("%ld ", counts_out[i]);
-        }
-        printf("| vel_q20_11: ");
-        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
-          printf("%ld ", (long) meta_out[i].velocity_q20_11);
-        }
-        printf("\r\n");
-
-        // Per-channel metadata word -- illegal/rate-limit reject counters and
-        // index_status straight off the FPGA, as an additional sanity check
-        // independent of the position/velocity math above.
-        printf("Encoder.lf: %s meta: illegal_rej=", group_name);
-        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
-          printf("%u ", (unsigned) meta_out[i].illegal_transition_rejects);
-        }
-        printf("| rate_limit_rej=");
-        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
-          printf("%u ", (unsigned) meta_out[i].rate_limit_rejects);
-        }
-        printf("| index_status=");
-        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) {
-          printf("%u ", (unsigned) meta_out[i].index_status);
-        }
+        printf("Encoder.lf: SEA counts: ");
+        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) { printf("%ld ", counts_out[i]); }
+        printf("| USM counts: ");
+        for (int i = 0; i < (int)ENCODER_CHANNELS_PER_GROUP; i++) { printf("%ld ", counts_out[ENCODER_CHANNELS_PER_GROUP + i]); }
         printf("\r\n");
       }
     }
 
-    // These numbers make sense once you know the SEA encoders are LINEAR
-    // (physical travel along the series elastic element, not
-    // counts/revolution of a shaft -- see qdec_convert_sea_to_rad_'s
-    // comment above and the startup reaction below). 25.4 = mm/inch, so
-    // each factor is converting inches of linear travel to degrees of
-    // joint rotation for a specific lever-arm radius: 25.4/70 and 25.4/45
-    // look like mm-per-inch divided by two different lever-arm
-    // circumferences (in mm) for the two joint groups (base vs.
-    // elbow/wrist), i.e. "degrees of rotation per inch of SEA extension"
-    // for each geometry. DEPRECATED/legacy path, only used when
-    // USE_OLD_SEA_CONVERSION is set (it isn't, by default) -- was written
-    // against the encoder's OLD 8000 lines/inch spec (see
-    // encoder_count_per_inch below), from back when the FPGA still applied
-    // x4 quadrature interpolation on top of the raw line count. That's
-    // since been removed and the raw spec corrected to 2000 lines/inch
-    // (see motor_config.h's sea_cpr) -- this legacy path was never updated
-    // to match and would be off by 4x if re-enabled as-is.
-    float magic_sea_count_conv[] = {0.5644, 0.5644, 0.5644, 0.3624, 0.3624, 0.3624, 0.3624};
+    // Validates a captured ENCODER_FRAME_BYTES-byte frame (magic header +
+    // CRC-16, see read_fpga_example.c section 5) and, if valid, parses it.
+    // Returns false on any validation failure; the caller just drops the
+    // frame for this cycle rather than byte-scanning for a resync (see
+    // read_full_encoder_state below for why that doesn't apply to this
+    // protocol).
+    static bool validate_and_parse_frame(const uint8_t *frame, long *counts_out,
+                                          encoder_channel_meta_t *meta_out) {
+      if (frame[0] != ENCODER_MAGIC_BYTE_0 || frame[1] != ENCODER_MAGIC_BYTE_1) {
+        if (PRINT_ENCODER && group_print_throttle == 0) {
+          printf("Encoder.lf: bad magic 0x%02X 0x%02X\r\n", frame[0], frame[1]);
+        }
+        return false;
+      }
+
+      const uint8_t *payload = frame + 2;
+      uint16_t crc = crc16_compute(payload, ENCODER_PAYLOAD_BYTES);
+      uint16_t frame_crc = (uint16_t)payload[ENCODER_PAYLOAD_BYTES] |
+                           ((uint16_t)payload[ENCODER_PAYLOAD_BYTES + 1] << 8);
+      if (crc != frame_crc) {
+        if (PRINT_ENCODER && group_print_throttle == 0) {
+          printf("Encoder.lf: CRC-16 mismatch, computed=0x%04X received=0x%04X\r\n", crc, frame_crc);
+        }
+        return false;
+      }
+
+      parse_encoder_payload(payload, counts_out, meta_out);
+      return true;
+    }
+
+    // Drains and discards any bytes still arriving on huart3, using short
+    // (1ms) per-byte timeouts so it gives up almost immediately once
+    // nothing more is available. Bounded to one frame's worth of bytes.
+    //
+    // Backstop for when ENCODER_FRAME_RX_TIMEOUT_MS elapses before the FPGA
+    // actually finishes sending: without this, the abandoned frame's unread
+    // tail bytes sit in USART3's RX register and collide with the next
+    // cycle's response, causing a hardware overrun (confirmed on-robot).
+    // Called before returning failure so leftover bytes never bleed into
+    // the next cycle's read.
+    static void encoder_drain_stray_bytes(void) {
+      uint8_t b;
+      for (int i = 0; i < (int)ENCODER_FRAME_BYTES; i++) {
+        if (HAL_UART_Receive(&huart3, &b, 1, 1) != HAL_OK) {
+          break;
+        }
+      }
+    }
+
+    // Fires the unified burst (0x04) and reads the fixed 144-byte frame.
+    // counts_out[0..6]/meta_out[0..6] = SEA, counts_out[7..13]/meta_out[7..13]
+    // = USM, straight from wire position.
+    //
+    // On a validation failure, this drops the frame (after
+    // encoder_drain_stray_bytes above) rather than byte-scanning for a
+    // resync the way read_fpga_example.c's reference implementation does.
+    // That scan assumes a continuously-streaming link; this protocol is
+    // request/response (the FPGA only sends bytes when fired), so once a
+    // frame fails validation there's nothing left on the wire to scan for
+    // until the next fire -- scanning would just block waiting on bytes
+    // that aren't coming. On real hardware that turned single bad-CRC
+    // frames into multi-hundred-ms stalls that, since this project is
+    // single-threaded, blocked every other reactor too (including
+    // UART.lf's host-computer link). Dropping immediately bounds worst-case
+    // blocking to ENCODER_FRAME_RX_TIMEOUT_MS plus the (typically instant)
+    // drain, and the next trigger cycle's fire starts fresh regardless.
+    static bool read_full_encoder_state(long *counts_out, encoder_channel_meta_t *meta_out) {
+      HAL_UART_Transmit(&huart3, qdec_fire_all, 1, HAL_MAX_DELAY);
+
+      if (!encoder_read_frame(encoder_frame_buf, ENCODER_FRAME_BYTES)) {
+        encoder_drain_stray_bytes();
+        return false;
+      }
+      if (validate_and_parse_frame(encoder_frame_buf, counts_out, meta_out)) {
+        return true;
+      }
+      encoder_drain_stray_bytes();
+      return false;
+    }
 
     static void MX_DMA_Init(void) {
       /* DMA controller clock enable */
@@ -519,13 +435,18 @@ reactor QDEC(sample_period: time = 5 ms){
 
     static void MX_UART3_Init(void) {
       huart3.Instance = USART3;
-      huart3.Init.BaudRate = 921600;
+      // Raised from 921600 to match comm_blk.v's new fixed 2.5Mbaud (FPGA's
+      // 125MHz sysclk / 50 cycles-per-bit, zero rounding). OVER16 tops out
+      // ~2.625Mbps on this board's ~42MHz PCLK1 -- too little margin against
+      // 2.5Mbps -- so this requires OVER8. Verify on hardware that the
+      // achieved baud is within a couple percent of nominal after flashing.
+      huart3.Init.BaudRate = 2500000;
       huart3.Init.WordLength = UART_WORDLENGTH_8B;
       huart3.Init.StopBits = UART_STOPBITS_1;
       huart3.Init.Parity = UART_PARITY_NONE;
       huart3.Init.Mode = UART_MODE_TX_RX;
       huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-      huart3.Init.OverSampling = UART_OVERSAMPLING_16;
+      huart3.Init.OverSampling = UART_OVERSAMPLING_8;
       HAL_UART_Init(&huart3);
     }
 
@@ -547,9 +468,9 @@ reactor QDEC(sample_period: time = 5 ms){
       HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     }
 
-    // Not used for encoder reception -- huart3 now uses blocking
-    // HAL_UART_Receive (see encoder_read_framed() above), not DMA/IT at all.
-    // Kept as empty stubs since Main.lf's HAL_UART_RxCpltCallback and
+    // Not used for encoder reception -- huart3 uses blocking
+    // HAL_UART_Receive (see read_full_encoder_state above), not DMA/IT at
+    // all. Kept as empty stubs since Main.lf's HAL_UART_RxCpltCallback and
     // UART.lf's HAL_UARTEx_RxEventCallback dispatchers still reference these
     // unconditionally for USART3.
     void HAL_UART_RxCallback3() {}
@@ -582,44 +503,20 @@ reactor QDEC(sample_period: time = 5 ms){
 
 
 
-    // Both branches below convert SEA counts straight to radians as if
-    // sea_counts[i] * factor were a rotary-encoder angle, but the SEA
-    // sensors are physically LINEAR encoders (2000 lines/inch of travel
-    // along the series elastic element, not counts/revolution of a shaft --
-    // see qdec_convert_sea_to_rad_'s declaration above and
-    // magic_sea_count_conv's comment below). That conflation only produces
-    // a correct radians-per-count factor if a linear-inches-to-
-    // joint-radians conversion (i.e. the joint's lever-arm radius) has been
-    // folded in somewhere upstream:
-    //   USE_OLD_SEA_CONVERSION path (deprecated, off by default): divides
-    //     magic_sea_count_conv[i] (degrees of joint rotation per inch of
-    //     SEA travel, for that joint's specific lever-arm geometry) by
-    //     encoder_count_per_inch -- but that constant is still the sensor's
-    //     OLD 8000 lines/inch spec (from when the FPGA applied x4
-    //     quadrature interpolation on the raw 2000 lines/inch signal). That
-    //     interpolation has since been removed; this path was never
-    //     updated and would read 4x too small if re-enabled.
-    //   Default path (motor_configs[i]->sea_cpr): as of the 2026-07-02
-    //     motor_config.h update, sea_cpr is now just the raw 2000
-    //     lines/inch spec with NO lever-arm conversion applied (see its
-    //     comment there: "Need to convert this to angle based on radius of
-    //     motor" -- not yet done). So TWO_PI/sea_cpr here is radians per
-    //     linear-inch-count, not per revolution -- dimensionally wrong
-    //     until each joint's actual lever-arm radius is incorporated
-    //     (there's no such field in Motor_Config yet). SEA position/
-    //     velocity outputs are NOT currently trustworthy in absolute units,
-    //     just as a raw uncalibrated proxy, until this is fixed.
-    if (USE_OLD_SEA_CONVERSION) {
-      float encoder_count_per_inch = 8000.0; // stale -- see comment above, actual sensor is 2000 lines/inch since x4 quadrature was removed from the FPGA
-      float deg_to_rad = TWO_PI / 360.0;
-      for (int i = 0; i<7; i++){
-        self->qdec_convert_sea_to_rad_[i] = magic_sea_count_conv[i] / (encoder_count_per_inch); // should convert from sea counts to radians
-      }
-    }
-    else{
-      for (int i = 0; i<7; i++){
-        self->qdec_convert_sea_to_rad_[i] = (TWO_PI) / (motor_configs[i]->sea_cpr); // BROKEN: sea_cpr is raw linear lines/inch now, not counts/revolution -- see comment above
-      }
+    // Converts SEA counts straight to radians as if sea_counts[i] * factor
+    // were a rotary-encoder angle, but the SEA sensors are physically
+    // LINEAR encoders (2000 lines/inch of travel along the series elastic
+    // element, not counts/revolution of a shaft -- see
+    // qdec_convert_sea_to_rad_'s declaration above). motor_configs[i]->sea_cpr
+    // is just the raw 2000 lines/inch spec with no lever-arm conversion
+    // applied (see its comment in motor_config.h: "Need to convert this to
+    // angle based on radius of motor" -- not yet done), so TWO_PI/sea_cpr
+    // here is radians per linear-inch-count, not per revolution --
+    // dimensionally wrong until each joint's lever-arm radius is folded in.
+    // SEA position/velocity outputs are NOT currently trustworthy in
+    // absolute units, just as a raw uncalibrated proxy, until this is fixed.
+    for (int i = 0; i<7; i++){
+      self->qdec_convert_sea_to_rad_[i] = (TWO_PI) / (motor_configs[i]->sea_cpr); // BROKEN: see comment above
     }
 
     self->prev_time = lf_time_physical(); //lf_time_physical(); //lf_time_physical_elapsed
@@ -632,14 +529,13 @@ reactor QDEC(sample_period: time = 5 ms){
   // a dead FPGA link shows up as visibly stalled counters instead of just
   // an absence of the (throttled) per-frame prints above.
   reaction(print_timer) {=
-    printf("Encoder.lf: heartbeat SEA ok=%lu bad=%lu, USM ok=%lu bad=%lu\r\n",
-           (unsigned long) sea_packets_ok, (unsigned long) sea_packets_bad,
-           (unsigned long) usm_packets_ok, (unsigned long) usm_packets_bad);
+    printf("Encoder.lf: heartbeat encoder ok=%lu bad=%lu\r\n",
+           (unsigned long) encoder_packets_ok, (unsigned long) encoder_packets_bad);
 
     // UART link status, printed unconditionally on the same 5s cadence --
-    // unlike the counters above, this is visible even when zero packets have
+    // unlike the counter above, this is visible even when zero packets have
     // ever decoded, so it can distinguish "UART never receiving" from
-    // "bytes arriving but failing COBS/CRC" (which would show up as bad>0).
+    // "bytes arriving but failing magic/CRC-16" (which would show up as bad>0).
     printf("Encoder.lf: heartbeat UART3 gState=0x%X RxState=0x%X HAL_error=0x%lX\r\n",
            huart3.gState, huart3.RxState, (unsigned long) HAL_UART_GetError(&huart3));
   =}
@@ -676,44 +572,23 @@ reactor QDEC(sample_period: time = 5 ms){
 
    self->interval_sec = (float) self->timer_elapsed_time_sec_;
 
-    // Fire and blocking-read each group in turn, synchronously, every
-    // trigger cycle -- no DMA, no ISR ping-pong (see Encoder_DMA.lf for
-    // that version). If a read/decode fails, that group's counts simply
-    // stay at their last known value for this cycle.
-    bool sea_rx_ok = false;
-    bool usm_rx_ok = false;
-    size_t frame_len;
-
-    HAL_UART_Transmit(&huart3, qdec_fire_sea, 1, HAL_MAX_DELAY);
-    if (encoder_read_framed(&frame_len)) {
-      sea_rx_ok = encoder_decode_and_verify(encoder_frame_buf, frame_len, sea_burst, "SEA");
-    }
-    if (sea_rx_ok) {
-      parse_encoder_group(sea_burst, sea_counts, sea_meta, "SEA");
+    // Fire the unified burst and blocking-read the single fixed frame
+    // covering all 14 channels, synchronously, every trigger cycle -- no
+    // DMA, no ISR ping-pong (see Encoder_DMA.lf for that version). If the
+    // read/validate fails, counts simply stay at their last known value.
+    bool encoder_rx_ok = read_full_encoder_state(encoder_counts, encoder_meta);
+    if (encoder_rx_ok) {
       for (int i = 0; i < 7; i++) {
         filter_channel_update("SEA", i, sea_counts[i], sea_meta[i],
                                &sea_counts_accepted[i], &sea_meta_accepted[i], &sea_reject_streak[i],
                                self->qdec_convert_sea_to_rad_[i], self->interval_sec);
-      }
-      sea_packets_ok++;
-    } else {
-      sea_packets_bad++;
-    }
-
-    HAL_UART_Transmit(&huart3, qdec_fire_usm, 1, HAL_MAX_DELAY);
-    if (encoder_read_framed(&frame_len)) {
-      usm_rx_ok = encoder_decode_and_verify(encoder_frame_buf, frame_len, usm_burst, "USM");
-    }
-    if (usm_rx_ok) {
-      parse_encoder_group(usm_burst, usm_counts, usm_meta, "USM");
-      for (int i = 0; i < 7; i++) {
         filter_channel_update("USM", i, usm_counts[i], usm_meta[i],
                                &usm_counts_accepted[i], &usm_meta_accepted[i], &usm_reject_streak[i],
                                self->qdec_convert_motor_to_rad_[i], self->interval_sec);
       }
-      usm_packets_ok++;
+      encoder_packets_ok++;
     } else {
-      usm_packets_bad++;
+      encoder_packets_bad++;
     }
 
     group_print_throttle = (group_print_throttle >= printcnt_lim) ? 0 : group_print_throttle + 1;
@@ -723,26 +598,8 @@ reactor QDEC(sample_period: time = 5 ms){
     // counts->radians conversion factor. sea_vel_out isn't consumed by any
     // other reactor yet; it's exposed here for a future pass to wire up.
     for (int i=0; i<7; i++) {
-      // TEMPORARY FIX, confirmed on-robot (2026-07-02) -- see
-      // fpga_comms_potential_issues.md's "SEA channels 4-6 read large
-      // values..." section. The last three motors' (indices 4-6) real USM
-      // (motor) data was landing on the SEA channel readout instead; with
-      // ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE set, sea_out[4..6] now pulls
-      // its DATA from usm_counts_accepted/usm_meta_accepted instead of
-      // sea_counts_accepted/sea_meta_accepted (still applying the SEA
-      // conversion factor -- only the raw source is swapped, not the
-      // physical-unit conversion), which correctly gives near-zero SEA
-      // readings again. Reads the _accepted (glitch-filtered, see
-      // filter_channel_update above) arrays, not sea_counts/usm_counts
-      // directly, so this swap operates on already-cleaned data. KEEP until
-      // the FPGA-side cross-routing bug is actually fixed; do not remove
-      // speculatively.
-      bool swap_this_channel = ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE && (i >= 4);
-      long sea_source_count = swap_this_channel ? usm_counts_accepted[i] : sea_counts_accepted[i];
-      encoder_channel_meta_t sea_source_meta = swap_this_channel ? usm_meta_accepted[i] : sea_meta_accepted[i];
-
-      float sea_value = ((float) sea_source_count) * self->qdec_convert_sea_to_rad_[i]; // - motor_configs[i]->sea_offset;
-      float sea_vel_counts_per_sec = ((float) sea_source_meta.velocity_q20_11) / ENCODER_VELOCITY_SCALE;
+      float sea_value = ((float) sea_counts_accepted[i]) * self->qdec_convert_sea_to_rad_[i]; // - motor_configs[i]->sea_offset;
+      float sea_vel_counts_per_sec = ((float) sea_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
       self->sea_vel_est_[i] = sea_vel_counts_per_sec * self->qdec_convert_sea_to_rad_[i]; // radians per second
 
       lf_set(sea_out[i],  sea_value);
@@ -754,21 +611,8 @@ reactor QDEC(sample_period: time = 5 ms){
     // position (the FPGA's estimate is more robust -- see
     // encoder_robustness_plan.md).
     for (int i=0; i<7; i++) {
-      // TEMPORARY FIX, confirmed on-robot -- mirror image of the SEA-side
-      // swap above: for the last three motors, qdec_out/qdec_vel_out now
-      // pull their DATA from sea_counts_accepted/sea_meta_accepted instead
-      // (still applying the motor conversion factor), which correctly
-      // recovers sane motor position/velocity for these channels instead of
-      // the near-zero they showed before this fix. Reads the _accepted
-      // (glitch-filtered) arrays, same reasoning as the SEA side above.
-      // KEEP until the FPGA-side cross-routing bug is actually fixed; do not
-      // remove speculatively.
-      bool swap_this_channel = ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE && (i >= 4);
-      long usm_source_count = swap_this_channel ? sea_counts_accepted[i] : usm_counts_accepted[i];
-      encoder_channel_meta_t usm_source_meta = swap_this_channel ? sea_meta_accepted[i] : usm_meta_accepted[i];
-
-      self->qdec_pos_[i] = ((float) usm_source_count) * self->qdec_convert_motor_to_rad_[i]; // update the new position
-      float usm_vel_counts_per_sec = ((float) usm_source_meta.velocity_q20_11) / ENCODER_VELOCITY_SCALE;
+      self->qdec_pos_[i] = ((float) usm_counts_accepted[i]) * self->qdec_convert_motor_to_rad_[i]; // update the new position
+      float usm_vel_counts_per_sec = ((float) usm_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
       self->qdec_vel_est_[i] = usm_vel_counts_per_sec * self->qdec_convert_motor_to_rad_[i]; // radians per second
 
       lf_set(qdec_out[i],  self->qdec_pos_[i]); // should be units of radians
@@ -797,11 +641,11 @@ reactor QDEC(sample_period: time = 5 ms){
       }
       printf("\r\ninterval [ms] %d, [us]: %d", (int) (self->interval_sec * 1000), (int) (self->interval_sec * 1000000));
 
-      // UART3 sanity check: sea_rx_ok/usm_rx_ok show whether this cycle's
-      // framed reads actually completed and passed their CRC-8 check.
-      printf("\r\nUART3 gState=0x%X RxState=0x%X HAL_error=0x%lX sea_rx_ok=%d usm_rx_ok=%d",
+      // UART3 sanity check: encoder_rx_ok shows whether this cycle's
+      // fixed-frame read actually completed and passed its magic/CRC-16 check.
+      printf("\r\nUART3 gState=0x%X RxState=0x%X HAL_error=0x%lX encoder_rx_ok=%d",
              huart3.gState, huart3.RxState, (unsigned long) HAL_UART_GetError(&huart3),
-             (int) sea_rx_ok, (int) usm_rx_ok);
+             (int) encoder_rx_ok);
 
       printf("\r\n\r\n");
     }

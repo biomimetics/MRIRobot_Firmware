@@ -4,21 +4,52 @@
  * fpga_top.v is an older, unused leftover and should not be used as a
  * reference for this protocol).
  *
+ * THIS IS A REFERENCE SPEC, NOT YET WIRED INTO Encoder.lf. This file
+ * documents the new single-fire, fixed-frame protocol precisely enough
+ * to implement the corresponding Encoder.lf changes directly from it (a
+ * separate, later pass -- see the FPGA repo's plan history). It replaces
+ * the OLD two-independent-fires (0x04=SEA / 0x05=USM) COBS+CRC-8
+ * protocol this file used to document.
+ *
+ * ============================================================================
+ * 0. WHY THIS CHANGED
+ * ============================================================================
+ * The old protocol fired SEA and USM independently, back-to-back every
+ * cycle, merged downstream by qdec_arbiter.v's runtime priority mux and
+ * a single-buffered COBS+CRC-8 packet_framer.v. That design produced two
+ * classes of hard-to-diagnose bugs on real hardware (see
+ * fpga_comms_potential_issues.md in the firmware repo for full worked
+ * examples): a stable +4 rotation in each record's channel_index
+ * self-check byte, and an occasional whole-burst swap where firing USM
+ * immediately after SEA returned a CRC-valid but exact copy of SEA's
+ * data. Both trace to the same root pattern: two independent triggered
+ * bursts racing to share one arbiter/framer/UART pipeline.
+ *
+ * The fix is architectural: ONE unified fire now atomically snapshots
+ * and streams all 14 channels as a single fixed packet (see
+ * qdec_burst_sequencer.v in the FPGA repo). qdec_arbiter.v is deleted.
+ * There is no longer a way for one bank's data to substitute for the
+ * other's, and no per-record self-check label is needed since wire
+ * position is authoritative again by construction.
+ *
  * ============================================================================
  * 1. PHYSICAL LINK
  * ============================================================================
  * The STM32 talks to the FPGA over a single UART pair (STM32_IN/STM32_OUT
  * on the FPGA side), handled by comm_blk.v's STM_uart instance
- * (uart_transmitter.v / uart_receiver.v). Framing is standard 8N1 at a
- * baud rate hardwired inside comm_blk.v to 921600 -- not the BAUD_RATE
- * parameter on mri_encoder_reader.v's module header, which is actually
- * unused dead code: the USB-facing debug UART (see section on
- * debug_status_reporter.v) hardcodes its own baud rate (115200) directly
- * rather than referencing it, so BAUD_RATE doesn't affect anything.
- * Bits within each byte go out LSB-first, which is ordinary UART framing
- * and transparent to byte-oriented code -- nothing special to handle here.
- * The one thing that IS easy to get wrong is BYTE order within each
- * multi-byte field; see section 4.
+ * (uart_transmitter.v / uart_receiver.v). Framing is standard 8N1 at
+ * 2,500,000 baud (raised from the old 921600 -- comm_blk.v hardwires
+ * this internally; it divides the FPGA's 125MHz system clock exactly,
+ * 125_000_000/2_500_000 = 50 cycles/bit with zero rounding). On the
+ * STM32 side (huart3, per Encoder.lf), matching this requires
+ * UART_OVERSAMPLING_8 -- OVER16 tops out around 2.625Mbps on this
+ * board's ~42MHz APB1/PCLK1, too little margin against 2.5Mbps. After
+ * setting this, verify HAL's actual achieved baud is within a couple
+ * percent of nominal.
+ *
+ * At 2.5Mbps, the new 144-byte fixed frame (section 3) takes roughly
+ * 144 * 10 bits / 2,500,000 =~ 576us to transmit -- comfortably inside a
+ * <1-2ms round-trip target even with STM32-side processing overhead.
  *
  * ============================================================================
  * 2. COMMAND PROTOCOL (STM32 -> FPGA)
@@ -26,224 +57,158 @@
  * The STM32 sends single command bytes. mri_encoder_reader.v compares the
  * most-recently-received byte (STM_data) directly against these values:
  *
- *   0x01  Reset (synchronous; see mri_encoder_reader.v's `assign reset =
- *         BTN_sync[0] || (STM_data == 8'h01);`). This resets ALL encoder
- *         state (both groups' position counters, velocity estimators,
- *         status bytes, and qdec_enable).
+ *   0x01  Reset (synchronous). Resets ALL encoder state (both groups'
+ *         position counters, velocity estimators, status bytes, and
+ *         qdec_enable).
  *   0x02  Disable encoder counting (qdec_enable <= 0). Position/velocity/
  *         diagnostics freeze at their current values; A/B/I transitions
  *         are ignored until re-enabled.
- *   0x03  Enable encoder counting (qdec_enable <= 1). This is the
- *         power-up default (qdec_en's REGISTER_R has INIT=1'b1), so you
- *         only need to send this after having sent 0x02 or after a 0x01
- *         reset if you want counting to resume without an external
- *         re-enable step -- reset does NOT re-enable counting on its own,
- *         it just clears qdec_enable back to its register's post-reset
- *         state, which is 1 (enabled) here as well.
- *   0x04  Fire the SEA group's burst readout (see section 3).
- *   0x05  Fire the USM group's burst readout (see section 3).
+ *   0x03  Enable encoder counting (qdec_enable <= 1). Power-up default.
+ *   0x04  Fire the unified burst readout -- atomically snapshots and
+ *         streams ALL 14 channels (SEA 0-6 then USM 0-6) as one fixed
+ *         frame (section 3). REPURPOSED from the old "fire SEA only"
+ *         meaning.
+ *   0x05  RETIRED. The old "fire USM only" command no longer exists --
+ *         0x04 now reads everything in one shot. mri_encoder_reader.v
+ *         does not special-case 0x05; sending it has no defined effect
+ *         (same as any other undefined byte).
  *   other No defined effect. STM_data reflects whatever byte was last
  *         received, but nothing in mri_encoder_reader.v compares against
  *         other values.
  *
  * Internally, STM_data is only actually valid for a single FPGA clock
- * cycle per received byte (comm_blk.v's uart_receiver ties data_out_ready
- * high, so the "byte available" pulse self-clears the next cycle) -- but
- * this is invisible from the STM32 side. As far as this code is
- * concerned, "send a command" just means "write one byte."
+ * cycle per received byte -- invisible from the STM32 side. As far as
+ * this code is concerned, "send a command" just means "write one byte."
  *
  * ============================================================================
- * 3. BURST RESPONSE PROTOCOL (FPGA -> STM32)
+ * 3. BURST RESPONSE PROTOCOL (FPGA -> STM32) -- fixed 144-byte frame
  * ============================================================================
- * Firing 0x04 or 0x05 starts that group's qdec_channel_bank 14-word burst
- * readout state machine (shift_counter14 inside qdec_channel_bank.v).
- * Each fire produces exactly one 112-byte payload (14 words x 8 bytes)
- * for that group's own 7 channels. That payload is NOT sent raw --
- * packet_framer.v (inserted between the serializer and the UART, see
- * section 6) appends a CRC-8 and COBS-encodes the result with a 0x00
- * delimiter, so the host reads a variable-length framed packet, not a
- * fixed 112-byte run. This is what replaced the earlier "there is no way
- * to resynchronize mid-burst" behavior: a corrupted or desynced frame is
- * now detected (via the CRC-8, and/or by a missing delimiter within the
- * expected max frame size) and the host can always resync on the next
- * 0x00 rather than staying permanently misaligned. The per-channel index
- * echo (section 5) is now a secondary, redundant self-check on top of
- * that -- the CRC-8 is the primary defense against silent corruption.
+ * Firing 0x04 triggers qdec_burst_sequencer.v: on the fire cycle, it
+ * atomically snapshots all 14 channels' current count/velocity/status/
+ * diagnostics (every channel in the burst reflects the same instant,
+ * even if the underlying counts are still ticking during the walk that
+ * follows), then streams the snapshot out as ONE fixed-length frame --
+ * no separate SEA/USM triggers, no arbitration between them.
  *
- * SEA and USM are independently triggered and NEVER combined into one
- * burst -- there is no FPGA-side command that fires both groups at once,
- * and qdec_arbiter.v is a pass-through priority mux (only one group is
- * ever actively producing words during a single fire), not an
- * interleaver. To read the full state of all 14 encoders, fire 0x04 and
- * read its framed response, THEN fire 0x05 and read another -- exactly
- * what read_full_encoder_state() below does.
+ * Frame layout (always exactly 144 bytes on the wire, no delimiter, no
+ * length byte -- both sides already know the length):
  *
- * Word order within a 112-byte payload (qdec_channel_bank.v's cntr_val
- * counts 0..13; even values select count_arr[cntr_val>>1], odd values
- * select metadata_arr[cntr_val>>1]):
+ *   bytes   0-1    magic header: 0xAA, 0x55
+ *   bytes   2-141  payload: 14 channel records x 10 bytes each (below)
+ *   bytes 142-143  CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF), over
+ *                  the payload ONLY (bytes 2-141) -- LOW byte first
+ *                  (byte 142), then HIGH byte (byte 143)
  *
- *   word 0  = channel 0 count      word 1  = channel 0 metadata
- *   word 2  = channel 1 count      word 3  = channel 1 metadata
- *   ...
- *   word 12 = channel 6 count      word 13 = channel 6 metadata
- *
- * i.e. 16-byte records per channel, count word first, metadata word
- * second -- matching ENCODER_BYTES_PER_CHANNEL/parse_encoder_channel_report
- * below. The channel_index embedded in each metadata word (section 5) is
- * always local to its own group (0-6) -- it does NOT continue 7-13 for
- * USM, so the two 112-byte payloads must be parsed as two separate
- * 7-channel groups, never as one contiguous 14-channel stream.
+ * Channel order within the payload is FIXED: record 0 = SEA channel 0,
+ * record 1 = SEA channel 1, ..., record 6 = SEA channel 6, record 7 =
+ * USM channel 0, ..., record 13 = USM channel 6. This is wire position,
+ * not a label -- there is no per-record channel_index self-check byte
+ * in this format (unlike the old protocol), because with the old
+ * arbiter's race eliminated there is nothing left to rotate. Trust wire
+ * position directly.
  *
  * ============================================================================
- * 4. BYTE ORDER -- little-endian, NOT big-endian
+ * 4. PER-CHANNEL RECORD LAYOUT -- 10 bytes, all little-endian
  * ============================================================================
- * This section describes the byte order WITHIN THE DECODED 112-byte
- * payload (i.e. after cobs_decode() in section 6 has already stripped
- * the COBS framing) -- packet_framer.v's framing sits on top of, and is
- * independent of, this word-level byte order.
+ *   bytes 0-3  count      int32, signed, little-endian. Truncated from
+ *                         the FPGA's internal 64-bit position counter --
+ *                         real values are nowhere near +-2^31, only the
+ *                         wire copy narrows.
+ *   bytes 4-7  velocity   int32, signed, little-endian, Q20.11
+ *                         fixed-point counts/sec -- SAME format as the
+ *                         old protocol, unchanged. Must match
+ *                         qdec_params.vh's QDEC_VELOCITY_FRAC_BITS (11).
+ *                         See ENCODER_VELOCITY_FRAC_BITS below.
+ *   byte  8    status     bit0: index correction applied this index
+ *                         pulse; bit1: large discrepancy detected
+ *                         between the index-implied and tracked
+ *                         position; bit2: index pulse seen. Bits 3-7
+ *                         always 0. Same meaning as the old protocol's
+ *                         status byte, unchanged.
+ *   byte  9    diag       bits [7:4] = illegal_transition_count,
+ *                         SATURATED to 4 bits (0-15, not the old 8-bit
+ *                         range). bits [3:0] = rate_reject_count,
+ *                         likewise saturated to 4 bits. These are
+ *                         already saturating/qualitative diagnostic
+ *                         counters on the FPGA side ("pinned at max" is
+ *                         the meaningful signal), so 4 bits of
+ *                         resolution on the wire is sufficient -- do NOT
+ *                         assume a value of 15 here means "exactly 15
+ *                         events," it means "15 or more."
  *
- * Every 64-bit word (count or metadata) is serialized onto the wire
- * LEAST SIGNIFICANT BYTE FIRST. This comes from comm_blk.v's serializer,
- * VectorToSingle.sv: it slices the 64-bit FIFO word into 8 bytes indexed
- * 0-7 (index 0 = bits[7:0], the LSB byte; index 7 = bits[63:56], the MSB
- * byte) and transmits index 0 first, index 7 last.
- *
- * Practical effect: the FIRST byte you read off the wire for any 64-bit
- * field is that field's least significant byte, and the 8th byte is its
- * most significant byte. Reconstruct with
- *     v |= (uint64_t)byte[i] << (8 * i)
- * for i = 0..7 -- NOT the reverse. This was previously implemented
- * backwards in this file (a read_be64() that treated the first byte as
- * the MOST significant byte) -- if STM32-side code copied that
- * assumption, every count/velocity/status field comes out byte-reversed,
- * which looks like consistently-wrong-but-not-obviously-corrupt data
- * rather than random noise -- exactly the kind of "packets don't parse
- * right" symptom this header is here to prevent.
- *
- * ============================================================================
- * 5. WORD CONTENTS
- * ============================================================================
- * Count word: raw 64-bit two's-complement signed position counter
- * (qdec_channel.v's `count` register). +1/-1 per accepted quadrature
- * step, plus an optional signed index-correction nudge (index_corrector.v)
- * when index correction applies a discrepancy fix. Not scaled or
- * normalized to counts/revolution -- it's the raw accumulated count.
- *
- * Metadata word bit layout (MSB to LSB), from qdec_channel_bank.v's
- * metadata_arr packing
- * (`{velocity, illegal_transition_count, rate_reject_count, status, 5'b0, ch[2:0]}`):
- *
- *   bits [63:32]  velocity      signed Q20.11 fixed-point counts/sec.
- *                               Must match qdec_params.vh's
- *                               QDEC_VELOCITY_FRAC_BITS (11) -- see
- *                               ENCODER_VELOCITY_FRAC_BITS below. Holds
- *                               its last nonzero value between accepted
- *                               steps but is forced to exactly 0 once
- *                               QDEC_VELOCITY_STALL_TIMEOUT_CYCLES have
- *                               elapsed with no new accepted step (see
- *                               velocity_estimator.v), so a channel that
- *                               has genuinely stopped moving reads 0
- *                               rather than a stale nonzero value.
- *   bits [31:24]  illegal_transition_count   saturating 8-bit diagnostic
- *                               counter (invalid Gray-code A/B transition).
- *   bits [23:16]  rate_reject_count          saturating 8-bit diagnostic
- *                               counter (step arrived faster than
- *                               QDEC_MIN_STEP_INTERVAL_CYCLES allows).
- *   bits [15:8]   status        bit0: index correction applied this
- *                               index pulse; bit1: large discrepancy
- *                               detected between the index-implied and
- *                               tracked position; bit2: index pulse seen.
- *                               All three bits are sticky until the next
- *                               qualified index pulse (qdec_channel.v's
- *                               status_reg only updates when index_seen
- *                               fires).
- *   bits [7:3]    always 0      padding.
- *   bits [2:0]    channel_index 0-6, local to this group (SEA or USM) --
- *                               frame self-check field; see
- *                               parse_encoder_channel_report() below.
- *
- * Corrected relative to the plan doc's original snippet: velocity is
- * Q20.11 fixed-point counts/sec, not Q16.16 -- the format was rebalanced
- * after the plan doc was written, to fix an overflow bug (the old Q16.16
- * format silently wrapped for any accepted-step interval below ~3815
- * cycles, which is faster than rate_limiter's default 2500-cycle minimum
- * legal interval). See qdec/velocity_estimator.v and qdec_params.vh's
- * QDEC_VELOCITY_FRAC_BITS for the current authoritative format.
+ * Byte reconstruction: v |= (uint32_t)byte[i] << (8*i) for i = 0..3 --
+ * little-endian, same convention the old protocol used for its 64-bit
+ * words (this file previously got that backwards once; see the
+ * read_le32 comment below for the same warning restated).
  *
  * ============================================================================
- * 6. PACKET FRAMING -- COBS + CRC-8 (see packet_framer.v, TODO.md)
+ * 5. FRAME VALIDATION AND RESYNC
  * ============================================================================
- * Motivation: without any packet-boundary marker or checksum, a burst
- * used to be just a fixed-length 112-byte run of raw bytes -- if any byte
- * was dropped, duplicated, or corrupted, everything after that point
- * silently shifted and got parsed as if it were valid, with only the
- * per-channel index echo (section 5) available to notice something was
- * wrong *after the fact*, and no way to find the next real packet
- * boundary. packet_framer.v (inserted into comm_blk.v between
- * VectorToSingle's serializer and the UART TX) fixes this:
+ * Read exactly 144 bytes (a single fixed-length blocking read is
+ * sufficient and simpler than the old protocol's byte-at-a-time
+ * delimiter-hunting loop, since the length is now known a priori).
+ * Validate:
+ *   1. bytes[0:1] == 0xAA, 0x55
+ *   2. CRC-16/CCITT-FALSE over bytes[2:141] == bytes[142:143] (low byte
+ *      first)
  *
- *   1. Appends a CRC-8 (poly 0x07, init 0x00, computed byte-serially over
- *      the 112 payload bytes) as a 113th byte.
- *   2. COBS-encodes (Consistent Overhead Byte Stuffing) that 113-byte
- *      block: 0x00 is reserved exclusively as a packet-boundary marker,
- *      and every 0x00 that would otherwise appear in the payload/CRC is
- *      "stuffed away" behind a code byte instead.
- *   3. Terminates the encoded block with a single literal 0x00 delimiter.
+ * On EITHER check failing, do not just drop the frame -- the stream may
+ * have desynced (e.g. a dropped byte shifted everything after it). Byte-
+ * scan forward for the next 0xAA, 0x55 occurrence and attempt to read
+ * the remaining 142 bytes from there, re-validating. This replaces the
+ * old protocol's COBS delimiter-hunting (0x00 byte) -- there is no
+ * delimiter in this format, so resync is driven by the magic header
+ * instead.
  *
- * Because 113 (payload + CRC) is well under COBS's 254-byte max
- * single-code-byte span, packet_framer.v never needs COBS's "0xFF forced
- * split" case -- cobs_decode() below doesn't special-case code==0xFF
- * either. Frame length on the wire is variable: as few as 114 bytes (if
- * the payload happens to be all zero, the most-stuffed case) up to 115
- * bytes (if the payload has zero 0x00 bytes at all, the least-stuffed
- * case) -- ENCODER_FRAME_MAX_BYTES below has margin above that.
+ * crc16_compute() below MUST exactly match packet_framer_fixed.v's
+ * crc16_update function (same poly 0x1021, same init 0xFFFF) bit-for-bit
+ * -- if it doesn't, every single frame will fail its CRC check and be
+ * rejected as corrupted, even when the link itself is perfectly clean.
  *
- * Receive algorithm (see read_encoder_group() below): read bytes one at a
- * time until a 0x00 delimiter is seen (or ENCODER_FRAME_MAX_BYTES is
- * exceeded, treated as a desync/failure), COBS-decode the result, verify
- * the CRC-8, and only then hand the recovered 112-byte payload to
- * parse_encoder_burst() (unchanged, still does the per-channel index
- * self-check on top). On any failure -- decode error, wrong decoded
- * length, CRC mismatch, or no delimiter within the max -- treat the read
- * as failed; because framing is now explicit, resyncing is simply "start
- * looking for the next 0x00" on the following read, instead of staying
- * permanently misaligned the way the old fixed-length-read protocol did.
+ * ============================================================================
+ * 6. CARRYING FORWARD EXISTING STM32-SIDE MITIGATIONS
+ * ============================================================================
+ * When Encoder.lf is updated to use this protocol, two existing
+ * mitigations should carry over UNCHANGED -- they address failure modes
+ * this redesign does not claim to fix:
  *
- * crc8_compute() below MUST exactly match packet_framer.v's crc8_update
- * function (same poly 0x07, same init 0x00) bit-for-bit -- if it doesn't,
- * every single frame will fail its CRC check and be rejected as
- * corrupted, even when the link itself is perfectly clean.
+ *   - filter_channel_update()'s reject-streak filter: keep it. It also
+ *     catches genuine encoder-line electrical-noise glitches
+ *     (rate-limiter saturation) that are unrelated to the arbiter/framer
+ *     race this redesign eliminates.
+ *   - ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE: keep it, exactly as-is,
+ *     unless/until separately confirmed fixed. The channels-4-6
+ *     cross-routing anomaly it works around is NOT confirmed to share a
+ *     root cause with the whole-burst swap bug this redesign targets --
+ *     test on hardware post-rollout whether it happens to also resolve;
+ *     if so, remove the flag in a later, SEPARATE change.
+ *
+ * The old channel_index-based placement workaround (trusting an
+ * embedded self-check byte over word position, to work around the old
+ * protocol's +4 rotation bug) has no equivalent in this format and
+ * should simply be deleted -- there is no channel_index field anymore,
+ * and none is needed.
  */
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
-#define ENCODER_CHANNELS_PER_GROUP   7u
-#define ENCODER_BYTES_PER_CHANNEL    16u   /* 8B count word + 8B metadata word */
-#define ENCODER_BYTES_PER_BURST      (ENCODER_CHANNELS_PER_GROUP * ENCODER_BYTES_PER_CHANNEL)
+#define ENCODER_TOTAL_CHANNELS       14u  /* 7 SEA (indices 0-6) + 7 USM (indices 7-13) */
+#define ENCODER_BYTES_PER_CHANNEL    10u
+#define ENCODER_PAYLOAD_BYTES        (ENCODER_TOTAL_CHANNELS * ENCODER_BYTES_PER_CHANNEL) /* 140 */
 
-/* Packet framing (section 6): 112 payload bytes + 1 CRC-8 byte, before
- * COBS encoding. Must match packet_framer.v's PAYLOAD_BYTES (112). */
-#define ENCODER_PAYLOAD_BYTES        (ENCODER_BYTES_PER_BURST + 1u)
+#define ENCODER_MAGIC_BYTE_0         0xAAu
+#define ENCODER_MAGIC_BYTE_1         0x55u
 
-/* Worst case on-wire frame size (excluding the 0x00 delimiter itself) is
- * 1 code byte + 113 data bytes = 114 bytes (payload has zero 0x00 bytes,
- * so nothing gets stuffed away); rounded up with margin. */
-#define ENCODER_FRAME_MAX_BYTES      128u
+/* Total on-wire frame size: 2 magic + 140 payload + 2 CRC-16 = 144.
+ * Fixed -- no delimiter, no length byte, both sides already know this. */
+#define ENCODER_FRAME_BYTES          (2u + ENCODER_PAYLOAD_BYTES + 2u)
 
-/* Total across both groups (7 SEA + 7 USM). Indices 0-6 are SEA,
- * indices 7-13 are USM, in read_full_encoder_state()'s output -- this
- * global numbering only exists on the STM32 side, assembled from two
- * separate 112-byte payloads; it is not how the FPGA labels channels. */
-#define ENCODER_TOTAL_CHANNELS       (2u * ENCODER_CHANNELS_PER_GROUP)
-
-/* Command bytes understood by mri_encoder_reader.v (see STM_data
- * handling there -- section 2 above). */
+/* Command bytes understood by mri_encoder_reader.v (see section 2). */
 #define ENCODER_CMD_RESET            0x01u
 #define ENCODER_CMD_DISABLE_COUNTING 0x02u
 #define ENCODER_CMD_ENABLE_COUNTING  0x03u
-#define ENCODER_CMD_FIRE_SEA         0x04u
-#define ENCODER_CMD_FIRE_USM         0x05u
+#define ENCODER_CMD_FIRE_ALL         0x04u  /* was "fire SEA" in the old protocol */
 
 /* Must match qdec_params.vh's QDEC_VELOCITY_FRAC_BITS (11 -> Q20.11). If
  * that macro is ever retuned, this needs to change to match. */
@@ -251,12 +216,11 @@
 #define ENCODER_VELOCITY_SCALE       ((float)(1 << ENCODER_VELOCITY_FRAC_BITS))
 
 typedef struct {
-    int64_t count;                        /* raw position, same semantics as today */
-    int32_t velocity_q20_11;              /* signed Q20.11 fixed-point counts/sec (raw) */
-    uint8_t illegal_transition_rejects;   /* saturating diagnostic counter */
-    uint8_t rate_limit_rejects;           /* saturating diagnostic counter */
-    uint8_t index_status;                 /* bit0: correction applied, bit1: large discrepancy, bit2: index seen */
-    uint8_t channel_index;                /* echoed 0-6 *within its own group* (SEA or USM), for frame self-check */
+    int32_t count;               /* raw position, truncated to 32 bits on the wire */
+    int32_t velocity_q20_11;     /* signed Q20.11 fixed-point counts/sec (raw) */
+    uint8_t status;              /* bit0: correction applied, bit1: large discrepancy, bit2: index seen */
+    uint8_t illegal_transition_rejects; /* saturated to 4 bits (0-15) on the wire */
+    uint8_t rate_limit_rejects;         /* saturated to 4 bits (0-15) on the wire */
 } encoder_channel_report_t;
 
 /* Converts the raw Q20.11 fixed-point value to a floating-point
@@ -265,159 +229,151 @@ static float encoder_velocity_counts_per_sec(int32_t velocity_q20_11) {
     return (float)velocity_q20_11 / ENCODER_VELOCITY_SCALE;
 }
 
-/* Reassembles a 64-bit field from 8 wire bytes in little-endian order --
- * byte[0] is the least significant byte, byte[7] the most significant.
- * See section 4 above: the FPGA's serializer (VectorToSingle.sv) sends
- * every 64-bit word LSB-byte-first. Do NOT swap this back to big-endian;
- * that was the bug this file previously had. */
-static uint64_t read_le64(const uint8_t *p) {
-    uint64_t v = 0;
-    for (int i = 0; i < 8; i++) {
-        v |= ((uint64_t)p[i]) << (8 * i);
+/* Reassembles a 32-bit field from 4 wire bytes in little-endian order --
+ * byte[0] is the least significant byte, byte[3] the most significant.
+ * Same convention the old protocol used for its 64-bit words -- do NOT
+ * assume big-endian here, that was a real bug in an earlier version of
+ * this file (see section 4). */
+static uint32_t read_le32(const uint8_t *p) {
+    uint32_t v = 0;
+    for (int i = 0; i < 4; i++) {
+        v |= ((uint32_t)p[i]) << (8 * i);
     }
     return v;
 }
 
-/* Byte-serial CRC-8, poly 0x07, init 0x00. Must exactly match
- * packet_framer.v's crc8_update -- see section 6. */
-static uint8_t crc8_compute(const uint8_t *data, size_t len) {
-    uint8_t crc = 0x00;
+/* Byte-serial CRC-16/CCITT-FALSE: poly 0x1021, init 0xFFFF, no
+ * reflection, xorout 0. Must exactly match packet_framer_fixed.v's
+ * crc16_update -- see section 5. */
+static uint16_t crc16_compute(const uint8_t *data, size_t len) {
+    uint16_t crc = 0xFFFF;
     for (size_t i = 0; i < len; i++) {
-        crc ^= data[i];
+        crc ^= (uint16_t)data[i] << 8;
         for (int b = 0; b < 8; b++) {
-            crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x07) : (uint8_t)(crc << 1);
+            crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
         }
     }
     return crc;
 }
 
-/* Standard COBS decode of `in` (in_len bytes, NOT including the 0x00
- * delimiter) into `out` (capacity out_cap). Returns the decoded length,
- * or 0 on a malformed frame (a code byte pointing past the end of `in`
- * or `out`, or an unexpected literal 0x00 in the frame body). See
- * section 6 -- packet_framer.v never produces COBS's 0xFF forced-split
- * case, so this decoder doesn't special-case code==0xFF either. */
-static size_t cobs_decode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_cap) {
-    size_t read_pos = 0;
-    size_t write_pos = 0;
-
-    while (read_pos < in_len) {
-        uint8_t code = in[read_pos++];
-        if (code == 0) {
-            return 0;
-        }
-        size_t run = (size_t)code - 1u;
-        if (read_pos + run > in_len || write_pos + run > out_cap) {
-            return 0;
-        }
-        for (size_t i = 0; i < run; i++) {
-            out[write_pos++] = in[read_pos++];
-        }
-        if (read_pos < in_len) {
-            /* More bytes remain, which only happens if a real payload
-             * zero was stuffed away here -- put it back. */
-            if (write_pos >= out_cap) {
-                return 0;
-            }
-            out[write_pos++] = 0x00;
-        }
-    }
-    return write_pos;
+/* Parses one 10-byte channel record starting at `bytes`. Channel
+ * identity is the caller's wire-position index -- there is no
+ * self-check field in this record to cross-validate against (see
+ * section 3: with the old arbiter's race eliminated, wire position is
+ * authoritative by construction). */
+static void parse_encoder_channel_report(const uint8_t *bytes, encoder_channel_report_t *out) {
+    out->count                      = (int32_t)read_le32(bytes);
+    out->velocity_q20_11            = (int32_t)read_le32(bytes + 4);
+    out->status                     = bytes[8];
+    out->illegal_transition_rejects = (uint8_t)(bytes[9] >> 4);
+    out->rate_limit_rejects         = (uint8_t)(bytes[9] & 0x0F);
 }
 
-/* Parses one 16-byte channel record (count word + metadata word) starting at `bytes`.
- * Returns false if the embedded channel-index byte doesn't match `expected_channel`,
- * signaling that the byte stream has desynced from the expected framing. */
-static bool parse_encoder_channel_report(const uint8_t *bytes, uint8_t expected_channel,
-                                          encoder_channel_report_t *out) {
-    uint64_t count_word    = read_le64(bytes);
-    uint64_t metadata_word = read_le64(bytes + 8);
-
-    out->count                      = (int64_t)count_word;
-    out->velocity_q20_11            = (int32_t)(metadata_word >> 32);
-    out->illegal_transition_rejects = (uint8_t)(metadata_word >> 24);
-    out->rate_limit_rejects         = (uint8_t)(metadata_word >> 16);
-    out->index_status               = (uint8_t)(metadata_word >> 8);
-    out->channel_index              = (uint8_t)(metadata_word);
-
-    return out->channel_index == expected_channel;
+/* Parses the 140-byte payload (already validated -- see
+ * validate_and_parse_frame below) into all 14 channels: out[0..6] = SEA
+ * channels 0-6, out[7..13] = USM channels 0-6, straight from wire
+ * position. */
+static void parse_encoder_payload(const uint8_t *payload,
+                                   encoder_channel_report_t out[ENCODER_TOTAL_CHANNELS]) {
+    for (unsigned ch = 0; ch < ENCODER_TOTAL_CHANNELS; ch++) {
+        parse_encoder_channel_report(payload + ch * ENCODER_BYTES_PER_CHANNEL, &out[ch]);
+    }
 }
 
-/* Parses one 112-byte burst (7 channels, local indices 0-6) from either
- * group. Returns the number of channels parsed before a framing mismatch
- * was detected (== ENCODER_CHANNELS_PER_GROUP on a fully successful
- * parse). */
-static int parse_encoder_burst(const uint8_t *burst,
-                                encoder_channel_report_t out[ENCODER_CHANNELS_PER_GROUP]) {
-    for (int ch = 0; ch < (int)ENCODER_CHANNELS_PER_GROUP; ch++) {
-        const uint8_t *record = burst + ch * ENCODER_BYTES_PER_CHANNEL;
-        if (!parse_encoder_channel_report(record, (uint8_t)ch, &out[ch])) {
-            return ch;
-        }
+/* Validates a captured ENCODER_FRAME_BYTES-byte frame (magic + CRC-16,
+ * section 5) and, if valid, parses it into out[]. Returns false on any
+ * validation failure -- caller should byte-scan for the next magic
+ * header occurrence and retry (section 5), not just drop and re-read
+ * blindly, since a byte may have been dropped/inserted somewhere in the
+ * stream. */
+static bool validate_and_parse_frame(const uint8_t *frame,
+                                      encoder_channel_report_t out[ENCODER_TOTAL_CHANNELS]) {
+    if (frame[0] != ENCODER_MAGIC_BYTE_0 || frame[1] != ENCODER_MAGIC_BYTE_1) {
+        return false;
     }
-    return (int)ENCODER_CHANNELS_PER_GROUP;
+
+    const uint8_t *payload = frame + 2;
+    uint16_t crc = crc16_compute(payload, ENCODER_PAYLOAD_BYTES);
+    uint16_t frame_crc = (uint16_t)payload[ENCODER_PAYLOAD_BYTES] |
+                          ((uint16_t)payload[ENCODER_PAYLOAD_BYTES + 1] << 8);
+    if (crc != frame_crc) {
+        return false;
+    }
+
+    parse_encoder_payload(payload, out);
+    return true;
 }
 
 /* Hooks the caller's UART driver must provide -- not implemented here,
  * since the actual transport is part of the STM32 firmware project, not
- * this repo. stm32_read_byte should block until one byte has arrived (or
- * a timeout elapses), returning false on failure -- frames are
- * variable-length now (section 6), so there's no fixed byte count to
- * read in one shot the way there used to be. */
+ * this repo. stm32_read_bytes should block until `len` bytes have
+ * arrived (or a timeout elapses), returning false on failure. Unlike the
+ * old variable-length COBS protocol, frames here are always exactly
+ * ENCODER_FRAME_BYTES, so a single fixed-length blocking read suffices
+ * for the fast path (see stm32_scan_for_magic below for the resync
+ * path). */
 extern void stm32_send_command_byte(uint8_t cmd);
+extern bool stm32_read_bytes(uint8_t *buf, size_t len);
 extern bool stm32_read_byte(uint8_t *b);
 
-/* Fires one group (SEA or USM), reads its COBS-framed response up to the
- * 0x00 delimiter, decodes + CRC-8-verifies it (section 6), and parses
- * the recovered 112-byte payload into out[0..ENCODER_CHANNELS_PER_GROUP-1]. */
-static bool read_encoder_group(uint8_t fire_cmd,
-                                encoder_channel_report_t out[ENCODER_CHANNELS_PER_GROUP]) {
-    uint8_t frame[ENCODER_FRAME_MAX_BYTES];
-    uint8_t decoded[ENCODER_PAYLOAD_BYTES];
-    size_t frame_len = 0;
+/* Resync path: on a validation failure, shift a 1-byte sliding window
+ * forward looking for the next magic-header occurrence, then read the
+ * remaining ENCODER_FRAME_BYTES-2 bytes from there and re-validate.
+ * Bounded by max_scan_bytes to avoid scanning forever on a dead/garbage
+ * link. */
+static bool read_encoder_frame_with_resync(uint8_t frame[ENCODER_FRAME_BYTES],
+                                            encoder_channel_report_t out[ENCODER_TOTAL_CHANNELS],
+                                            size_t max_scan_bytes) {
+    size_t scanned = 0;
+    uint8_t b0 = frame[0], b1 = frame[1];
 
-    stm32_send_command_byte(fire_cmd);
-
-    for (;;) {
-        if (frame_len >= ENCODER_FRAME_MAX_BYTES) {
-            return false; /* no delimiter within the expected max -- desynced */
+    while (scanned < max_scan_bytes) {
+        if (b0 == ENCODER_MAGIC_BYTE_0 && b1 == ENCODER_MAGIC_BYTE_1) {
+            uint8_t candidate[ENCODER_FRAME_BYTES];
+            candidate[0] = b0;
+            candidate[1] = b1;
+            if (!stm32_read_bytes(&candidate[2], ENCODER_FRAME_BYTES - 2)) {
+                return false;
+            }
+            if (validate_and_parse_frame(candidate, out)) {
+                return true;
+            }
+            /* CRC failed even after finding a magic-shaped header --
+             * false positive in the payload data; keep scanning from
+             * just past this false match. */
+            b0 = candidate[ENCODER_FRAME_BYTES - 2];
+            b1 = candidate[ENCODER_FRAME_BYTES - 1];
+            scanned += ENCODER_FRAME_BYTES;
+            continue;
         }
-        uint8_t b;
-        if (!stm32_read_byte(&b)) {
+        b0 = b1;
+        if (!stm32_read_byte(&b1)) {
             return false;
         }
-        if (b == 0x00) {
-            break;
-        }
-        frame[frame_len++] = b;
+        scanned++;
     }
-
-    size_t decoded_len = cobs_decode(frame, frame_len, decoded, sizeof(decoded));
-    if (decoded_len != ENCODER_PAYLOAD_BYTES) {
-        return false; /* malformed frame */
-    }
-
-    uint8_t crc = crc8_compute(decoded, ENCODER_BYTES_PER_BURST);
-    if (crc != decoded[ENCODER_BYTES_PER_BURST]) {
-        return false; /* corrupted -- caller can just retry, which resyncs on the next 0x00 */
-    }
-
-    return parse_encoder_burst(decoded, out) == (int)ENCODER_CHANNELS_PER_GROUP;
+    return false;
 }
 
-/* Reads the full state (count + velocity, all diagnostics) of all 14
- * encoders by firing SEA then USM in turn and concatenating their
- * reports -- out[0..6] = SEA channels 0-6, out[7..13] = USM channels
- * 0-6. This is two independent framed transfers on the wire (112-byte
- * payload each, ~114-115 bytes once COBS-encoded -- section 6), not one
- * combined 224-byte-payload burst; the FPGA has no single command that
- * fires both groups at once. */
+/* Fires the unified burst (0x04), reads the fixed 144-byte frame,
+ * validates it, and on failure falls back to the resync scan. Populates
+ * out[0..13] = SEA channels 0-6 then USM channels 0-6, straight from
+ * wire position -- no group-by-group split, no channel_index
+ * cross-check, unlike the old two-fire protocol this replaces. */
 bool read_full_encoder_state(encoder_channel_report_t out[ENCODER_TOTAL_CHANNELS]) {
-    if (!read_encoder_group(ENCODER_CMD_FIRE_SEA, &out[0])) {
+    uint8_t frame[ENCODER_FRAME_BYTES];
+
+    stm32_send_command_byte(ENCODER_CMD_FIRE_ALL);
+
+    if (!stm32_read_bytes(frame, ENCODER_FRAME_BYTES)) {
         return false;
     }
-    if (!read_encoder_group(ENCODER_CMD_FIRE_USM, &out[ENCODER_CHANNELS_PER_GROUP])) {
-        return false;
+    if (validate_and_parse_frame(frame, out)) {
+        return true;
     }
-    return true;
+
+    /* Fast path failed -- resync scan, bounded to a couple of frames'
+     * worth of bytes so a persistently desynced/dead link fails fast
+     * rather than hanging. */
+    return read_encoder_frame_with_resync(frame, out, ENCODER_FRAME_BYTES * 3);
 }
