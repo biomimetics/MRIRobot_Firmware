@@ -144,7 +144,7 @@ reactor QDEC(sample_period: time = 5 ms){
     // STM32 level without touching the FPGA. Do not remove this without
     // first confirming the FPGA-side fix actually resolves the root cause
     // -- otherwise the outputs will silently go back to being swapped.
-    #define ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE 1
+    #define ENCODER_DEBUG_SWAP_SEA_USM_LAST_THREE 0
 
     // Diagnostics-only throttle for the debug prints below.
     static int group_print_throttle = 0;
