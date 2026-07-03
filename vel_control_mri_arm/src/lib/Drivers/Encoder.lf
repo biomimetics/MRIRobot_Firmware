@@ -14,6 +14,13 @@ preamble {=
   #include <math.h> // fabsf, for the position-anomaly check below
   #include "motor_config.h"
   #include "common.h"
+
+  // Set to 1 if on-robot testing shows the SEA channels arrive in reverse
+  // index order relative to USM (ch0<->ch6, ch1<->ch5, ch2<->ch4, ch3
+  // unchanged) -- USM channels have been observed to be in the correct
+  // order, so this only remaps SEA. Set to 0 once the underlying wiring/FPGA
+  // channel-order mismatch is fixed at the source.
+  #define SEA_CHANNEL_INDEX_SWAP 1
 =}
 
 reactor QDEC(sample_period: time = 5 ms){
@@ -42,23 +49,7 @@ reactor QDEC(sample_period: time = 5 ms){
   state qdec_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
   state qdec_convert_motor_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to acutator space
-  // KNOWN BROKEN as of 2026-07-02, despite the name/units: this is supposed
-  // to convert SEA counts to radians, but the SEA sensors are physically
-  // LINEAR encoders (2000 lines/inch of linear travel along the series
-  // elastic element -- the FPGA used to apply x4 quadrature interpolation
-  // on top of that, which has since been removed, so it's a raw 2000
-  // lines/inch now), not a rotary shaft with counts/revolution. An older
-  // version of motor_config.h's sea_cpr baked an assumed lever-arm
-  // circumference into a fake "counts-per-revolution" figure so a plain
-  // TWO_PI/sea_cpr (see the startup reaction below) would give a usable
-  // radians-per-count factor; sea_cpr is now just the raw 2000 lines/inch
-  // spec with no circumference applied (see its comment in
-  // motor_config.h: "Need to convert this to angle based on radius of
-  // motor" -- not yet done anywhere). TWO_PI/sea_cpr as currently written
-  // is therefore dimensionally wrong (radians per linear-inch-count, not
-  // per revolution) until each joint's actual lever-arm radius is folded
-  // in -- SEA position/velocity outputs are not trustworthy in absolute
-  // units right now, only as a raw uncalibrated proxy.
+
   state qdec_convert_sea_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from sea space to acutator space
 
   state sea_pos_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
@@ -501,22 +492,14 @@ reactor QDEC(sample_period: time = 5 ms){
       //self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio) * motor_configs[i]->dir;
     }
 
-
-
-    // Converts SEA counts straight to radians as if sea_counts[i] * factor
-    // were a rotary-encoder angle, but the SEA sensors are physically
-    // LINEAR encoders (2000 lines/inch of travel along the series elastic
-    // element, not counts/revolution of a shaft -- see
-    // qdec_convert_sea_to_rad_'s declaration above). motor_configs[i]->sea_cpr
-    // is just the raw 2000 lines/inch spec with no lever-arm conversion
-    // applied (see its comment in motor_config.h: "Need to convert this to
-    // angle based on radius of motor" -- not yet done), so TWO_PI/sea_cpr
-    // here is radians per linear-inch-count, not per revolution --
-    // dimensionally wrong until each joint's lever-arm radius is folded in.
-    // SEA position/velocity outputs are NOT currently trustworthy in
-    // absolute units, just as a raw uncalibrated proxy, until this is fixed.
+    // SEA sensors are physically LINEAR encoders (8000 counts/inch of travel
+    // along the series elastic element, not counts/revolution of a shaft).
+    // counts / sea_cpr gives the linear deflection in inches, which is the
+    // arc length swept along motor_configs[i]->sea_radius (the lever-arm
+    // radius, inches) -- so dividing that arc length by the radius gives
+    // the angular deflection in radians (arc_length = radius * angle).
     for (int i = 0; i<7; i++){
-      self->qdec_convert_sea_to_rad_[i] = (TWO_PI) / (motor_configs[i]->sea_cpr); // BROKEN: see comment above
+      self->qdec_convert_sea_to_rad_[i] = 1.0f / (motor_configs[i]->sea_cpr * motor_configs[i]->sea_radius);
     }
 
     self->prev_time = lf_time_physical(); //lf_time_physical(); //lf_time_physical_elapsed
@@ -579,7 +562,8 @@ reactor QDEC(sample_period: time = 5 ms){
     bool encoder_rx_ok = read_full_encoder_state(encoder_counts, encoder_meta);
     if (encoder_rx_ok) {
       for (int i = 0; i < 7; i++) {
-        filter_channel_update("SEA", i, sea_counts[i], sea_meta[i],
+        int sea_wire_ch = SEA_CHANNEL_INDEX_SWAP ? (6 - i) : i;
+        filter_channel_update("SEA", i, sea_counts[sea_wire_ch], sea_meta[sea_wire_ch],
                                &sea_counts_accepted[i], &sea_meta_accepted[i], &sea_reject_streak[i],
                                self->qdec_convert_sea_to_rad_[i], self->interval_sec);
         filter_channel_update("USM", i, usm_counts[i], usm_meta[i],

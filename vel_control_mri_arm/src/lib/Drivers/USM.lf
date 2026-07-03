@@ -47,17 +47,12 @@ reactor USM {
         duty_cycle = 0.0;
       }
       return duty_cycle;
-      //int ccr = ((int) (((float) ARR_PERIOD) * duty_cycle));
-      //return ccr; //((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
     }
 
-    //float convert_speed_rad_per_sec_to_duty_cycle(float speed_rad_per_sec){
-    //  return apply_duty_cycle_limits(speed_rad_per_sec / ((float)(motor_configs[i]->pwm_rad_per_sec_max)));
-    //}
 
     int convert_duty_cycle_to_pwm_ccr(float duty_cycle){
       int ccr = ((int) (((float) ARR_PERIOD) * duty_cycle));
-      return ccr; //((int) (((float) ARR_PERIOD) * duty_cycle)); // CCR = AAR * duty_cycle [percentage]
+      return ccr; //
     }
 
 
@@ -247,20 +242,6 @@ reactor USM {
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   motor_directions_[6]);
       return;
     }
-    
-    /*
-    // old version of function
-    void set_direction_pins(){
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13,   speed_[0] >= 0); // 1 if non-negative, 0 if negative
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,    speed_[1] >= 0);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6,    speed_[2] >= 0);
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4,    speed_[3] >= 0);
-      HAL_GPIO_WritePin(GPIOC, GPIO_PIN_5,    speed_[4] >= 0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,   speed_[5] >= 0);
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14,   speed_[6] >= 0);
-      return;
-    }
-    */
 
     void compute_duty_cycles(){
       for (int i = 0; i < 7; i++){
