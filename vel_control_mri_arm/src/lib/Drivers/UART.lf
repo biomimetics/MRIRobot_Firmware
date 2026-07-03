@@ -64,7 +64,19 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
             HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
         }
 
+        // HAL_UARTEx_ReceiveToIdle_DMA funnels ALL idle-DMA UARTs through this
+        // one weak global callback, not per-instance ones -- so any other
+        // reactor using idle-DMA reception (currently Encoder.lf's SEA/USM
+        // burst reception on huart3) has to be dispatched out of here by
+        // huart->Instance, mirroring how Main.lf's HAL_UART_RxCpltCallback
+        // already dispatches by instance for the non-idle DMA/IT callbacks.
+        extern void HAL_UART_RxEventCallback3(UART_HandleTypeDef *huart, uint16_t Size);
+
         void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+            if (huart->Instance == USART3) {
+                HAL_UART_RxEventCallback3(huart, Size);
+                return;
+            }
 
             uart_receive_size = (size_t)Size;
             memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, uart_receive_size); // moves the data over to a buffer that's handled in the receive update

@@ -17,6 +17,12 @@ import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import StateMachine from "lib/State_Machine.lf"
 import UART_Handler from "lib/Drivers/UART.lf"
+// MotorCalibration.lf is a diagnostic reactor for finding the USM/SEA
+// channel <-> physical joint mapping (see that file for usage notes and
+// fpga_comms_potential_issues.md for what it found). Not part of normal
+// operation -- uncomment this import plus the instantiation/wiring below
+// to use it again.
+// import MotorCalibration from "lib/Drivers/MotorCalibration.lf"
 
 preamble {=
   #include <stdio.h>
@@ -100,6 +106,9 @@ main reactor {
   usm = new USM()                            // Ultrasonic motor controllers
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
+  // Diagnostic only -- see MotorCalibration.lf for usage notes. Uncomment
+  // along with the import above and the wiring below to use it again.
+  // motor_calib = new MotorCalibration()
 
   // route all the inputs/outputs here
 
@@ -123,6 +132,15 @@ main reactor {
   state_machine.commanded_motor_velocities -> usm.speed
   state_machine.enable_motor_command -> usm.enable_motor_command
   state_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
+
+  // MotorCalibration.lf wiring (diagnostic only, see that file) -- swap the
+  // three lines above for these, plus uncomment the import and instantiation
+  // above, to drive motors from the calibration reactor instead:
+  // motor_calib.speed -> usm.speed
+  // motor_calib.enable_motor_command -> usm.enable_motor_command
+  // motor_calib.force_disable_motor_pins -> usm.force_disable_motor_pins
+  // qdec.qdec_out -> motor_calib.qdec_in
+  // qdec.sea_out -> motor_calib.sea_in
 
 
   reaction(startup) {=
