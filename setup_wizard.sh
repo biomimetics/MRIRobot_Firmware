@@ -50,11 +50,20 @@ else
     echo "ARM toolchain (arm-none-eabi-gcc) is already installed. Skipping installation."
 fi
 
-# Clone openocd into resources if not already present
+# Clone openocd into resources if not already present. Check for the
+# `bootstrap` script (not just directory existence) -- a prior clone
+# interrupted partway (network blip, etc.) can leave a directory behind
+# that exists but isn't a real checkout, which would otherwise cause this
+# check to skip re-cloning and fail later at the `./bootstrap` step.
 OPENOCD_DIR="$SCRIPT_DIR/resources/openocd"
 echo "Checking OpenOCD..."
-if [ ! -d "$OPENOCD_DIR" ]; then
-    echo "OpenOCD not found! Cloning into $OPENOCD_DIR..."
+if [ ! -f "$OPENOCD_DIR/bootstrap" ]; then
+    if [ -d "$OPENOCD_DIR" ]; then
+        echo "OpenOCD directory at $OPENOCD_DIR exists but looks incomplete (missing bootstrap script) -- removing and re-cloning..."
+        rm -rf "$OPENOCD_DIR"
+    else
+        echo "OpenOCD not found! Cloning into $OPENOCD_DIR..."
+    fi
     git clone https://github.com/openocd-org/openocd.git "$OPENOCD_DIR"
     echo "OpenOCD cloned successfully."
 else

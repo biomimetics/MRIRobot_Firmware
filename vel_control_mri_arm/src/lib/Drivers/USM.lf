@@ -18,13 +18,13 @@ preamble {=
 
 reactor USM {
   input[7] speed: float
-  input enable_motor_command: bool
+  input[7] enable_motor_command: bool
   input[7] force_disable_motor_pins: bool
 
   output[7] commanded_duty_cycle: float // only used for monitoring purposes
 
   state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
-  state enable_motor_command_: bool = false
+  state enable_motor_command_: bool[7] = {false, false, false, false, false, false, false}
   
   //state force_disable_motor_pins
   preamble {=
@@ -319,13 +319,20 @@ reactor USM {
   =}
 
   reaction(enable_motor_command) {=
-    self->enable_motor_command_ = enable_motor_command->value;
-    set_motor_enable_pins(self->enable_motor_command_);
+    for (int i = 0; i<7; i++){
+      self->enable_motor_command_[i] = enable_motor_command[i]->value;
+    }
+    set_motor_enable_pins_from_array(self->enable_motor_command_);
     =}
 
   reaction(speed) -> commanded_duty_cycle{=
-    
-    if (self->enable_motor_command_){
+
+    bool any_motor_enabled_ = false;
+    for (int i = 0; i<7; i++){
+      if (self->enable_motor_command_[i]) any_motor_enabled_ = true;
+    }
+
+    if (any_motor_enabled_){
       // save internal speed_ values
       for (int i = 0; i<7; i++){
         //speed_[i] = speed[i]->value;

@@ -49,7 +49,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
 
     // outputs to usm
     output[7] commanded_motor_velocities: float
-    output enable_motor_command: bool // triggered when we're in the right state
+    output[7] enable_motor_command: bool // triggered when we're in the right state
     output[7] force_disable_motor_pins: bool // used to disable specific motors if they've hit convergence or for safety reasons.
 
     // internal copies of inputs    
@@ -164,8 +164,10 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         lf_set(force_disable_motor_pins[i], self->force_disable_motor_pins_[i]);
       }
       if (PRINT_STATEMACHINE) printf("\n");
-      lf_set(enable_motor_command, self->enable_motor_command_);
-      
+      for (int i = 0; i<DOF_NUMBER; i++){
+        lf_set(enable_motor_command[i], self->enable_motor_command_);
+      }
+
     =}
     
 
