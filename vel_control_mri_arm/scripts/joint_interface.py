@@ -62,6 +62,20 @@ def convVal(value):
 
 
 
+# Column names for the CSV written by listener() below -- one leading
+# time_s column, then 7 joints' worth of each of encoder position, SEA
+# position, and velocity, matching the 'e' message's [encoder x7, sea x7,
+# velocity x7] layout so the file can be read directly with
+# pandas.read_csv() (see scripts/data_processing.py for the existing
+# encoder_i/sea_i column-index convention this mirrors).
+CSV_HEADER = (
+    ["time_s"]
+    + [f"encoder_{i}" for i in range(7)]
+    + [f"sea_{i}" for i in range(7)]
+    + [f"velocity_{i}" for i in range(7)]
+)
+
+
 # Listender to print and log the STM32's outputs
 def listener(STM32_serial, file_name):
   start_time = time.time()
@@ -124,7 +138,8 @@ if __name__ == '__main__':
 
   file_name = getFileName()
   f = open(file_name,'w')
-  f.write("")
+  f.write(",".join(CSV_HEADER) + "\n")
+  f.close()
 
   
   print( f"\n===================================\n\n")
