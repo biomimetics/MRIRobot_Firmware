@@ -1,0 +1,76 @@
+target C
+
+preamble {=
+  // Nanoseconds -> seconds, matching the convention used by
+  // Small_Velocity_Controller.lf and FakeMotorPlant.lf.
+  #define NS_TO_S 1e-9f
+=}
+
+// Simple discrete PID position controller: reads a plant's position
+// feedback and outputs a velocity command for Small_Velocity_Controller,
+// standing in for the higher-level ROS2 process that (per
+// Small_Velocity_Controller.lf's header comment) already closes the
+// trajectory/fine-positioning loop on the real system. Used by
+// Main_Test_SVC_Sweep.lf to evaluate MPC weight tuning against a
+// closed-loop step response instead of the open-loop triangle wave in
+// Main_Test_SVC_Csv.lf.
+//
+// Gains are placeholders -- TODO: characterize against the real arm's
+// dynamics, same caveat as Small_Velocity_Controller's motor-model
+// parameters.
+reactor PositionPidController(
+  control_period: time = 1 ms,
+  kp: float = 2.0,
+  ki: float = 0.0,
+  kd: float = 0.1,
+  target_position: float = 1.0, // rad, step target commanded from startup
+  max_velocity: float = 0.6981  // rad/s, output saturation, ~40 deg/s
+) {
+  input position_feedback: float
+  output command_velocity: float
+
+  state position_: float = 0.0
+  state integral_: float = 0.0
+  state prev_error_: float = 0.0
+  state have_prev_error_: bool = false
+  state last_tick_time_: time = 0
+
+  timer control_tick(0, control_period)
+
+  reaction(startup) {=
+    self->position_ = 0.0f;
+    self->integral_ = 0.0f;
+    self->prev_error_ = 0.0f;
+    self->have_prev_error_ = false;
+    self->last_tick_time_ = lf_time_logical();
+  =}
+
+  // Thin cache-only reaction, same pattern as Small_Velocity_Controller's
+  // command_velocity_input reaction -- keeps the PID computation itself on
+  // its own timer cadence, independent of when feedback samples arrive.
+  reaction(position_feedback) {=
+    self->position_ = position_feedback->value;
+  =}
+
+  reaction(control_tick) -> command_velocity {=
+    instant_t now = lf_time_logical();
+    float dt = (float) (now - self->last_tick_time_) * NS_TO_S;
+    self->last_tick_time_ = now;
+    if (dt < 0.0f) dt = 0.0f; // defensive; logical time is monotonic
+
+    float error = self->target_position - self->position_;
+    self->integral_ += error * dt;
+    float derivative = 0.0f;
+    if (self->have_prev_error_ && dt > 0.0f) {
+      derivative = (error - self->prev_error_) / dt;
+    }
+    self->prev_error_ = error;
+    self->have_prev_error_ = true;
+
+    float v = self->kp * error + self->ki * self->integral_ + self->kd * derivative;
+    if (v > self->max_velocity) v = self->max_velocity;
+    if (v < -self->max_velocity) v = -self->max_velocity;
+
+    lf_set(command_velocity, v);
+  =}
+}

@@ -1,0 +1,104 @@
+// Closed-loop sweep harness for tuning Small_Velocity_Controller's MPC cost
+// weights (W_debt/W_switch/W_pulse) against a position step commanded by
+// an outer PositionPidController -> Small_Velocity_Controller ->
+// FakeMotorPlant loop (PositionPidController stands in for the real
+// higher-level ROS2 process, per Small_Velocity_Controller.lf's header
+// comment). scripts/sweep_svc_weights.py runs this binary many times to
+// compare how different weight combinations trade off total pulse count
+// against settling time.
+//
+// ---- Quickstart ----
+//   cd vel_control_mri_arm
+//   python3 scripts/sweep_svc_weights.py --build
+// That single command flips PRINT_SVC to 1, builds this file with
+// `lfc-dev`, reverts PRINT_SVC to 0, then runs the default 3x3x3 weight
+// grid (27 subprocess runs of the binary this file compiles to, each with
+// different SVC_W_DEBT/SVC_W_SWITCH/SVC_W_PULSE env vars -- see below).
+// Results land in csv_data/sweep/: summary.csv (one row per combination),
+// pareto_scatter.png (pulse count vs. settling time, Pareto front
+// highlighted), heatmaps.png (pulse count over the W_debt/W_switch grid,
+// faceted by W_pulse), and runs/run_NNNN.csv (the raw per-sample CSV for
+// each combination, same columns as Main_Test_SVC_Csv.lf's CsvLogger
+// output). On later sweeps, once this file and pulse_mpc.c/h are unchanged,
+// drop --build to reuse the existing binary and skip recompiling. See
+// scripts/sweep_svc_weights.py's own docstring for --grid/--tolerance/
+// --pid-kp etc. to customize the sweep.
+//
+// The MPC weights, PID gains, target position, and CSV output path are all
+// overridable via environment variables (read once at startup via getenv()
+// in the instantiation arguments below) so a whole sweep only needs one
+// `lfc-dev` build -- scripts/sweep_svc_weights.py sets these env vars before
+// each subprocess run of this *same* compiled binary. (H_initial is the one
+// exception -- see the comment above the `svc` instantiation below.)
+//
+// Build directly (bypassing the sweep script -- you must flip PRINT_SVC to
+// 1 in src_c/pulse_mpc.h yourself first, see Note below):
+//   lfc-dev src/Main_Test_SVC_Sweep.lf
+//
+// Run one configuration directly (every env var optional, falls back to
+// the defaults below):
+//   SVC_W_DEBT=1.0 SVC_W_SWITCH=0.05 SVC_W_PULSE=0.001 \
+//     SVC_TARGET_POSITION=1.0 SVC_CSV_PATH=csv_data/manual_run.csv \
+//     ./bin/Main_Test_SVC_Sweep
+// ...then plot that one CSV the same way as a Main_Test_SVC_Csv.lf run:
+//   python3 scripts/plot_svc_test.py csv_data/manual_run.csv
+//
+// Note: PRINT_SVC must be set to 1 in src_c/pulse_mpc.h at *build* time for
+// debug_info (and therefore the CSV) to see anything real -- see
+// Small_Velocity_Controller.lf's control_tick reaction. This only matters
+// when compiling; scripts/sweep_svc_weights.py's --build flag flips it,
+// builds, and flips it back automatically, so the checked-in source is
+// always left at PRINT_SVC=0. Remember to do the same (flip back to 0)
+// if you ever build this file manually. It must stay 0 before flashing
+// production firmware.
+target C {
+  fast: true,
+  timeout: 20 s
+}
+
+// No `platform` override here -- same reasoning as Main_Test_SVC.lf/
+// Main_Test_SVC_Csv.lf: this harness runs natively on the dev machine, not
+// the STM32.
+import Small_Velocity_Controller from "lib/SmallVelocityControl/Small_Velocity_Controller.lf"
+import FakeMotorPlant from "lib/SmallVelocityControl/FakeMotorPlant.lf"
+import CsvLogger from "lib/SmallVelocityControl/CsvLogger.lf"
+import PositionPidController from "lib/SmallVelocityControl/PositionPidController.lf"
+
+preamble {=
+  #include <stdlib.h>
+=}
+
+main reactor {
+  pid = new PositionPidController(
+    target_position = {= getenv("SVC_TARGET_POSITION") ? atof(getenv("SVC_TARGET_POSITION")) : 1.0f =},
+    kp = {= getenv("SVC_PID_KP") ? atof(getenv("SVC_PID_KP")) : 2.0f =},
+    ki = {= getenv("SVC_PID_KI") ? atof(getenv("SVC_PID_KI")) : 0.0f =},
+    kd = {= getenv("SVC_PID_KD") ? atof(getenv("SVC_PID_KD")) : 0.1f =}
+  )
+  // H_initial is NOT overridden here -- it's declared as a `time` parameter,
+  // and LF only accepts compile-time time literals (e.g. `300 ms`) for
+  // time-typed parameters, not runtime getenv()-based code expressions (LF
+  // rejects a CodeExpr assignment to a time parameter at compile time). It
+  // stays at Small_Velocity_Controller's own default (300 ms) for every
+  // sweep run; tuning it would require recompiling per value.
+  svc = new Small_Velocity_Controller(
+    W_debt_initial = {= getenv("SVC_W_DEBT") ? atof(getenv("SVC_W_DEBT")) : 1.0f =},
+    W_switch_initial = {= getenv("SVC_W_SWITCH") ? atof(getenv("SVC_W_SWITCH")) : 0.05f =},
+    W_pulse_initial = {= getenv("SVC_W_PULSE") ? atof(getenv("SVC_W_PULSE")) : 0.001f =}
+  )
+  plant = new FakeMotorPlant()
+  logger = new CsvLogger(
+    csv_path = {= getenv("SVC_CSV_PATH") ? getenv("SVC_CSV_PATH") : "csv_data/svc_test_log.csv" =}
+  )
+
+  pid.command_velocity -> svc.command_velocity_input
+  svc.command_velocity_output -> plant.command_velocity
+  svc.debug_info -> logger.debug_info
+  plant.real_velocity -> logger.real_velocity
+  plant.position -> logger.position
+
+  // `after` is required here to break the pid -> svc -> plant -> pid
+  // feedback cycle (LF disallows zero-delay cycles among reactors) -- 1 ms
+  // also stands in for a plausible real feedback-sampling delay.
+  plant.position -> pid.position_feedback after 1 ms
+}

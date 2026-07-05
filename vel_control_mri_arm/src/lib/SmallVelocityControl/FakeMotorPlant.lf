@@ -1,0 +1,85 @@
+target C
+
+preamble {=
+  #include <math.h>
+
+  // Nanoseconds -> seconds, matching the convention used by
+  // Small_Velocity_Controller.lf for converting LF instant_t/interval_t
+  // deltas into plain float seconds.
+  #define NS_TO_S 1e-9f
+=}
+
+// Minimal open-loop simulated motor, standing in for the real USM hardware
+// so test/dev harnesses can plot "what would the motor actually be doing"
+// in response to Small_Velocity_Controller's bang-bang commands --
+// Small_Velocity_Controller itself uses no encoder feedback (see
+// Small_Velocity_Controller.lf's header comment), so nothing else in this
+// repo shows the motor's simulated response.
+//
+// Not a literal reuse of pulse_mpc.h's MotorModel struct -- this is a
+// separate, simplified reactor for visualization only, kept intentionally
+// decoupled from the controller's own internal model so it can't
+// accidentally mask a controller bug by sharing its assumptions verbatim.
+// Defaults mirror Small_Velocity_Controller's V_min_initial/gain_initial/
+// T_start_initial/T_stop_initial so the two stay comparable.
+//
+// Dynamics: real_velocity exponentially approaches gain*command_velocity,
+// using time constant tau_start while ramping up from near-zero and
+// tau_stop while decaying toward zero -- approximating the startup-command
+// delay / hard-stop settle time the real motor (and the controller's own
+// MotorModel) assumes. position is then Euler-integrated from
+// real_velocity.
+reactor FakeMotorPlant(
+  sim_period: time = 1 ms,
+  gain: float = 0.9,
+  tau_start: time = 25 ms,
+  tau_stop: time = 1 ms
+) {
+  input command_velocity: float
+
+  output real_velocity: float
+  output position: float
+
+  state real_velocity_: float = 0.0
+  state position_: float = 0.0
+  state last_command_: float = 0.0
+  state last_sim_time_: time = 0
+
+  timer sim_tick(0, sim_period)
+
+  reaction(startup) {=
+    self->real_velocity_ = 0.0f;
+    self->position_ = 0.0f;
+    self->last_command_ = 0.0f;
+    self->last_sim_time_ = lf_time_logical();
+  =}
+
+  reaction(command_velocity) {=
+    self->last_command_ = command_velocity->value;
+  =}
+
+  reaction(sim_tick) -> real_velocity, position {=
+    instant_t now = lf_time_logical();
+    float dt = (float) (now - self->last_sim_time_) * NS_TO_S;
+    self->last_sim_time_ = now;
+    if (dt < 0.0f) dt = 0.0f; // defensive; logical time is monotonic
+
+    float target = self->gain * self->last_command_;
+    bool ramping_up = fabsf(target) > fabsf(self->real_velocity_);
+    float tau = ramping_up
+        ? (float) self->tau_start * NS_TO_S
+        : (float) self->tau_stop * NS_TO_S;
+
+    if (tau > 0.0f) {
+      float alpha = 1.0f - expf(-dt / tau);
+      self->real_velocity_ += (target - self->real_velocity_) * alpha;
+    } else {
+      self->real_velocity_ = target;
+    }
+
+    self->position_ += self->real_velocity_ * dt;
+
+    lf_set(real_velocity, self->real_velocity_);
+    lf_set(position, self->position_);
+  =}
+}

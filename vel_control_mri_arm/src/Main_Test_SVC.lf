@@ -30,45 +30,12 @@ target C {
 // build and run fine here even though its own target block still requests
 // the stm32 platform for the real firmware build.
 import Small_Velocity_Controller from "lib/SmallVelocityControl/Small_Velocity_Controller.lf"
+import VelocitySignalGenerator from "lib/SmallVelocityControl/VelocitySignalGenerator.lf"
 
 preamble {=
   #include "pulse_mpc.h"
   #include <math.h>
 =}
-
-// Generates a slow triangle wave: 0 -> +amplitude -> 0 -> -amplitude -> 0,
-// looping every cycle_period. Default amplitude is 40 deg/s (well above the
-// default V_min ~17 deg/s), so the trajectory spends most of its time in
-// pass-through mode and dips into small-velocity bang-bang mode near each
-// zero-crossing -- exercising both modes and the transitions between them.
-reactor VelocitySignalGenerator(
-  gen_period: time = 10 ms,
-  cycle_period: time = 8 s,
-  amplitude: float = 0.6981 // rad/s, ~40 deg/s
-) {
-  output command_velocity: float
-
-  timer t(0, gen_period)
-
-  reaction(t) -> command_velocity {=
-    instant_t now = lf_time_logical();
-    double cycle_ns = (double) self->cycle_period;
-    double phase = fmod((double) now, cycle_ns) / cycle_ns; // in [0, 1)
-
-    float v;
-    if (phase < 0.25) {
-      v = self->amplitude * (float) (phase / 0.25);
-    } else if (phase < 0.5) {
-      v = self->amplitude * (float) (1.0 - (phase - 0.25) / 0.25);
-    } else if (phase < 0.75) {
-      v = -self->amplitude * (float) ((phase - 0.5) / 0.25);
-    } else {
-      v = -self->amplitude * (float) (1.0 - (phase - 0.75) / 0.25);
-    }
-
-    lf_set(command_velocity, v);
-  =}
-}
 
 // Consumes the SVC's debug_info (only populated when PRINT_SVC is enabled
 // in pulse_mpc.h -- it must be set to 1 for this test to see anything) and
