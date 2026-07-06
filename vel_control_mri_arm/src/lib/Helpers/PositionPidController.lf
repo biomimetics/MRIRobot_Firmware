@@ -15,6 +15,12 @@ preamble {=
 // closed-loop step response instead of the open-loop triangle wave in
 // Main_Test_SVC_Csv.lf.
 //
+// Also outputs remaining_error (target_position - position_) alongside
+// command_velocity, standing in for Small_DeltaP_Controller's real upstream
+// remaining-error signal (see Small_DeltaP_Controller_Plan.md's phasing)
+// until the real wire signal lands (Small_DeltaP_Comms_Plan.md) -- used by
+// Main_Test_DeltaP.lf.
+//
 // Gains are placeholders -- TODO: characterize against the real arm's
 // dynamics, same caveat as Small_Velocity_Controller's motor-model
 // parameters.
@@ -28,6 +34,7 @@ reactor PositionPidController(
 ) {
   input position_feedback: float
   output command_velocity: float
+  output remaining_error: float
 
   state position_: float = 0.0
   state integral_: float = 0.0
@@ -52,7 +59,7 @@ reactor PositionPidController(
     self->position_ = position_feedback->value;
   =}
 
-  reaction(control_tick) -> command_velocity {=
+  reaction(control_tick) -> command_velocity, remaining_error {=
     instant_t now = lf_time_logical();
     float dt = (float) (now - self->last_tick_time_) * NS_TO_S;
     self->last_tick_time_ = now;
@@ -72,5 +79,6 @@ reactor PositionPidController(
     if (v < -self->max_velocity) v = -self->max_velocity;
 
     lf_set(command_velocity, v);
+    lf_set(remaining_error, error);
   =}
 }

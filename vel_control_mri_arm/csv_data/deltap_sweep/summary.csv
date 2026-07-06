@@ -1,0 +1,2 @@
+W_error,k_overshoot,C_overshoot,sigma0,pulse_count,settling_time_s,converged,final_error,overshoot_count,max_overshoot,csv_path
+1.0,10.0,0.01,0.01,1,2.26200008392334,True,0.0002340000000000675,1,0.0002340000000000675,/home/linny/mri/MRIRobot_Firmware/vel_control_mri_arm/csv_data/deltap_sweep/runs/run_0000.csv

@@ -17,7 +17,7 @@ import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import StateMachine from "lib/State_Machine.lf"
 import UART_Handler from "lib/Drivers/UART.lf"
-import Small_Velocity_Controller_Bank from "lib/SmallVelocityControl/Small_Velocity_Controller_Bank.lf"
+import Small_DeltaP_Controller_Bank from "lib/Drivers/SmallDeltaPControl/Small_DeltaP_Controller_Bank.lf"
 
 // MotorCalibration.lf is a diagnostic reactor for finding the USM/SEA
 // channel <-> physical joint mapping (see that file for usage notes and
@@ -108,7 +108,7 @@ main reactor {
   usm = new USM()                            // Ultrasonic motor controllers
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
-  vel_bank = new Small_Velocity_Controller_Bank()  // Per-joint velocity control stubs, routed between state_machine and usm
+  deltap_bank = new Small_DeltaP_Controller_Bank()  // Per-joint delta-position pulse control, routed between state_machine and usm
   // Diagnostic only -- see MotorCalibration.lf for usage notes. Uncomment
   // along with the import above and the wiring below to use it again.
   // motor_calib = new MotorCalibration()
@@ -125,20 +125,21 @@ main reactor {
   qdec.qdec_out -> state_machine.motor_encoder_positions
   qdec.qdec_vel_out -> state_machine.motor_encoder_velocities
   qdec.sea_out -> state_machine.sea_encoder_positions
+  qdec.sea_vel_out -> state_machine.sea_encoder_velocities
 
   state_machine.enable_qdec -> qdec.enable_qdec
   state_machine.reset_qdec -> qdec.reset_qdec
 
   // usm
-  usm.commanded_duty_cycle -> state_machine.usm_duty_cycles
-
-  state_machine.commanded_motor_velocities -> vel_bank.command_velocity_input
-  vel_bank.command_velocity_output -> usm.speed
+  state_machine.commanded_motor_velocities -> deltap_bank.command_velocity_input
+  state_machine.commanded_position_deltas -> deltap_bank.remaining_error_input
+  deltap_bank.command_velocity_output -> usm.speed
 
   // enable_motor_command goes directly from state_machine to usm, bypassing
-  // vel_bank -- coupling it to Small_Velocity_Controller's own bang-bang
+  // deltap_bank -- coupling it to Small_DeltaP_Controller's own bang-bang
   // start/stop cycling caused direction-reversal failures downstream (see
-  // Small_Velocity_Controller.lf).
+  // Small_Velocity_Controller.lf, whose motor this shares -- same hazard
+  // applies to any bang-bang small-velocity controller on this hardware).
   state_machine.enable_motor_command -> usm.enable_motor_command
 
   state_machine.force_disable_motor_pins -> usm.force_disable_motor_pins

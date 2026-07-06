@@ -1,0 +1,70 @@
+target C
+
+preamble {=
+  #include <math.h>
+=}
+
+// Generates a slow triangle wave as a POSITION target (not velocity, unlike
+// VelocitySignalGenerator.lf): 0 -> +amplitude -> 0, dwell, 0 -> -amplitude
+// -> 0, dwell, repeat. A 6-segment cycle instead of VelocitySignalGenerator's
+// 4-segment one, since that generator's zero crossings are single instants
+// that barely exercise pulse planning at all -- a sustained dwell right in
+// the small-velocity/remaining-error-convergence region is exactly the
+// regime Small_DeltaP_Controller targets, and needs to be observable, not
+// just transiently passed through (see
+// src/lib/Drivers/SmallDeltaPControl/TODO.md's Stage 3 notes).
+//
+// A new reactor rather than a modification to VelocitySignalGenerator.lf --
+// keeps Small_Velocity_Controller's existing test harness untouched.
+//
+// Segment order per cycle: ramp (0->+A), ramp (+A->0), dwell at 0, ramp
+// (0->-A), ramp (-A->0), dwell at 0. The two ramp segments together take
+// ramp_period; each dwell takes zero_dwell_time. Total cycle length is
+// 2*ramp_period + 2*zero_dwell_time.
+reactor DeltaPSignalGenerator(
+  gen_period: time = 16 ms,
+  ramp_period: time = 2 s,     // time for one full 0->+A->0 (or 0->-A->0) ramp
+  zero_dwell_time: time = 2 s, // pause at 0 after each ramp
+  amplitude: float = 2.0       // rad, target position swing
+) {
+  output target_position: float
+
+  timer t(0, gen_period)
+
+  reaction(t) -> target_position {=
+    double ramp_ns = (double) self->ramp_period;
+    double dwell_ns = (double) self->zero_dwell_time;
+    double cycle_ns = 2.0 * ramp_ns + 2.0 * dwell_ns;
+
+    instant_t now = lf_time_logical();
+    double phase_ns = fmod((double) now, cycle_ns);
+
+    float p;
+    if (phase_ns < ramp_ns) {
+      // Ramp 1: 0 -> +A -> 0
+      double half = ramp_ns / 2.0;
+      if (phase_ns < half) {
+        p = self->amplitude * (float) (phase_ns / half);
+      } else {
+        p = self->amplitude * (float) (1.0 - (phase_ns - half) / half);
+      }
+    } else if (phase_ns < ramp_ns + dwell_ns) {
+      // Dwell 1, at 0
+      p = 0.0f;
+    } else if (phase_ns < 2.0 * ramp_ns + dwell_ns) {
+      // Ramp 2: 0 -> -A -> 0
+      double local = phase_ns - (ramp_ns + dwell_ns);
+      double half = ramp_ns / 2.0;
+      if (local < half) {
+        p = -self->amplitude * (float) (local / half);
+      } else {
+        p = -self->amplitude * (float) (1.0 - (local - half) / half);
+      }
+    } else {
+      // Dwell 2, at 0
+      p = 0.0f;
+    }
+
+    lf_set(target_position, p);
+  =}
+}

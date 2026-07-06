@@ -4,8 +4,14 @@ target C {
     name: "stm32",
     board: "F446RE"
   },
-  files: ["../../../src_c/pulse_mpc.h", "../../../src_c/pulse_mpc.c"],
-  cmake-include: ["../../../src_c/pulse_mpc_cmake.cmake"]
+  files: [
+    "../../../src_c/pulse_mpc.h", "../../../src_c/pulse_mpc.c",
+    "../../../src_c/motor_model.h", "../../../src_c/motor_model.c"
+  ],
+  cmake-include: [
+    "../../../src_c/pulse_mpc_cmake.cmake",
+    "../../../src_c/motor_model_cmake.cmake"
+  ]
 }
 
 // Single-channel hybrid velocity controller. Sits inside

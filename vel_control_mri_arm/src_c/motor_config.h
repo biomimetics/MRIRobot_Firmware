@@ -14,137 +14,111 @@ typedef struct { /* __MOTOR_CONFIG_H */
     float qdec_cpr;         // motor encoder count per rotation
     float sea_cpr;          // sea encoder counts per inch of linear travel (linear encoder, not counts/revolution)
     float sea_radius;       // lever-arm radius (inches) from the SEA's linear travel to the joint's angular deflection
-    float sea_gear_ratio;   // sea motor gear ratio
     float sea_offset;       // sea reset offset
     float pwm_rad_per_sec_max; // max rad/s value to use for calculating duty cycles (dependent on external encoder cpr and expected encoder ratio)
-
-    // Movement info
-    float speed_ratio;      // motor speed ratio
-    float gear_ratio;       // motor gear box gear ratio
    } Motor_Config;
 
-// --------------------------------------- Base joint --------------------------------------- 
+// --------------------------------------- Base joint ---------------------------------------
 static Motor_Config motor0_config = {
     1,          // dir              - Motor direction
-    0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s // APPLY THESE BEFORE GEAR REDUCTION
+    12.566,       // max_speed        - max motor speed in rad/s, 2 rotations/sec (4*pi rad/s)
     40000,      // qdec_cpr         - motor encoder count per rotation // 10,000 base cpr * 4 scaling = 40,000
     8000,       // sea_cpr          - sea encoder counts per inch of linear travel
     2.79528,    // sea_radius       - lever-arm radius, inches
-    22.0,       // sea_gear_ratio   - sea motor gear ratio
-    -0.5,       // sea_offset       - sea reset offset
+    -0.5,       // sea_offset       - sea reset offset // UNUSED
     PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
-    1.0,        // speed_ratio      - motor speed ration 
-    21.0,       // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor1_config = {
     1,          // dir              - Motor direction
-    0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
+    12.566,       // max_speed        - max motor speed in rad/s, 2 rotations/sec (4*pi rad/s)
     40000,      // qdec_cpr         - motor encoder count per rotation // (40000 base cpr, 40k * 1 = 40k after x4 counts scaling.)
     8000,       // sea_cpr          - sea encoder counts per inch of linear travel
     2.79528,    // sea_radius       - lever-arm radius, inches
-    22.0,       // sea_gear_ratio   - sea motor gear ratio
     0.3,        // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
-    1.0,        // speed_ratio      - motor speed ration 
-    21.0,       // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor2_config = {
     1,          // dir              - Motor direction
-    0.52,       // max_speed        - max motor speed in rad/s, about 30 deg/s
+    12.566,       // max_speed        - max motor speed in rad/s, 2 rotations/sec (4*pi rad/s)
     40000,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder counts per inch of linear travel
     2.79528,    // sea_radius       - lever-arm radius, inches
-    20.0,       // sea_gear_ratio   - sea motor gear ratio
     -0.15,      // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
-    1.0,        // speed_ratio      - motor speed ration 
-    21.0,       // gear_ratio       - motor gear box gear ratio
 };
-// --------------------------------------- Base joint --------------------------------------- 
+// --------------------------------------- Base joint ---------------------------------------
 
 
 
 
-// --------------------------------------- Elbow joint --------------------------------------- 
+// --------------------------------------- Elbow joint ---------------------------------------
 static Motor_Config motor3_config = {
     -1, //1,          // dir              - Motor direction
-    0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
+    12.566,       // max_speed        - max motor speed in rad/s, 2 rotations/sec (4*pi rad/s)
     8000,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder counts per inch of linear travel
     1.775591,   // sea_radius       - lever-arm radius, inches
-    13.0,       // sea_gear_ratio   - sea motor gear ratio
     2,       // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
-    1.0,        // speed_ratio      - motor speed ration 
-    12.0,       // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor4_config = {
     -1, //1,          // dir              - Motor direction
-    0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
+    12.566,       // max_speed        - max motor speed in rad/s, 2 rotations/sec (4*pi rad/s)
     8000,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder counts per inch of linear travel
     1.775591,   // sea_radius       - lever-arm radius, inches
-    15.0,       // sea_gear_ratio   - sea motor gear ratio
     0,         // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
-    1.0,        // speed_ratio      - motor speed ration 
-    12.0,       // gear_ratio       - motor gear box gear ratio
 };
-// --------------------------------------- Elbow joint --------------------------------------- 
+// --------------------------------------- Elbow joint ---------------------------------------
 
 
 
 
-// --------------------------------------- Wrist joint --------------------------------------- 
+// --------------------------------------- Wrist joint ---------------------------------------
 static Motor_Config motor5_config = {
     -1,         // dir              - Motor direction
-    0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
+    12.566,       // max_speed        - max motor speed in rad/s, 2 rotations/sec (4*pi rad/s)
     8000,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder counts per inch of linear travel
     1.775591,   // sea_radius       - lever-arm radius, inches
-    36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
     0.3,        // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
-    1.0,        // speed_ratio      - motor speed ration 
-    52.0/16.0,  // gear_ratio       - motor gear box gear ratio
 };
 
 
 static Motor_Config motor6_config = {
     -1,         // dir              - Motor direction
-    0.26,       // max_speed        - max motor speed in rad/s, about 15 deg/s
+    12.566,       // max_speed        - max motor speed in rad/s, 2 rotations/sec (4*pi rad/s)
     8000,      // qdec_cpr         - motor encoder count per rotation
     8000,       // sea_cpr          - sea encoder counts per inch of linear travel
     1.775591,   // sea_radius       - lever-arm radius, inches
-    36.0/16.0,  // sea_gear_ratio   - sea motor gear ratio
     -0.2,       // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
-    1.0,        // speed_ratio      - motor speed ration 
-    52.0/16.0,  // gear_ratio       - motor gear box gear ratio
 };
-// --------------------------------------- Wrist joint --------------------------------------- 
+// --------------------------------------- Wrist joint ---------------------------------------
 
 
 
 
 
 /*
-    We want to make an array of pointers to all the hard-coded encoder configs. 
+    We want to make an array of pointers to all the hard-coded encoder configs.
         This allows us to easily access cofings as needed
 */
 static Motor_Config* motor_configs[7] = {
-    &motor0_config, 
-    &motor1_config, 
-    &motor2_config, 
-    &motor3_config, 
-    &motor4_config, 
-    &motor5_config, 
+    &motor0_config,
+    &motor1_config,
+    &motor2_config,
+    &motor3_config,
+    &motor4_config,
+    &motor5_config,
     &motor6_config
     };
 

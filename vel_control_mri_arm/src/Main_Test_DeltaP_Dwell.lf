@@ -1,0 +1,154 @@
+// Repeated-zero-dwell variant of Main_Test_DeltaP.lf: instead of a single
+// step-response target driven by a PID, this drives Small_DeltaP_Controller
+// with DeltaPSignalGenerator.lf's triangle-with-dwell position target,
+// repeatedly exercising the small-velocity/remaining-error-convergence
+// region rather than converging once and stopping -- see
+// lib/Helpers/DeltaPSignalGenerator.lf and
+// src/lib/Drivers/SmallDeltaPControl/TODO.md's Stage 3 notes for why this
+// case matters (VelocitySignalGenerator's zero crossings are single
+// instants that barely exercise pulse planning at all).
+//
+// No PositionPidController in this harness -- instead RemainingErrorComputer
+// itself derives a simple proportional command_velocity from remaining_error
+// (clamped to max_velocity), so pass-through mode (large remaining_error,
+// per Small_DeltaP_Controller_Plan.md §2.3) has a real, sensible velocity to
+// relay instead of the hardcoded 0 a fully-disconnected command_velocity_input
+// would produce -- exactly mirroring how the real system always provides
+// both velocity and position_delta together every cycle (see
+// Small_DeltaP_Comms_Plan.md). Once remaining_error drops inside
+// engagementGapThreshold, small-velocity/bang-bang mode takes over and
+// pulses the rest of the way, which is the "commanded velocity has gone to
+// zero for a sustained dwell, but a small residual position error still
+// needs closing via pulses" scenario this design targets.
+//
+// Build:
+//   cd vel_control_mri_arm
+//   lfc-dev src/Main_Test_DeltaP_Dwell.lf
+//
+// Run:
+//   ./bin/Main_Test_DeltaP_Dwell
+//   python3 scripts/plot_deltap_dwell.py     # plots csv_data/deltap_dwell_log.csv
+//
+// Note: PRINT_DPOS must be set to 1 in src_c/dpos_pulse_mpc.h for this
+// file's own ConvergenceLogger (defined inline below, not shared with
+// Main_Test_DeltaP.lf) and for the CSV log (via DeltaPCsvLogger.lf, same as
+// Main_Test_DeltaP_Csv.lf) to see anything real -- debug_info is only ever
+// populated under that flag. The CSV doesn't carry target_position directly
+// (DeltaPCsvLogger.lf's columns are shared with Main_Test_DeltaP_Csv.lf,
+// which has no signal generator) -- scripts/plot_deltap_dwell.py
+// reconstructs it as position + remaining_error.
+target C {
+  fast: true,
+  timeout: 30 s
+}
+
+import Small_DeltaP_Controller from "lib/Drivers/SmallDeltaPControl/Small_DeltaP_Controller.lf"
+import DeltaPSignalGenerator from "lib/Helpers/DeltaPSignalGenerator.lf"
+import FakeMotorPlant from "lib/Helpers/FakeMotorPlant.lf"
+import DeltaPCsvLogger from "lib/Helpers/DeltaPCsvLogger.lf"
+
+preamble {=
+  #include "dpos_pulse_mpc.h"
+  #include <math.h>
+=}
+
+// Computes remaining_error = target_position - position every time a fresh
+// position sample arrives (plant's sim_period, faster than the generator's
+// gen_period), using whatever target_position was most recently received.
+// Also derives a simple proportional command_velocity (kp * remaining_error,
+// clamped to max_velocity) -- this harness's stand-in for the real velocity
+// command a higher-level controller would send alongside position_delta, so
+// Small_DeltaP_Controller's pass-through mode has something real to relay
+// when remaining_error is too large for small-velocity mode to engage.
+reactor RemainingErrorComputer(
+  kp: float = 4.0,
+  max_velocity: float = 12.6981 // rad/s
+) {
+  input target_position: float
+  input position: float
+  output remaining_error: float
+  output command_velocity: float
+
+  state target_: float = 0.0
+
+  reaction(target_position) {=
+    self->target_ = target_position->value;
+  =}
+
+  reaction(position) -> remaining_error, command_velocity {=
+    float error = self->target_ - position->value;
+    lf_set(remaining_error, error);
+
+    float v = self->kp * error;
+    if (v > self->max_velocity) v = self->max_velocity;
+    if (v < -self->max_velocity) v = -self->max_velocity;
+    lf_set(command_velocity, v);
+  =}
+}
+
+// Same rolling remaining-error stats as Main_Test_DeltaP.lf's
+// ConvergenceLogger -- duplicated locally rather than shared, matching how
+// Main_Test_SVC.lf/Main_Test_SVC_Csv.lf each keep their own small
+// test-only reactors.
+reactor ConvergenceLogger(report_period: time = 1 s) {
+  input debug_info: DposPulseMPCDebugInfo
+
+  state sample_count: int = 0
+  state sum_abs_error: float = 0.0
+  state max_abs_error: float = 0.0
+  state passthrough_samples: int = 0
+  state smallvel_samples: int = 0
+
+  reaction(debug_info) {=
+    float abs_error = fabsf(debug_info->value.remainingError);
+    self->sum_abs_error += abs_error;
+    if (abs_error > self->max_abs_error) self->max_abs_error = abs_error;
+    if (debug_info->value.passThrough) {
+      self->passthrough_samples++;
+    } else {
+      self->smallvel_samples++;
+    }
+    self->sample_count++;
+  =}
+
+  timer report_tick(0, report_period)
+
+  reaction(report_tick) {=
+    float mean_abs_error = (self->sample_count > 0) ? (self->sum_abs_error / self->sample_count) : 0.0f;
+    printf(
+        "[ConvergenceLogger] samples=%d passthrough=%d small_vel=%d mean|err|=%d max|err|=%d (milli-rad)\n",
+        self->sample_count, self->passthrough_samples, self->smallvel_samples,
+        (int) (mean_abs_error * 1000.0f), (int) (self->max_abs_error * 1000.0f));
+
+    self->sum_abs_error = 0.0f;
+    self->max_abs_error = 0.0f;
+    self->passthrough_samples = 0;
+    self->smallvel_samples = 0;
+    self->sample_count = 0;
+  =}
+}
+
+main reactor {
+  gen = new DeltaPSignalGenerator()
+  computer = new RemainingErrorComputer()
+  controller = new Small_DeltaP_Controller()
+  plant = new FakeMotorPlant()
+  logger = new ConvergenceLogger()
+  csv_logger = new DeltaPCsvLogger(csv_path = "csv_data/deltap_dwell_log.csv")
+
+  gen.target_position -> computer.target_position
+  computer.remaining_error -> controller.remaining_error_input
+  computer.command_velocity -> controller.command_velocity_input
+  controller.command_velocity_output -> plant.command_velocity
+  controller.debug_info -> logger.debug_info
+
+  controller.debug_info -> csv_logger.debug_info
+  plant.real_velocity -> csv_logger.real_velocity
+  plant.position -> csv_logger.position
+  gen.target_position -> csv_logger.target_position
+
+  // `after` breaks the plant -> computer -> controller -> plant feedback
+  // cycle (LF disallows zero-delay cycles), same pattern as
+  // Main_Test_DeltaP.lf/Main_Test_SVC_Sweep.lf.
+  plant.position -> computer.position after 1 ms
+}

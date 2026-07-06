@@ -34,19 +34,14 @@ int main() {
     uint8_t rx_buf[UART_BUFFER_SIZE];
     uint8_t tx_buf[UART_BUFFER_SIZE];
 
-    float pos_fake[DOF_NUMBER];
     float vel_fake[DOF_NUMBER];
     float vel_cmd[DOF_NUMBER];
-    float sea_fake[DOF_NUMBER];
+    float position_deltas_fake[DOF_NUMBER];
     for (int i = 0; i<DOF_NUMBER; i++){
-        pos_fake[i] = 0.0;
         vel_fake[i] = 0.0;
-        sea_fake[i] = 0.0;
+        position_deltas_fake[i] = 0.0;
         vel_cmd[i] = 0.0;
     }
-
-    float extra_fake[EXTRA_LENGTH];
-    for (int i = 0; i<EXTRA_LENGTH; i++) extra_fake[i] = ((float)i) * ((float) i) / 1000.0;
 
     FILE *fpt;
     fpt = fopen("csv_data/uart_ramp.csv", "w+");
@@ -85,8 +80,7 @@ int main() {
 
             if (USE_HARDWARE){
                 construct_command_message(&transmit_data, 1,
-                                    pos_fake, vel_cmd,
-                                    sea_fake, extra_fake,
+                                    vel_cmd, position_deltas_fake,
                                     0, message_index++ % 256);
 
                 send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
@@ -116,8 +110,7 @@ int main() {
             if (!USE_HARDWARE) printf("(%d, %d) vel_cmd[0]: %f\n", i, j, vel_cmd[0]);
             if (USE_HARDWARE){
                 construct_command_message(&transmit_data, 1,
-                                    pos_fake, vel_cmd,
-                                    sea_fake, extra_fake,
+                                    vel_cmd, position_deltas_fake,
                                     0, message_index++ % 256);
 
                 send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
@@ -146,8 +139,7 @@ int main() {
         
         if (USE_HARDWARE){
             construct_command_message(&transmit_data, 1,
-                                pos_fake, vel_cmd,
-                                sea_fake, extra_fake,
+                                vel_cmd, position_deltas_fake,
                                 0, message_index++ % 256);
 
             send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
@@ -179,8 +171,7 @@ int main() {
             if (!USE_HARDWARE) printf("(%d, %d) vel_cmd[0]: %f\n", i, j, vel_cmd[0]);
             if (USE_HARDWARE){
                 construct_command_message(&transmit_data, 1,
-                                    pos_fake, vel_cmd,
-                                    sea_fake, extra_fake,
+                                    vel_cmd, position_deltas_fake,
                                     0, message_index++ % 256);
 
                 send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
@@ -213,8 +204,7 @@ int main() {
             if (!USE_HARDWARE) printf("(%d, %d) vel_cmd[0]: %f\n", i, j, vel_cmd[0]);
             if (USE_HARDWARE){
                 construct_command_message(&transmit_data, 1,
-                                    pos_fake, vel_cmd,
-                                    sea_fake, extra_fake,
+                                    vel_cmd, position_deltas_fake,
                                     0, message_index++ % 256);
 
                 send_command_message(fd, &transmit_data);//, state_data_buff, tx_buf);
@@ -244,8 +234,7 @@ int main() {
     CommandMessage transmit_data;
 
     construct_command_message(&transmit_data, 0,
-                        pos_fake, vel_fake,
-                        sea_fake, extra_fake,
+                        vel_fake, position_deltas_fake,
                         0, message_index++ % 256);
 
     print_command_message_int(&transmit_data);

@@ -1,0 +1,96 @@
+// Regression check for Small_DeltaP_Controller's delta-position pulse
+// planner. Runs natively (no STM32 hardware/cross-compiler needed): a
+// PositionPidController -> Small_DeltaP_Controller -> FakeMotorPlant loop
+// drives a single step-response target, printing rolling remaining-error
+// stats (see ConvergenceLogger below) so you can eyeball whether the
+// controller converges and how often it engages small-velocity/bang-bang
+// mode near the target. Analogous to Main_Test_SVC.lf.
+//
+// Build:
+//   cd vel_control_mri_arm
+//   lfc-dev src/Main_Test_DeltaP.lf
+//
+// Run:
+//   ./bin/Main_Test_DeltaP
+//
+// Note: PRINT_DPOS must be set to 1 in src_c/dpos_pulse_mpc.h for
+// ConvergenceLogger to see anything -- debug_info is only ever populated
+// under that flag (see Small_DeltaP_Controller.lf's control_tick reaction).
+// Remember to flip it back to 0 before flashing production firmware.
+target C {
+  fast: true,
+  timeout: 20 s
+}
+
+// No `platform` override here -- same reasoning as Main_Test_SVC.lf: this
+// harness runs natively on the dev machine, not the STM32.
+import Small_DeltaP_Controller from "lib/Drivers/SmallDeltaPControl/Small_DeltaP_Controller.lf"
+import PositionPidController from "lib/Helpers/PositionPidController.lf"
+import FakeMotorPlant from "lib/Helpers/FakeMotorPlant.lf"
+
+preamble {=
+  #include "dpos_pulse_mpc.h"
+  #include <math.h>
+=}
+
+// Consumes Small_DeltaP_Controller's debug_info (only populated when
+// PRINT_DPOS is enabled -- it must be set to 1 for this test to see
+// anything) and reports rolling remaining-error stats every report_period.
+// remainingError staying small (not just bounded, unlike motionDebt in the
+// old design) is the main thing to check: it means pulses are actually
+// closing the gap rather than just oscillating around it.
+reactor ConvergenceLogger(report_period: time = 1 s) {
+  input debug_info: DposPulseMPCDebugInfo
+
+  state sample_count: int = 0
+  state sum_abs_error: float = 0.0
+  state max_abs_error: float = 0.0
+  state passthrough_samples: int = 0
+  state smallvel_samples: int = 0
+
+  reaction(debug_info) {=
+    float abs_error = fabsf(debug_info->value.remainingError);
+    self->sum_abs_error += abs_error;
+    if (abs_error > self->max_abs_error) self->max_abs_error = abs_error;
+    if (debug_info->value.passThrough) {
+      self->passthrough_samples++;
+    } else {
+      self->smallvel_samples++;
+    }
+    self->sample_count++;
+  =}
+
+  timer report_tick(0, report_period)
+
+  reaction(report_tick) {=
+    float mean_abs_error = (self->sample_count > 0) ? (self->sum_abs_error / self->sample_count) : 0.0f;
+    printf(
+        "[ConvergenceLogger] samples=%d passthrough=%d small_vel=%d mean|err|=%d max|err|=%d (milli-rad)\n",
+        self->sample_count, self->passthrough_samples, self->smallvel_samples,
+        (int) (mean_abs_error * 1000.0f), (int) (self->max_abs_error * 1000.0f));
+
+    // Rolling window -- reset for the next report_period.
+    self->sum_abs_error = 0.0f;
+    self->max_abs_error = 0.0f;
+    self->passthrough_samples = 0;
+    self->smallvel_samples = 0;
+    self->sample_count = 0;
+  =}
+}
+
+main reactor {
+  pid = new PositionPidController()
+  controller = new Small_DeltaP_Controller()
+  plant = new FakeMotorPlant()
+  logger = new ConvergenceLogger()
+
+  pid.command_velocity -> controller.command_velocity_input
+  pid.remaining_error -> controller.remaining_error_input
+  controller.command_velocity_output -> plant.command_velocity
+  controller.debug_info -> logger.debug_info
+
+  // `after` is required here to break the pid -> controller -> plant -> pid
+  // feedback cycle (LF disallows zero-delay cycles among reactors) -- same
+  // pattern as Main_Test_SVC_Sweep.lf.
+  plant.position -> pid.position_feedback after 1 ms
+}

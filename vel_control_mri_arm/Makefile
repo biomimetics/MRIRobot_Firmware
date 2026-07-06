@@ -4,6 +4,7 @@
 ######################################
 TARGET = Main
 TARGET_EX = Main_TXRX
+TARGET_NO = Main_NoRobot
 #######################################
 # paths
 #######################################
@@ -60,6 +61,9 @@ flash_ex:
 	lfc-dev src/Main_TXRX.lf 
 	openocd -f $(OPENOCD_PATH)/tcl/interface/stlink.cfg -f $(OPENOCD_PATH)/tcl/target/stm32f4x.cfg -c "program $(BUILD_DIR)/$(TARGET_EX).elf verify reset exit"	
 
+flash_no: 
+	lfc-dev src/Main_NoRobot.lf 
+	openocd -f $(OPENOCD_PATH)/tcl/interface/stlink.cfg -f $(OPENOCD_PATH)/tcl/target/stm32f4x.cfg -c "program $(BUILD_DIR)/$(TARGET_NO).elf verify reset exit"	
 
 
 #######################################

@@ -1,0 +1,64 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../../../src_c/dpos_pulse_mpc.h", "../../../../src_c/dpos_pulse_mpc.c",
+    "../../../../src_c/motor_model.h", "../../../../src_c/motor_model.c"
+  ],
+  cmake-include: [
+    "../../../../src_c/dpos_pulse_mpc_cmake.cmake",
+    "../../../../src_c/motor_model_cmake.cmake"
+  ]
+}
+
+import Small_DeltaP_Controller from "Small_DeltaP_Controller.lf"
+
+// Top-level preamble so DposPulseMPCDebugInfo is visible where the print
+// reaction below reads controllers[i].debug_info->value -- same reasoning as
+// Small_DeltaP_Controller.lf's own top-level preamble.
+preamble {=
+  #include "dpos_pulse_mpc.h"
+=}
+
+// 7-dof wrapper that sits between StateMachine.lf and USM.lf, routing
+// velocity and remaining-error signals to a bank of single-channel
+// Small_DeltaP_Controller instances. Motor enable/disable does NOT route
+// through here -- same as Small_Velocity_Controller_Bank.lf, Main.lf wires
+// State_Machine's enable_motor_command directly to USM instead.
+reactor Small_DeltaP_Controller_Bank(print_period: time = 250 ms) {
+  input[7] command_velocity_input: float
+  input[7] remaining_error_input: float
+
+  output[7] command_velocity_output: float
+
+  state last_print_time_: time = 0
+
+  controllers = new[7] Small_DeltaP_Controller()
+
+  command_velocity_input -> controllers.command_velocity_input
+  remaining_error_input -> controllers.remaining_error_input
+
+  controllers.command_velocity_output -> command_velocity_output
+
+  // Prints the status of all 7 Small_DeltaP_Controller instances together,
+  // at print_period cadence, when PRINT_DPOS is enabled (dpos_pulse_mpc.h).
+  // Only fires at all when PRINT_DPOS is set, since debug_info is only ever
+  // lf_set under that same flag (see Small_DeltaP_Controller.lf).
+  reaction(controllers.debug_info) {=
+#if PRINT_DPOS
+    instant_t now = lf_time_logical();
+    if ((now - self->last_print_time_) < self->print_period) {
+      return;
+    }
+    self->last_print_time_ = now;
+
+    printf("\r\n--- DPOS status ---\r\n");
+    for (int i = 0; i < controllers_width; i++) {
+      DposPulseMPC_PrintDebugInfo(i, controllers[i].debug_info->value);
+    }
+#endif
+  =}
+}

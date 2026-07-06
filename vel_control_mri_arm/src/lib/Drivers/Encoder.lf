@@ -486,10 +486,11 @@ reactor QDEC(sample_period: time = 5 ms){
     // SEA/USM bursts are fetched synchronously each trigger cycle (blocking
     // fire+read below); no receive needs arming here.
 
-    // computing conversions from motor/encoder space to joint space
+    // computing conversions from motor/encoder space to joint space -- motor
+    // shaft radians only (counts -> radians via qdec_cpr); gear reduction is
+    // handled entirely on the ROS2 side, not here.
     for (int i = 0; i<7; i++){
-      self->qdec_convert_motor_to_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr); // motor_config should be updated for this, no CPR_RATIO scale needed here.
-      //self->qdec_convert_motor_to_joint_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr * motor_configs[i]->gear_ratio) * motor_configs[i]->dir;
+      self->qdec_convert_motor_to_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr);
     }
 
     // SEA sensors are physically LINEAR encoders (8000 counts/inch of travel

@@ -2,10 +2,6 @@
 #include <math.h>
 #include <stdio.h>
 
-float sign_f(float x) {
-  return (x >= 0.0f) ? 1.0f : -1.0f;
-}
-
 void PulseMPC_GetDebugInfo(const PulseMPC *c, float desiredVelocity, SVCDebugInfo *out) {
   out->state = c->state;
   out->passThrough = (c->state == MOTOR_STOPPED) && (c->filteredVelocityMagnitude >= c->model.V_min);

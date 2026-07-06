@@ -60,9 +60,9 @@ target C {
 // Main_Test_SVC_Csv.lf: this harness runs natively on the dev machine, not
 // the STM32.
 import Small_Velocity_Controller from "lib/SmallVelocityControl/Small_Velocity_Controller.lf"
-import FakeMotorPlant from "lib/SmallVelocityControl/FakeMotorPlant.lf"
-import CsvLogger from "lib/SmallVelocityControl/CsvLogger.lf"
-import PositionPidController from "lib/SmallVelocityControl/PositionPidController.lf"
+import FakeMotorPlant from "lib/Helpers/FakeMotorPlant.lf"
+import CsvLogger from "lib/Helpers/CsvLogger.lf"
+import PositionPidController from "lib/Helpers/PositionPidController.lf"
 
 preamble {=
   #include <stdlib.h>

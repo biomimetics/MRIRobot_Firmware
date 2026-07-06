@@ -30,7 +30,7 @@ target C {
 // build and run fine here even though its own target block still requests
 // the stm32 platform for the real firmware build.
 import Small_Velocity_Controller from "lib/SmallVelocityControl/Small_Velocity_Controller.lf"
-import VelocitySignalGenerator from "lib/SmallVelocityControl/VelocitySignalGenerator.lf"
+import VelocitySignalGenerator from "lib/Helpers/VelocitySignalGenerator.lf"
 
 preamble {=
   #include "pulse_mpc.h"

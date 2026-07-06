@@ -1,0 +1,147 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../../../src_c/dpos_pulse_mpc.h", "../../../../src_c/dpos_pulse_mpc.c",
+    "../../../../src_c/motor_model.h", "../../../../src_c/motor_model.c"
+  ],
+  cmake-include: [
+    "../../../../src_c/dpos_pulse_mpc_cmake.cmake",
+    "../../../../src_c/motor_model_cmake.cmake"
+  ]
+}
+
+// Single-channel hybrid delta-position controller. Sits inside
+// Small_DeltaP_Controller_Bank.lf, one instance per joint. Replaces
+// Small_Velocity_Controller.lf's motion-debt design (see
+// ../SmallVelocityControl/Motion_Debt_Limitations.md for why that design
+// struggles) with one that plans discrete pulses directly against a
+// remaining position error, using a predictive cost + short lookahead
+// search -- see Small_DeltaP_Controller_Plan.md and
+// dpos_pulse_mpc_planning.md for the full design rationale and the exact
+// planning math (src_c/dpos_pulse_mpc.h/.c).
+//
+// For ordinary velocity commands (|desiredVelocity| >= V_min) or while the
+// remaining position error is still too large to be worth closing via
+// pulsing, this passes the velocity command straight through -- same
+// pass-through behavior as Small_Velocity_Controller, folding in
+// remainingError per Small_DeltaP_Controller_Plan.md §2.3. Only once both
+// conditions clear does it engage the small-velocity bang-bang planner.
+//
+// remaining_error_input is a locally-fed synthetic value in this stage's
+// test harness (Main_Test_DeltaP*.lf), not yet the real wire signal -- see
+// Small_DeltaP_Comms_Plan.md for the follow-on work that delivers the real
+// signal end to end.
+//
+// This reactor does NOT handle motor enable/disable -- same as
+// Small_Velocity_Controller.lf, that's wired directly from State_Machine.lf
+// to USM.lf in Main.lf.
+//
+// See Small_Velocity_Controller.lf for the reasoning behind putting the
+// #include below at top-level (file-scope) preamble rather than
+// reactor-scoped.
+preamble {=
+  #include "dpos_pulse_mpc.h"
+
+  // Nanoseconds -> seconds, for converting LF instant_t/interval_t deltas
+  // into the plain float seconds DposPulseMPC's math works in.
+  #define NS_TO_S 1e-9f
+=}
+
+// Constructor parameters below are the initial-guess motor model / MPC
+// tuning values, all placeholders pending real bench characterization --
+// same caveat as Small_Velocity_Controller.lf's parameters. V_min/gain/
+// T_start/T_stop/minimumPulseWidth default to the same values as
+// Small_Velocity_Controller so the two controllers stay comparable.
+reactor Small_DeltaP_Controller(
+  control_period: time = 1 ms,
+  V_min_initial: float = 0.2,        // rad/s, ~10 deg/s -- TODO: characterize
+  gain_initial: float = 0.9,            // unitless 0..1 -- TODO: characterize
+  T_start_initial: time = 25 ms,       // startup command delay -- TODO: characterize further
+  T_stop_initial: time = 1 ms,         // hard-stop settle time, datasheet value, likely optimistic
+  minimumPulseWidth_initial: time = 20 ms, // hysteresis guard / min feasible run_duration -- TODO: characterize
+  W_error_initial: float = 1.0,          // cost weight -- TODO: characterize
+  k_overshoot_initial: float = 10.0,     // overshoot-side cost multiplier -- dpos_pulse_mpc_planning.md §7 item 2
+  C_overshoot_initial: float = 0.01,     // flat overshoot cost -- TODO: characterize
+  sigma0_initial: float = 0.01,          // rad, pulse-outcome noise stddev -- TODO: characterize
+  lookahead_depth_initial: int = 2,      // pulses scored deep -- dpos_pulse_mpc_planning.md §5
+  grid_step_sigmas_initial: float = 1.0, // grid candidate spacing, in units of sigma0/speed
+  filterAlpha_initial: float = 0.1,     // weight on newest sample in the pass-through/
+                                         // small-velocity mode filter (0..1) -- TODO: characterize
+  engagementGapThreshold_initial: float = 0.3 // rad -- TODO: characterize
+) {
+  input command_velocity_input: float
+  input remaining_error_input: float
+
+  output command_velocity_output: float
+  output debug_info: DposPulseMPCDebugInfo // only set when PRINT_DPOS is enabled -- see dpos_pulse_mpc.h
+
+  state controller_: DposPulseMPC
+  state desired_velocity_: float = 0.0
+  state remaining_error_: float = 0.0
+  state last_decide_time_: time = 0
+
+  timer control_tick(0, control_period)
+
+  reaction(startup) {=
+    self->controller_.model.V_min = self->V_min_initial;
+    self->controller_.model.gain = self->gain_initial;
+    self->controller_.model.T_start = (float) self->T_start_initial * NS_TO_S;
+    self->controller_.model.T_stop = (float) self->T_stop_initial * NS_TO_S;
+    self->controller_.model.minimumPulseWidth = (float) self->minimumPulseWidth_initial * NS_TO_S;
+
+    self->controller_.W_error = self->W_error_initial;
+    self->controller_.k_overshoot = self->k_overshoot_initial;
+    self->controller_.C_overshoot = self->C_overshoot_initial;
+    self->controller_.sigma0 = self->sigma0_initial;
+    self->controller_.lookahead_depth = self->lookahead_depth_initial;
+    self->controller_.grid_step_sigmas = self->grid_step_sigmas_initial;
+    self->controller_.filterAlpha = self->filterAlpha_initial;
+    self->controller_.engagementGapThreshold = self->engagementGapThreshold_initial;
+
+    self->controller_.state = MOTOR_STOPPED;
+    self->controller_.dir = 1.0f;
+    self->controller_.stateTimer = 0.0f;
+    self->controller_.pulseTimer = 0.0f;
+    self->controller_.remainingError = 0.0f;
+    self->controller_.plannedPulse.dir = 1.0f;
+    self->controller_.plannedPulse.run_duration = 0.0f;
+    self->controller_.commandVelocity = 0.0f;
+    self->controller_.filteredVelocityMagnitude = 0.0f;
+    self->controller_.passThrough = true;
+
+    self->last_decide_time_ = lf_time_logical();
+  =}
+
+  // Thin cache-only reactions: just copy incoming values into state. No FSM
+  // logic here -- that all lives in the control_tick reaction below.
+  reaction(command_velocity_input) {=
+    self->desired_velocity_ = command_velocity_input->value;
+  =}
+
+  reaction(remaining_error_input) {=
+    self->remaining_error_ = remaining_error_input->value;
+  =}
+
+  // Runs the FSM/pulse-planning update at control_period cadence,
+  // independent of when new setpoints arrive from upstream.
+  reaction(control_tick) -> command_velocity_output, debug_info {=
+    instant_t now = lf_time_logical();
+    float dt = (float)(now - self->last_decide_time_) * NS_TO_S;
+    self->last_decide_time_ = now;
+    if (dt < 0.0f) dt = 0.0f; // defensive; logical time is monotonic
+
+    DposPulseMPC_Update(&self->controller_, self->desired_velocity_, self->remaining_error_, dt);
+
+    lf_set(command_velocity_output, self->controller_.commandVelocity);
+
+#if PRINT_DPOS
+    DposPulseMPCDebugInfo info;
+    DposPulseMPC_GetDebugInfo(&self->controller_, &info);
+    lf_set(debug_info, info);
+#endif
+  =}
+}

@@ -1,6 +1,8 @@
 #ifndef PULSE_MPC_H
 #define PULSE_MPC_H
 
+#include "motor_model.h"
+
 // Sentinel cost used to seed a min-cost search before any real candidate
 // has been evaluated -- must be larger than any real J() value can reach.
 #define PULSE_MPC_UNREACHABLE_COST 1e30f
@@ -18,30 +20,14 @@
 #define PRINT_SVC 0
 
 typedef enum {
-  MOTOR_STOPPED,
-  MOTOR_STARTING,
-  MOTOR_RUNNING,
-  MOTOR_STOPPING
-} MotorState;
-
-typedef enum {
   ACTION_IDLE,
   ACTION_START,
   ACTION_CONTINUE,
   ACTION_STOP
 } MpcAction;
 
-// Physical/open-loop motor model, all placeholders (see Small_Velocity_Controller.lf's
-// `startup` reaction for current values). Split out from PulseMPC so a
-// future live parameter estimator has a single, self-contained struct to
-// update without touching MPC tuning or FSM state.
-typedef struct {
-  float V_min;              // rad/s, magnitude of the fixed pulse speed
-  float gain;                // unitless 0..1, actual/commanded ratio
-  float T_start;             // s, startup command delay
-  float T_stop;              // s, hard-stop settle time
-  float minimumPulseWidth;   // s, hysteresis guard before STOP eligible
-} MotorModel;
+// MotorModel and MotorState now live in motor_model.h, shared with
+// dpos_pulse_mpc.h -- see that header for why.
 
 // Per-motor controller state and tuning. Each Small_Velocity_Controller
 // bank instance must hold its own PulseMPC as a reactor `state` field
@@ -134,8 +120,6 @@ void PulseMPC_GetDebugInfo(const PulseMPC *c, float desiredVelocity, SVCDebugInf
 // int, to avoid floating-point printf on this embedded target -- matches
 // the convention used elsewhere in this codebase, e.g. USM.lf).
 void PulseMPC_PrintDebugInfo(int index, SVCDebugInfo info);
-
-float sign_f(float x);
 
 // J() cost of each candidate action. desiredVelocity is only used by
 // ACTION_START, to evaluate the direction it would actually commit to

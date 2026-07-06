@@ -1,0 +1,61 @@
+// CSV-logging variant of Main_Test_DeltaP.lf for plotting Small_DeltaP_
+// Controller's behavior. Runs natively (no STM32 hardware/cross-compiler
+// needed), drives a single controller instance with the same
+// PositionPidController step-response loop as Main_Test_DeltaP.lf, and logs
+// every sample -- remaining error, commanded/planned pulse, mode, simulated
+// position -- to a CSV via DeltaPCsvLogger. Plot the result with
+// scripts/plot_deltap_test.py.
+//
+// ---- Quickstart ----
+//   1. In src_c/dpos_pulse_mpc.h, set `#define PRINT_DPOS 1` (see Note below).
+//   2. cd vel_control_mri_arm
+//   3. lfc-dev src/Main_Test_DeltaP_Csv.lf   # build (~10-20s)
+//   4. ./bin/Main_Test_DeltaP_Csv            # run (real time << 30s logical,
+//                                            # since target has fast: true)
+//   5. python3 scripts/plot_deltap_test.py   # opens a plot window
+//   6. Revert PRINT_DPOS to 0 in src_c/dpos_pulse_mpc.h before committing/flashing.
+//
+// The run writes csv_data/deltap_test_log.csv (created relative to whatever
+// directory you invoke ./bin/Main_Test_DeltaP_Csv from -- run it from
+// vel_control_mri_arm/ as above) with columns: time_s, remaining_error,
+// command_velocity, pass_through, state, planned_dir, planned_run_duration,
+// real_velocity, position (see DeltaPCsvLogger.lf).
+//
+// Note: PRINT_DPOS must be set to 1 in src_c/dpos_pulse_mpc.h at *build*
+// time for debug_info (and therefore this CSV) to see anything real --
+// debug_info is only ever populated/emitted under that flag (see
+// Small_DeltaP_Controller.lf's control_tick reaction). If you forget, this
+// will still build and run fine, just with the remaining_error/pass_through/
+// state/planned_* columns all reading 0 all the way through. Remember to
+// flip it back to 0 before flashing production firmware, since it also
+// enables Small_DeltaP_Controller_Bank.lf's periodic UART printout.
+target C {
+  fast: true,
+  timeout: 30 s
+}
+
+// No `platform` override here -- same reasoning as Main_Test_DeltaP.lf:
+// this harness runs natively on the dev machine, not the STM32.
+import Small_DeltaP_Controller from "lib/Drivers/SmallDeltaPControl/Small_DeltaP_Controller.lf"
+import PositionPidController from "lib/Helpers/PositionPidController.lf"
+import FakeMotorPlant from "lib/Helpers/FakeMotorPlant.lf"
+import DeltaPCsvLogger from "lib/Helpers/DeltaPCsvLogger.lf"
+
+main reactor {
+  pid = new PositionPidController()
+  controller = new Small_DeltaP_Controller()
+  plant = new FakeMotorPlant()
+  logger = new DeltaPCsvLogger()
+
+  pid.command_velocity -> controller.command_velocity_input
+  pid.remaining_error -> controller.remaining_error_input
+  controller.command_velocity_output -> plant.command_velocity
+  controller.debug_info -> logger.debug_info
+  plant.real_velocity -> logger.real_velocity
+  plant.position -> logger.position
+
+  // `after` is required here to break the pid -> controller -> plant -> pid
+  // feedback cycle (LF disallows zero-delay cycles among reactors) -- same
+  // pattern as Main_Test_DeltaP.lf/Main_Test_SVC_Sweep.lf.
+  plant.position -> pid.position_feedback after 1 ms
+}
