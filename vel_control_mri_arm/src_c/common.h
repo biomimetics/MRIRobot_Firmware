@@ -14,7 +14,13 @@
 #define PRINT_USM 0
 #define PRINT_ENCODER 0
 #define PRINT_UART 0
-#define USE_EX_DMA 0
+// Must be 1: CommandMessage and StateMessage are no longer the same size
+// (see stm_comms.h), so UART4's fixed-length HAL_UART_Receive_DMA would wait
+// for UART_BUFFER_SIZE bytes (sized for the larger StateMessage) even though
+// only CommandMessage-sized packets ever arrive on this line, corrupting
+// framing by concatenating multiple packets per DMA completion. The idle-line
+// path uses the actual received byte count instead.
+#define USE_EX_DMA 1
 
 // for communication
 #define DMA_TX_BUFFER_SIZE 400 //256//(STM_BUFFER_SIZE) //200

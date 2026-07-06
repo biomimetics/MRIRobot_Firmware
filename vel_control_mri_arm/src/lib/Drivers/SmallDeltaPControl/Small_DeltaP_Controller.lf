@@ -57,17 +57,17 @@ preamble {=
 // T_start/T_stop/minimumPulseWidth default to the same values as
 // Small_Velocity_Controller so the two controllers stay comparable.
 reactor Small_DeltaP_Controller(
-  control_period: time = 1 ms,
-  V_min_initial: float = 0.2,        // rad/s, ~10 deg/s -- TODO: characterize
+  control_period: time = 5 ms,
+  V_min_initial: float = 0.25,        // rad/s, ~10 deg/s -- TODO: characterize
   gain_initial: float = 0.9,            // unitless 0..1 -- TODO: characterize
-  T_start_initial: time = 25 ms,       // startup command delay -- TODO: characterize further
+  T_start_initial: time = 10 ms,       // startup command delay -- TODO: characterize further
   T_stop_initial: time = 1 ms,         // hard-stop settle time, datasheet value, likely optimistic
-  minimumPulseWidth_initial: time = 20 ms, // hysteresis guard / min feasible run_duration -- TODO: characterize
+  minimumPulseWidth_initial: time = 5 ms, // hysteresis guard / min feasible run_duration -- TODO: characterize
   W_error_initial: float = 1.0,          // cost weight -- TODO: characterize
   k_overshoot_initial: float = 10.0,     // overshoot-side cost multiplier -- dpos_pulse_mpc_planning.md §7 item 2
   C_overshoot_initial: float = 0.01,     // flat overshoot cost -- TODO: characterize
-  sigma0_initial: float = 0.01,          // rad, pulse-outcome noise stddev -- TODO: characterize
-  lookahead_depth_initial: int = 2,      // pulses scored deep -- dpos_pulse_mpc_planning.md §5
+  sigma0_initial: float = 0.05,          // rad, pulse-outcome noise stddev -- TODO: characterize
+  lookahead_depth_initial: int = 1,      // pulses scored deep -- dpos_pulse_mpc_planning.md §5
   grid_step_sigmas_initial: float = 1.0, // grid candidate spacing, in units of sigma0/speed
   filterAlpha_initial: float = 0.1,     // weight on newest sample in the pass-through/
                                          // small-velocity mode filter (0..1) -- TODO: characterize

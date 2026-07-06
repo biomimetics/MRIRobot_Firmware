@@ -32,8 +32,14 @@
 
 // Number of candidates evaluated on each side of the naive run_duration
 // estimate during DposPulseMPC_PlanBestPulse's grid search (see
-// dpos_pulse_mpc_planning.md §7 item 3).
-#define DPOS_MPC_GRID_HALF_WIDTH 3
+// dpos_pulse_mpc_planning.md §7 item 3). Total candidates tried per call is
+// 2*this + 1 (the +1 is the naive estimate itself, evaluated separately
+// below the loop) -- 2 keeps that at 5, down from the original 7, since the
+// depth-2 recursive search (this grid nested inside itself, see
+// DposPulseMPC_ContinuationCost) made the original 7-wide/5-sigma-point
+// combination too expensive to run every 1ms across 7 joints on the F446RE
+// (see UART.lf's transmit-cadence regression this caused).
+#define DPOS_MPC_GRID_HALF_WIDTH 2
 
 // A single planned pulse: direction and how long to spend in MOTOR_RUNNING
 // (excluding T_start/T_stop dead time, which contribute zero motion under
