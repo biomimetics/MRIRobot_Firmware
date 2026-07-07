@@ -1,20 +1,21 @@
 #ifndef DPOS_PULSE_MPC_H
 #define DPOS_PULSE_MPC_H
 
-#include "motor_model.h"
+#include "pulse_motor_model.h"
 #include <stdbool.h>
 
 // Delta-position pulse planner: the alternative to pulse_mpc.h's
 // motion-debt design (see
-// src/lib/Drivers/SmallDeltaPControl/Small_DeltaP_Controller_Plan.md for
+// src/lib/SmallDeltaPMPCControl/Small_DeltaP_Controller_Plan.md for
 // the full design rationale, and dpos_pulse_mpc_planning.md for the exact
 // cost/lookahead math implemented below). Deliberately kept separate from
 // pulse_mpc.c rather than added alongside it: given a remaining position
 // error, plan pulses to close it directly, with no motion-debt integral
 // anywhere in it.
 //
-// Shares MotorModel/MotorState with pulse_mpc.h (both bang-bang the exact
-// same physical motor) via motor_model.h -- see that header.
+// Shares MotorModel/MotorState/PulseCommand and the PredictDelta helper with
+// pulse_mpc.h (both bang-bang the exact same physical motor) via
+// pulse_motor_model.h -- see that header.
 //
 // Mode arbitration (ordinary pass-through vs. this small-velocity bang-bang
 // planner) is decided inside DposPulseMPC_Update itself, at MOTOR_STOPPED,
@@ -27,7 +28,8 @@
 // Set to 1 to enable periodic diagnostic printouts of all 7
 // Small_DeltaP_Controller instances (see Small_DeltaP_Controller_Bank.lf's
 // print reaction). 0 by default to avoid flooding the UART during normal
-// operation.
+// operation. TEMP enabled to check real remErr/runDur against the
+// convergence-floor investigation -- turn back off for normal operation.
 #define PRINT_DPOS 0
 
 // Number of candidates evaluated on each side of the naive run_duration
@@ -40,14 +42,6 @@
 // combination too expensive to run every 1ms across 7 joints on the F446RE
 // (see UART.lf's transmit-cadence regression this caused).
 #define DPOS_MPC_GRID_HALF_WIDTH 2
-
-// A single planned pulse: direction and how long to spend in MOTOR_RUNNING
-// (excluding T_start/T_stop dead time, which contribute zero motion under
-// the current model). See dpos_pulse_mpc_planning.md §2.
-typedef struct {
-  float dir;          // +1.0f or -1.0f
-  float run_duration; // s
-} PulseCommand;
 
 // Per-motor controller state and tuning.
 typedef struct {
@@ -80,18 +74,14 @@ typedef struct {
   float engagementGapThreshold;
 
   // ---- Controller state ----
-  MotorState state;
-  float dir;                 // +1.0/-1.0, latched at STOPPED->START, held until back to STOPPED
-  float stateTimer;          // s, elapsed since entering STARTING/STOPPING
-  float pulseTimer;          // s, elapsed since entering RUNNING
+  // FSM/timers/committed-pulse/commandVelocity execution state -- generic
+  // across any pulse-based controller, see pulse_motor_model.h.
+  PulseMotorState pulseState;
   float remainingError;      // rad, remaining position error left to close --
                               // sourced directly from the incoming remaining-
                               // error signal, refreshed each time a new pulse
                               // is planned (see the plan doc's design decisions
                               // for reset rules).
-  PulseCommand plannedPulse; // the pulse currently committed to (valid from
-                              // STARTING through STOPPING)
-  float commandVelocity;     // rad/s, signed, last commanded output
   float filteredVelocityMagnitude; // rad/s, EMA of |desiredVelocity| -- drives
                                     // the mode decision and the RUNNING
                                     // pass-through-recovery early-exit below.
@@ -120,6 +110,13 @@ typedef struct {
   float remainingError;
   PulseCommand plannedPulse;
   float commandVelocity;
+  // TEMP diagnostic fields -- added to check whether pulseTimer/stateTimer
+  // are actually advancing tick to tick (i.e. whether dt is nonzero in
+  // DposPulseMPC_Update), after PRINT_DPOS showed every other field frozen
+  // bit-identical across a 20s capture despite RUNNING's planned run_duration
+  // having long since elapsed.
+  float pulseTimer;
+  float stateTimer;
 } DposPulseMPCDebugInfo;
 
 void DposPulseMPC_GetDebugInfo(const DposPulseMPC *c, DposPulseMPCDebugInfo *out);
@@ -128,11 +125,6 @@ void DposPulseMPC_GetDebugInfo(const DposPulseMPC *c, DposPulseMPCDebugInfo *out
 // int, to avoid floating-point printf on this embedded target -- matches
 // PulseMPC_PrintDebugInfo's convention).
 void DposPulseMPC_PrintDebugInfo(int index, DposPulseMPCDebugInfo info);
-
-// Deterministic point estimate of a candidate pulse's effect (planning doc
-// §3): dir * gain * V_min * run_duration. The real motor won't match this
-// exactly -- see DposPulseMPC_EvaluateLookahead for how that's accounted for.
-float DposPulseMPC_PredictDelta(const MotorModel *model, PulseCommand pulse);
 
 // Piecewise loss on the position error that would remain after a pulse
 // resolves to resultingError, given the original remainingError it was
@@ -164,6 +156,11 @@ PulseCommand DposPulseMPC_PlanBestPulse(const DposPulseMPC *c, float remainingEr
 // Hybrid pass-through / small-velocity (bang-bang) update, run every
 // control_period tick, mirroring PulseMPC_Update's signature and calling
 // convention. dt is real elapsed time in seconds since the previous call.
+// FSM timing/execution itself (STARTING/RUNNING/STOPPING advancement,
+// committing a planned pulse) is delegated to PulseMotorModel_Advance/
+// PulseMotorModel_StartPulse (pulse_motor_model.h) -- this function's own
+// job is only the decisions layered on top: mode arbitration, pulse
+// planning, and whether a running pulse should be cut short.
 //
 // Every call updates filteredVelocityMagnitude regardless of mode. Only at
 // MOTOR_STOPPED is the pass-through vs. small-velocity decision (re-)made:
@@ -179,16 +176,17 @@ PulseCommand DposPulseMPC_PlanBestPulse(const DposPulseMPC *c, float remainingEr
 // the pulse executes open-loop for its planned run_duration -- no per-tick
 // stopping-distance recheck (planning doc's intro note and §6).
 //
-// While RUNNING, two unconditional early exits can cut a pulse short
-// regardless of its planned run_duration -- ported from PulseMPC_Update's
-// RUNNING checks, but the near-zero/reversal check is deliberately keyed to
-// remainingError rather than desiredVelocity (see the struct's
-// filteredVelocityMagnitude comment for why): (1) filteredVelocityMagnitude
-// has climbed back to/above V_min -- demand has clearly moved into
-// pass-through range, so stop and hand control back as soon as possible; (2)
-// the freshly-supplied remainingError's sign no longer matches the latched
-// dir -- the target has moved past/reversed relative to what this pulse was
-// planned against, so abort rather than keep running the wrong way.
+// While RUNNING, this computes a stop_early condition (true if EITHER
+// filteredVelocityMagnitude has climbed back to/above V_min -- demand has
+// clearly moved into pass-through range, so stop and hand control back as
+// soon as possible -- OR the freshly-supplied remainingError's sign no
+// longer matches the latched dir -- the target has moved past/reversed
+// relative to what this pulse was planned against, so abort rather than
+// keep running the wrong way) and passes it to PulseMotorModel_Advance,
+// which cuts the pulse short regardless of its planned run_duration.
+// Deliberately keyed to remainingError rather than desiredVelocity like
+// PulseMPC_Update's equivalent checks are -- see the struct's
+// filteredVelocityMagnitude comment for why.
 void DposPulseMPC_Update(DposPulseMPC *c, float desiredVelocity, float remainingError, float dt);
 
 #endif // DPOS_PULSE_MPC_H

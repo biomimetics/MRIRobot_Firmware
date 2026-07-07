@@ -16,7 +16,7 @@ preamble {=
 // Main_Test_SVC_Csv.lf.
 //
 // Also outputs remaining_error (target_position - position_) alongside
-// command_velocity, standing in for Small_DeltaP_Controller's real upstream
+// command_velocity, standing in for Small_DeltaP_MPC_Controller's real upstream
 // remaining-error signal (see Small_DeltaP_Controller_Plan.md's phasing)
 // until the real wire signal lands (Small_DeltaP_Comms_Plan.md) -- used by
 // Main_Test_DeltaP.lf.

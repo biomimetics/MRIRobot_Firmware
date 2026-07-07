@@ -6,13 +6,13 @@ preamble {=
   #include <sys/stat.h>
 =}
 
-// CSV logger for Small_DeltaP_Controller test harnesses -- the delta-
+// CSV logger for Small_DeltaP_MPC_Controller test harnesses -- the delta-
 // position analogue of CsvLogger.lf. Kept as a separate sibling reactor
 // rather than generalizing CsvLogger.lf: keeps the two controllers' test
 // harnesses fully decoupled (CsvLogger.lf/SVCDebugInfo stay SVC-only).
 //
 // Appends one CSV row per sample_period tick, combining a
-// Small_DeltaP_Controller's debug_info (only populated when PRINT_DPOS is
+// Small_DeltaP_MPC_Controller's debug_info (only populated when PRINT_DPOS is
 // set to 1 in src_c/dpos_pulse_mpc.h) with a FakeMotorPlant's simulated
 // real_velocity/position, so a run can be plotted afterward (see
 // scripts/plot_deltap_test.py).
@@ -27,7 +27,7 @@ preamble {=
 // reconstruction silently smears out exactly the flat dwell region a dwell
 // test cares about.
 //
-// Relies on this program also importing Small_DeltaP_Controller.lf (whose
+// Relies on this program also importing Small_DeltaP_MPC_Controller.lf (whose
 // target `files` property pulls in dpos_pulse_mpc.h/dpos_pulse_mpc.c) so
 // that DposPulseMPCDebugInfo is visible here -- this reactor does not
 // declare its own `files`/`cmake-include`.

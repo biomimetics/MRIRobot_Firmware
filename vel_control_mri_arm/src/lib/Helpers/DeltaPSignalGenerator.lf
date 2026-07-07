@@ -10,9 +10,9 @@ preamble {=
 // 4-segment one, since that generator's zero crossings are single instants
 // that barely exercise pulse planning at all -- a sustained dwell right in
 // the small-velocity/remaining-error-convergence region is exactly the
-// regime Small_DeltaP_Controller targets, and needs to be observable, not
+// regime Small_DeltaP_MPC_Controller targets, and needs to be observable, not
 // just transiently passed through (see
-// src/lib/Drivers/SmallDeltaPControl/TODO.md's Stage 3 notes).
+// src/lib/SmallDeltaPMPCControl/TODO.md's Stage 3 notes).
 //
 // A new reactor rather than a modification to VelocitySignalGenerator.lf --
 // keeps Small_Velocity_Controller's existing test harness untouched.

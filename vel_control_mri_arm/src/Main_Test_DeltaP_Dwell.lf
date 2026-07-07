@@ -1,10 +1,10 @@
 // Repeated-zero-dwell variant of Main_Test_DeltaP.lf: instead of a single
-// step-response target driven by a PID, this drives Small_DeltaP_Controller
+// step-response target driven by a PID, this drives Small_DeltaP_MPC_Controller
 // with DeltaPSignalGenerator.lf's triangle-with-dwell position target,
 // repeatedly exercising the small-velocity/remaining-error-convergence
 // region rather than converging once and stopping -- see
 // lib/Helpers/DeltaPSignalGenerator.lf and
-// src/lib/Drivers/SmallDeltaPControl/TODO.md's Stage 3 notes for why this
+// src/lib/SmallDeltaPMPCControl/TODO.md's Stage 3 notes for why this
 // case matters (VelocitySignalGenerator's zero crossings are single
 // instants that barely exercise pulse planning at all).
 //
@@ -42,7 +42,7 @@ target C {
   timeout: 30 s
 }
 
-import Small_DeltaP_Controller from "lib/Drivers/SmallDeltaPControl/Small_DeltaP_Controller.lf"
+import Small_DeltaP_MPC_Controller from "lib/SmallDeltaPMPCControl/Small_DeltaP_MPC_Controller.lf"
 import DeltaPSignalGenerator from "lib/Helpers/DeltaPSignalGenerator.lf"
 import FakeMotorPlant from "lib/Helpers/FakeMotorPlant.lf"
 import DeltaPCsvLogger from "lib/Helpers/DeltaPCsvLogger.lf"
@@ -58,7 +58,7 @@ preamble {=
 // Also derives a simple proportional command_velocity (kp * remaining_error,
 // clamped to max_velocity) -- this harness's stand-in for the real velocity
 // command a higher-level controller would send alongside position_delta, so
-// Small_DeltaP_Controller's pass-through mode has something real to relay
+// Small_DeltaP_MPC_Controller's pass-through mode has something real to relay
 // when remaining_error is too large for small-velocity mode to engage.
 reactor RemainingErrorComputer(
   kp: float = 4.0,
@@ -131,7 +131,7 @@ reactor ConvergenceLogger(report_period: time = 1 s) {
 main reactor {
   gen = new DeltaPSignalGenerator()
   computer = new RemainingErrorComputer()
-  controller = new Small_DeltaP_Controller()
+  controller = new Small_DeltaP_MPC_Controller()
   plant = new FakeMotorPlant()
   logger = new ConvergenceLogger()
   csv_logger = new DeltaPCsvLogger(csv_path = "csv_data/deltap_dwell_log.csv")

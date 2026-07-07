@@ -6,11 +6,11 @@ target C {
   },
   files: [
     "../../../src_c/pulse_mpc.h", "../../../src_c/pulse_mpc.c",
-    "../../../src_c/motor_model.h", "../../../src_c/motor_model.c"
+    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c"
   ],
   cmake-include: [
     "../../../src_c/pulse_mpc_cmake.cmake",
-    "../../../src_c/motor_model_cmake.cmake"
+    "../../../src_c/pulse_motor_model_cmake.cmake"
   ]
 }
 

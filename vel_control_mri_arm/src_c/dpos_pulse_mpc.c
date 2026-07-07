@@ -8,16 +8,18 @@
 // approximate normal probability mass. One mechanism, reused by both the
 // single-pulse cost (via EvaluateLookahead at depth 1) and the multi-pulse
 // recursion -- see the planning doc's explicit "one mechanism, not two."
-#define DPOS_MPC_NUM_SIGMA_POINTS 5
-static const float kSigmaOffsets[DPOS_MPC_NUM_SIGMA_POINTS] = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f};
-static const float kSigmaWeights[DPOS_MPC_NUM_SIGMA_POINTS] = {0.06f, 0.24f, 0.40f, 0.24f, 0.06f};
+#define DPOS_MPC_NUM_SIGMA_POINTS 3
+static const float kSigmaOffsets[DPOS_MPC_NUM_SIGMA_POINTS] = {-1.0f, 0.0f, 1.0f};
+static const float kSigmaWeights[DPOS_MPC_NUM_SIGMA_POINTS] = {0.272f, 0.4545f, 0.272f};
 
 void DposPulseMPC_GetDebugInfo(const DposPulseMPC *c, DposPulseMPCDebugInfo *out) {
-  out->state = c->state;
+  out->state = c->pulseState.state;
   out->passThrough = c->passThrough;
   out->remainingError = c->remainingError;
-  out->plannedPulse = c->plannedPulse;
-  out->commandVelocity = c->commandVelocity;
+  out->plannedPulse = c->pulseState.plannedPulse;
+  out->commandVelocity = c->pulseState.commandVelocity;
+  out->pulseTimer = c->pulseState.pulseTimer;
+  out->stateTimer = c->pulseState.stateTimer;
 }
 
 void DposPulseMPC_PrintDebugInfo(int index, DposPulseMPCDebugInfo info) {
@@ -30,15 +32,13 @@ void DposPulseMPC_PrintDebugInfo(int index, DposPulseMPCDebugInfo info) {
     default:              state_str = "?";        break;
   }
   printf(
-      "DPOS[%d]: %-8s mode=%-9s remErr=%6d dir=%+d runDur=%6d cmd=%6d (milli-rad, milli-rad/s, milli-s)\r\n",
+      "DPOS[%d]: %-8s mode=%-9s remErr=%6d dir=%+d runDur=%6d cmd=%6d pulseT=%6d stateT=%6d (milli-rad, milli-rad/s, milli-s)\r\n",
       index, state_str, info.passThrough ? "PASSTHRU" : "SMALL_VEL",
       (int) (info.remainingError * 1000.0f), (int) info.plannedPulse.dir,
       (int) (info.plannedPulse.run_duration * 1000.0f),
-      (int) (info.commandVelocity * 1000.0f));
-}
-
-float DposPulseMPC_PredictDelta(const MotorModel *model, PulseCommand pulse) {
-  return pulse.dir * model->gain * model->V_min * pulse.run_duration;
+      (int) (info.commandVelocity * 1000.0f),
+      (int) (info.pulseTimer * 1000.0f),
+      (int) (info.stateTimer * 1000.0f));
 }
 
 float DposPulseMPC_ErrorLoss(const DposPulseMPC *c, float remainingError, float resultingError) {
@@ -78,7 +78,7 @@ static float DposPulseMPC_ContinuationCost(
 }
 
 float DposPulseMPC_EvaluateLookahead(const DposPulseMPC *c, PulseCommand pulse, float remainingError, int depth) {
-  float mu = DposPulseMPC_PredictDelta(&c->model, pulse);
+  float mu = PulseMotorModel_PredictDelta(&c->model, pulse);
 
   float total = 0.0f;
   for (int i = 0; i < DPOS_MPC_NUM_SIGMA_POINTS; i++) {
@@ -158,47 +158,52 @@ void DposPulseMPC_Update(DposPulseMPC *c, float desiredVelocity, float remaining
   c->filteredVelocityMagnitude =
       c->filterAlpha * fabsf(desiredVelocity) + (1.0f - c->filterAlpha) * c->filteredVelocityMagnitude;
 
-  // Advance transient timers -- can flip MOTOR_STARTING->RUNNING or
-  // MOTOR_STOPPING->STOPPED within this same call; the decision blocks below
-  // check c->state AFTER this switch runs, same reasoning as
-  // PulseMPC_Update.
-  switch (c->state) {
-    case MOTOR_STARTING:
-      c->stateTimer += dt;
-      if (c->stateTimer >= c->model.T_start) {
-        c->state = MOTOR_RUNNING;
-        c->stateTimer = 0.0f;
-      }
-      break;
-
-    case MOTOR_STOPPING:
-      c->stateTimer += dt;
-      if (c->stateTimer >= c->model.T_stop) {
-        c->state = MOTOR_STOPPED;
-        c->stateTimer = 0.0f;
-      }
-      break;
-
-    case MOTOR_RUNNING:
-      c->pulseTimer += dt;
-      break;
-
-    case MOTOR_STOPPED:
-      break;
+  // stop_early: this design's two RUNNING early-exit conditions, ported
+  // from PulseMPC_Update's RUNNING checks but keyed to remainingError rather
+  // than desiredVelocity -- see the struct's filteredVelocityMagnitude
+  // comment for why (desiredVelocity legitimately sits near zero throughout
+  // a dwell-region small-velocity episode for this design, so a
+  // desiredVelocity-near-zero check would spuriously abort essentially
+  // every pulse). Only meaningful while RUNNING -- computed here (rather
+  // than inside PulseMotorModel_Advance) because both conditions are
+  // decisions specific to this controller, not the generic pulse-execution
+  // FSM.
+  bool stop_early = false;
+  if (c->pulseState.state == MOTOR_RUNNING) {
+    if (c->filteredVelocityMagnitude >= c->model.V_min) {
+      // 1. Demand has clearly moved back into pass-through range -- stop so
+      // control can return to MOTOR_STOPPED and hand off as soon as
+      // possible, same reasoning as PulseMPC_Update's equivalent check.
+      stop_early = true;
+    } else if (sign_f(remainingError) != c->pulseState.dir) {
+      // 2. The freshly-supplied remainingError's sign no longer matches the
+      // latched dir -- the target has moved past/reversed relative to what
+      // this pulse was planned against. Abort, and discard any assumption
+      // about remainingError in favor of the fresh value next planned from
+      // STOPPED (plan doc §3 item 4).
+      stop_early = true;
+      c->remainingError = remainingError;
+    }
   }
 
-  if (c->state == MOTOR_STOPPED) {
+  // Advances MOTOR_STARTING->RUNNING, MOTOR_STOPPING->STOPPED, and (while
+  // RUNNING) ->STOPPING once either plannedPulse.run_duration elapses or
+  // stop_early is true -- see pulse_motor_model.h. Can flip state within
+  // this same call; the decision block below checks the post-advance state,
+  // same reasoning as PulseMPC_Update.
+  PulseMotorModel_Advance(&c->pulseState, &c->model, dt, stop_early);
+
+  if (c->pulseState.state == MOTOR_STOPPED) {
     // Pass-through eligibility is checked FIRST, ahead of (and instead of)
-    // the small-velocity floor gate -- see the note above the switch
-    // statement for why this can't be a separate early-return at the top of
-    // the function. Engages ordinary continuous velocity control whenever
-    // EITHER the filtered velocity is already at/above V_min OR the
-    // remaining gap is still too large to be worth closing via pulsing
-    // (Small_DeltaP_Controller_Plan.md §2.3) -- small-velocity mode requires
-    // BOTH conditions to fail.
+    // the small-velocity floor gate -- see the note above for why this
+    // can't be a separate early-return at the top of the function. Engages
+    // ordinary continuous velocity control whenever EITHER the filtered
+    // velocity is already at/above V_min OR the remaining gap is still too
+    // large to be worth closing via pulsing (Small_DeltaP_Controller_Plan.md
+    // §2.3) -- small-velocity mode requires BOTH conditions to fail.
     if (c->filteredVelocityMagnitude >= c->model.V_min || fabsf(remainingError) > c->engagementGapThreshold) {
       c->passThrough = true;
-      c->commandVelocity = desiredVelocity;
+      c->pulseState.commandVelocity = desiredVelocity;
       return;
     }
     c->passThrough = false;
@@ -215,52 +220,12 @@ void DposPulseMPC_Update(DposPulseMPC *c, float desiredVelocity, float remaining
 
     PulseCommand candidate;
     if (DposPulseMPC_WorthPulsing(c, c->remainingError, &candidate)) {
-      c->dir = candidate.dir;
-      c->plannedPulse = candidate;
-      c->state = MOTOR_STARTING;
-      c->stateTimer = 0.0f;
-      c->pulseTimer = 0.0f;
-      c->commandVelocity = c->dir * c->model.V_min;
+      PulseMotorModel_StartPulse(&c->pulseState, &c->model, candidate);
     } else {
-      c->commandVelocity = 0.0f;
+      c->pulseState.commandVelocity = 0.0f;
     }
-  } else if (c->state == MOTOR_RUNNING) {
-    // Two unconditional (planned-run_duration-bypassing) early exits, ported
-    // from PulseMPC_Update's RUNNING checks, ahead of the normal
-    // planned-duration-elapsed check below. Both are keyed to remainingError
-    // rather than desiredVelocity where PulseMPC's originals used
-    // desiredVelocity -- see the struct's filteredVelocityMagnitude comment
-    // for why (desiredVelocity legitimately sits near zero throughout a
-    // dwell-region small-velocity episode for this design, so a
-    // desiredVelocity-near-zero check would spuriously abort essentially
-    // every pulse).
-    if (c->filteredVelocityMagnitude >= c->model.V_min) {
-      // 1. Demand has clearly moved back into pass-through range -- stop so
-      // control can return to MOTOR_STOPPED and hand off as soon as
-      // possible, same reasoning as PulseMPC_Update's equivalent check.
-      c->state = MOTOR_STOPPING;
-      c->stateTimer = 0.0f;
-      c->commandVelocity = 0.0f;
-    } else if (sign_f(remainingError) != c->dir) {
-      // 2. The freshly-supplied remainingError's sign no longer matches the
-      // latched dir -- the target has moved past/reversed relative to what
-      // this pulse was planned against. Abort, and discard any assumption
-      // about remainingError in favor of the fresh value next planned from
-      // STOPPED (plan doc §3 item 4).
-      c->state = MOTOR_STOPPING;
-      c->stateTimer = 0.0f;
-      c->commandVelocity = 0.0f;
-      c->remainingError = remainingError;
-    } else if (c->pulseTimer >= c->plannedPulse.run_duration) {
-      // 3. Planned run_duration elapsed on schedule -- no per-tick
-      // stopping-distance recheck, per planning doc §6.
-      c->state = MOTOR_STOPPING;
-      c->stateTimer = 0.0f;
-      c->commandVelocity = 0.0f;
-    }
-    // else: still mid-pulse, commandVelocity already holds dir*V_min.
   }
-  // MOTOR_STARTING / MOTOR_STOPPING: no decision, timer-advance only (above);
-  // commandVelocity already holds whatever was set at the transition into
-  // this state.
+  // MOTOR_STARTING / MOTOR_RUNNING (still mid-pulse) / MOTOR_STOPPING: no
+  // decision here; commandVelocity already holds whatever
+  // PulseMotorModel_StartPulse/PulseMotorModel_Advance set.
 }

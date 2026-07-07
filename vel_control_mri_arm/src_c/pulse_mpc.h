@@ -1,7 +1,7 @@
 #ifndef PULSE_MPC_H
 #define PULSE_MPC_H
 
-#include "motor_model.h"
+#include "pulse_motor_model.h"
 
 // Sentinel cost used to seed a min-cost search before any real candidate
 // has been evaluated -- must be larger than any real J() value can reach.
@@ -26,7 +26,7 @@ typedef enum {
   ACTION_STOP
 } MpcAction;
 
-// MotorModel and MotorState now live in motor_model.h, shared with
+// MotorModel and MotorState now live in pulse_motor_model.h, shared with
 // dpos_pulse_mpc.h -- see that header for why.
 
 // Per-motor controller state and tuning. Each Small_Velocity_Controller

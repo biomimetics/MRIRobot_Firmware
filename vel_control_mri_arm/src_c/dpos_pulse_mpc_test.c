@@ -3,13 +3,13 @@
 // compiles this file automatically); compile and run it directly:
 //
 //   cd vel_control_mri_arm/src_c
-//   gcc -o /tmp/dpos_test dpos_pulse_mpc_test.c dpos_pulse_mpc.c motor_model.c -lm
+//   gcc -o /tmp/dpos_test dpos_pulse_mpc_test.c dpos_pulse_mpc.c pulse_motor_model.c -lm
 //   /tmp/dpos_test
 //
 // Hand-sets a MotorModel + DposPulseMPC and checks PlanBestPulse's chosen
 // direction/run_duration against a few fixed remainingError values, before
-// any reactor (Small_DeltaP_Controller.lf) is involved -- see
-// src/lib/Drivers/SmallDeltaPControl/TODO.md's Stage 1 checklist.
+// any reactor (Small_DeltaP_MPC_Controller.lf) is involved -- see
+// src/lib/SmallDeltaPMPCControl/TODO.md's Stage 1 checklist.
 #include "dpos_pulse_mpc.h"
 #include <stdio.h>
 #include <math.h>
@@ -31,15 +31,15 @@ static DposPulseMPC MakeController(void) {
   c.filterAlpha = 0.1f;
   c.engagementGapThreshold = 0.3f;
 
-  c.state = MOTOR_STOPPED;
-  c.dir = 1.0f;
+  c.pulseState.state = MOTOR_STOPPED;
+  c.pulseState.dir = 1.0f;
   return c;
 }
 
 static void CheckCase(const char *label, float remainingError) {
   DposPulseMPC c = MakeController();
   PulseCommand best = DposPulseMPC_PlanBestPulse(&c, remainingError, c.lookahead_depth);
-  float predicted = DposPulseMPC_PredictDelta(&c.model, best);
+  float predicted = PulseMotorModel_PredictDelta(&c.model, best);
 
   printf(
       "%-28s remErr=%+7.4f -> dir=%+.0f run_duration=%7.4fs predicted_delta=%+7.4f\n",
@@ -99,8 +99,8 @@ int main(void) {
     for (int i = 0; i < 5000; i++) {
       float gapLeft = remainingError - simulatedPosition;
       DposPulseMPC_Update(&c, 0.0f, gapLeft, dt);
-      if (c.state == MOTOR_RUNNING) {
-        simulatedPosition += c.commandVelocity * c.model.gain * dt;
+      if (c.pulseState.state == MOTOR_RUNNING) {
+        simulatedPosition += c.pulseState.commandVelocity * c.model.gain * dt;
       }
     }
 

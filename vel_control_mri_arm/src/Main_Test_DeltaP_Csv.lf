@@ -24,11 +24,11 @@
 // Note: PRINT_DPOS must be set to 1 in src_c/dpos_pulse_mpc.h at *build*
 // time for debug_info (and therefore this CSV) to see anything real --
 // debug_info is only ever populated/emitted under that flag (see
-// Small_DeltaP_Controller.lf's control_tick reaction). If you forget, this
+// Small_DeltaP_MPC_Controller.lf's control_tick reaction). If you forget, this
 // will still build and run fine, just with the remaining_error/pass_through/
 // state/planned_* columns all reading 0 all the way through. Remember to
 // flip it back to 0 before flashing production firmware, since it also
-// enables Small_DeltaP_Controller_Bank.lf's periodic UART printout.
+// enables Small_DeltaP_MPC_Controller_Bank.lf's periodic UART printout.
 target C {
   fast: true,
   timeout: 30 s
@@ -36,14 +36,14 @@ target C {
 
 // No `platform` override here -- same reasoning as Main_Test_DeltaP.lf:
 // this harness runs natively on the dev machine, not the STM32.
-import Small_DeltaP_Controller from "lib/Drivers/SmallDeltaPControl/Small_DeltaP_Controller.lf"
+import Small_DeltaP_MPC_Controller from "lib/SmallDeltaPMPCControl/Small_DeltaP_MPC_Controller.lf"
 import PositionPidController from "lib/Helpers/PositionPidController.lf"
 import FakeMotorPlant from "lib/Helpers/FakeMotorPlant.lf"
 import DeltaPCsvLogger from "lib/Helpers/DeltaPCsvLogger.lf"
 
 main reactor {
   pid = new PositionPidController()
-  controller = new Small_DeltaP_Controller()
+  controller = new Small_DeltaP_MPC_Controller()
   plant = new FakeMotorPlant()
   logger = new DeltaPCsvLogger()
 

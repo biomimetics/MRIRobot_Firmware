@@ -1,6 +1,6 @@
-// Regression check for Small_DeltaP_Controller's delta-position pulse
+// Regression check for Small_DeltaP_MPC_Controller's delta-position pulse
 // planner. Runs natively (no STM32 hardware/cross-compiler needed): a
-// PositionPidController -> Small_DeltaP_Controller -> FakeMotorPlant loop
+// PositionPidController -> Small_DeltaP_MPC_Controller -> FakeMotorPlant loop
 // drives a single step-response target, printing rolling remaining-error
 // stats (see ConvergenceLogger below) so you can eyeball whether the
 // controller converges and how often it engages small-velocity/bang-bang
@@ -15,7 +15,7 @@
 //
 // Note: PRINT_DPOS must be set to 1 in src_c/dpos_pulse_mpc.h for
 // ConvergenceLogger to see anything -- debug_info is only ever populated
-// under that flag (see Small_DeltaP_Controller.lf's control_tick reaction).
+// under that flag (see Small_DeltaP_MPC_Controller.lf's control_tick reaction).
 // Remember to flip it back to 0 before flashing production firmware.
 target C {
   fast: true,
@@ -24,7 +24,7 @@ target C {
 
 // No `platform` override here -- same reasoning as Main_Test_SVC.lf: this
 // harness runs natively on the dev machine, not the STM32.
-import Small_DeltaP_Controller from "lib/Drivers/SmallDeltaPControl/Small_DeltaP_Controller.lf"
+import Small_DeltaP_MPC_Controller from "lib/SmallDeltaPMPCControl/Small_DeltaP_MPC_Controller.lf"
 import PositionPidController from "lib/Helpers/PositionPidController.lf"
 import FakeMotorPlant from "lib/Helpers/FakeMotorPlant.lf"
 
@@ -33,7 +33,7 @@ preamble {=
   #include <math.h>
 =}
 
-// Consumes Small_DeltaP_Controller's debug_info (only populated when
+// Consumes Small_DeltaP_MPC_Controller's debug_info (only populated when
 // PRINT_DPOS is enabled -- it must be set to 1 for this test to see
 // anything) and reports rolling remaining-error stats every report_period.
 // remainingError staying small (not just bounded, unlike motionDebt in the
@@ -80,7 +80,7 @@ reactor ConvergenceLogger(report_period: time = 1 s) {
 
 main reactor {
   pid = new PositionPidController()
-  controller = new Small_DeltaP_Controller()
+  controller = new Small_DeltaP_MPC_Controller()
   plant = new FakeMotorPlant()
   logger = new ConvergenceLogger()
 

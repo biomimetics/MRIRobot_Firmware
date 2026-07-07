@@ -5,17 +5,17 @@ target C {
     board: "F446RE"
   },
   files: [
-    "../../../../src_c/dpos_pulse_mpc.h", "../../../../src_c/dpos_pulse_mpc.c",
-    "../../../../src_c/motor_model.h", "../../../../src_c/motor_model.c"
+    "../../../src_c/dpos_pulse_mpc.h", "../../../src_c/dpos_pulse_mpc.c",
+    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c"
   ],
   cmake-include: [
-    "../../../../src_c/dpos_pulse_mpc_cmake.cmake",
-    "../../../../src_c/motor_model_cmake.cmake"
+    "../../../src_c/dpos_pulse_mpc_cmake.cmake",
+    "../../../src_c/pulse_motor_model_cmake.cmake"
   ]
 }
 
 // Single-channel hybrid delta-position controller. Sits inside
-// Small_DeltaP_Controller_Bank.lf, one instance per joint. Replaces
+// Small_DeltaP_MPC_Controller_Bank.lf, one instance per joint. Replaces
 // Small_Velocity_Controller.lf's motion-debt design (see
 // ../SmallVelocityControl/Motion_Debt_Limitations.md for why that design
 // struggles) with one that plans discrete pulses directly against a
@@ -56,16 +56,16 @@ preamble {=
 // same caveat as Small_Velocity_Controller.lf's parameters. V_min/gain/
 // T_start/T_stop/minimumPulseWidth default to the same values as
 // Small_Velocity_Controller so the two controllers stay comparable.
-reactor Small_DeltaP_Controller(
+reactor Small_DeltaP_MPC_Controller(
   control_period: time = 5 ms,
-  V_min_initial: float = 0.25,        // rad/s, ~10 deg/s -- TODO: characterize
+  V_min_initial: float = 0.35,        // rad/s, ~20 deg/s -- raised from 0.25 (~14.3 deg/s) to test whether that was below the real motor's minimum-moving threshold -- TODO: characterize
   gain_initial: float = 0.9,            // unitless 0..1 -- TODO: characterize
-  T_start_initial: time = 10 ms,       // startup command delay -- TODO: characterize further
+  T_start_initial: time = 5 ms,       // startup command delay -- TODO: characterize further
   T_stop_initial: time = 1 ms,         // hard-stop settle time, datasheet value, likely optimistic
-  minimumPulseWidth_initial: time = 5 ms, // hysteresis guard / min feasible run_duration -- TODO: characterize
+  minimumPulseWidth_initial: time = 40 ms, // hysteresis guard / min feasible run_duration -- raised from 5ms to test whether pulses need more sustained duration to produce real motion -- TODO: characterize
   W_error_initial: float = 1.0,          // cost weight -- TODO: characterize
-  k_overshoot_initial: float = 10.0,     // overshoot-side cost multiplier -- dpos_pulse_mpc_planning.md §7 item 2
-  C_overshoot_initial: float = 0.01,     // flat overshoot cost -- TODO: characterize
+  k_overshoot_initial: float = 1.0,     // overshoot-side cost multiplier -- TEMP 1 (no asymmetry) to rule out as convergence-floor cause, was 10.0 -- dpos_pulse_mpc_planning.md §7 item 2
+  C_overshoot_initial: float = 0.0,     // flat overshoot cost -- TEMP 0 to rule out as convergence-floor cause, was 0.01 -- TODO: characterize
   sigma0_initial: float = 0.05,          // rad, pulse-outcome noise stddev -- TODO: characterize
   lookahead_depth_initial: int = 1,      // pulses scored deep -- dpos_pulse_mpc_planning.md §5
   grid_step_sigmas_initial: float = 1.0, // grid candidate spacing, in units of sigma0/speed
@@ -102,14 +102,14 @@ reactor Small_DeltaP_Controller(
     self->controller_.filterAlpha = self->filterAlpha_initial;
     self->controller_.engagementGapThreshold = self->engagementGapThreshold_initial;
 
-    self->controller_.state = MOTOR_STOPPED;
-    self->controller_.dir = 1.0f;
-    self->controller_.stateTimer = 0.0f;
-    self->controller_.pulseTimer = 0.0f;
+    self->controller_.pulseState.state = MOTOR_STOPPED;
+    self->controller_.pulseState.dir = 1.0f;
+    self->controller_.pulseState.stateTimer = 0.0f;
+    self->controller_.pulseState.pulseTimer = 0.0f;
+    self->controller_.pulseState.plannedPulse.dir = 1.0f;
+    self->controller_.pulseState.plannedPulse.run_duration = 0.0f;
+    self->controller_.pulseState.commandVelocity = 0.0f;
     self->controller_.remainingError = 0.0f;
-    self->controller_.plannedPulse.dir = 1.0f;
-    self->controller_.plannedPulse.run_duration = 0.0f;
-    self->controller_.commandVelocity = 0.0f;
     self->controller_.filteredVelocityMagnitude = 0.0f;
     self->controller_.passThrough = true;
 
@@ -136,7 +136,7 @@ reactor Small_DeltaP_Controller(
 
     DposPulseMPC_Update(&self->controller_, self->desired_velocity_, self->remaining_error_, dt);
 
-    lf_set(command_velocity_output, self->controller_.commandVelocity);
+    lf_set(command_velocity_output, self->controller_.pulseState.commandVelocity);
 
 #if PRINT_DPOS
     DposPulseMPCDebugInfo info;
