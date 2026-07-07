@@ -32,6 +32,13 @@ reactor PulseMotorModelEstimator {
   input[7] position_input: float
   input[7] velocity_input: float
   input[7] commanded_velocity_input: float
+  // Which MotorState each joint's Small_DeltaP_Pulse_Controller is
+  // currently in (STOPPED/STARTING/RUNNING/STOPPING) -- see that reactor's
+  // motor_state_output. Lets a future estimator tell "this motion happened
+  // during a specific commanded pulse" apart from "this motion happened
+  // during ordinary pass-through," which matters for attributing observed
+  // position/velocity back to a particular PulseCommand.
+  input[7] motor_state_input: MotorState
 
   output[7] motor_model_output: MotorModel
 

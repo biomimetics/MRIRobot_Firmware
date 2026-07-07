@@ -17,7 +17,7 @@ import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import StateMachine from "lib/State_Machine.lf"
 import UART_Handler from "lib/Drivers/UART.lf"
-import Small_DeltaP_MPC_Controller_Bank from "lib/SmallDeltaPMPCControl/Small_DeltaP_MPC_Controller_Bank.lf"
+import Small_DeltaP_Pulse_Controller_Bank from "lib/SmallDeltaPPulseControl/Small_DeltaP_Pulse_Controller_Bank.lf"
 import EncoderStateEstimator from "lib/EncoderStateEstimator.lf"
 import PulseMotorModelEstimator from "lib/PulseMotorModelEstimator.lf"
 
@@ -110,7 +110,7 @@ main reactor {
   usm = new USM()                            // Ultrasonic motor controllers
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
-  deltap_bank = new Small_DeltaP_MPC_Controller_Bank()  // Per-joint delta-position pulse control, routed between state_machine and usm
+  deltap_bank = new Small_DeltaP_Pulse_Controller_Bank()  // Per-joint delta-position pulse control, routed between state_machine and usm
   // Sits inline between qdec and state_machine for USM position/velocity --
   // see EncoderStateEstimator.lf. Currently just echoes its inputs through.
   encoder_state_estimator = new EncoderStateEstimator()
@@ -159,11 +159,23 @@ main reactor {
   encoder_state_estimator.position_output -> pulse_motor_model_estimator.position_input
   encoder_state_estimator.velocity_output -> pulse_motor_model_estimator.velocity_input
 
+  // Closes the loop between the pulse controller bank and its parameter
+  // estimator: deltap_bank's per-joint MotorState tells
+  // pulse_motor_model_estimator when it's safe to attribute encoder motion
+  // to a specific commanded pulse, and pulse_motor_model_estimator's
+  // (currently never-sent) refined MotorModel feeds back into deltap_bank
+  // for more accurate pulse-duration planning -- see
+  // Small_DeltaP_Pulse_Controller.lf's motor_model_update_input/
+  // motor_state_output and PulseMotorModelEstimator.lf.
+  deltap_bank.motor_state_output -> pulse_motor_model_estimator.motor_state_input
+  pulse_motor_model_estimator.motor_model_output -> deltap_bank.motor_model_update_input
+
   // enable_motor_command goes directly from state_machine to usm, bypassing
-  // deltap_bank -- coupling it to Small_DeltaP_MPC_Controller's own bang-bang
-  // start/stop cycling caused direction-reversal failures downstream (see
-  // Small_Velocity_Controller.lf, whose motor this shares -- same hazard
-  // applies to any bang-bang small-velocity controller on this hardware).
+  // deltap_bank -- coupling it to Small_DeltaP_Pulse_Controller's own
+  // bang-bang start/stop cycling caused direction-reversal failures
+  // downstream (see Small_Velocity_Controller.lf, whose motor this shares --
+  // same hazard applies to any bang-bang small-velocity controller on this
+  // hardware).
   state_machine.enable_motor_command -> usm.enable_motor_command
 
   state_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
