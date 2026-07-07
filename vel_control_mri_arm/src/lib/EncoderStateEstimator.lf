@@ -8,7 +8,7 @@ target C {
 
 // Placeholder for a future proper state estimator: the intent is to fuse
 // USM encoder position/velocity with the actual commanded velocity (e.g.
-// filtering noise, detecting stiction, reconciling against a MotorModel)
+// filtering noise, detecting stiction, reconciling against a PulseMotorModel)
 // before handing cleaned position/velocity estimates on to
 // State_Machine.lf. Sits inline between Encoder.lf's QDEC and
 // State_Machine.lf now so that estimation logic can be added here later

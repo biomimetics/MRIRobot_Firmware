@@ -43,6 +43,16 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
         // Init functions
         // ------
 
+        // This UART line only ever carries CommandMessage packets (host ->
+        // STM32; StateMessage is the other direction), so the fixed-size RX
+        // below waits for exactly one CommandMessage-sized packet rather than
+        // UART_BUFFER_SIZE (which is sized for the larger StateMessage and
+        // would never arrive on this line -- see common.h's old USE_EX_DMA=1
+        // comment for why that broke fixed-size reception before this fix).
+        // TODO: revisit if/when packets on this line become variable-length;
+        // this assumes every CommandMessage on the wire is the same size.
+        #define COMMAND_PACKET_SIZE (COMMAND_MSG_SIZE + PACKET_OVERHEAD)
+
         bool received_new_message = false;
 
         uint8_t uart_rx_dma_buffer[UART_BUFFER_SIZE];
@@ -54,14 +64,14 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
         uint8_t uart_tx_dma_buffer[UART_BUFFER_SIZE];
 
         void HAL_UART_RxCallback_DMA(){
-            
-            //printf("In HAL_UART_RxCpltCallback, received some bytes.");
-            uart_receive_size = (size_t)UART_BUFFER_SIZE; //(size_t)Size;
 
-            memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, UART_BUFFER_SIZE); // moves the data over to a buffer that's handled in the receive update
+            //printf("In HAL_UART_RxCpltCallback, received some bytes.");
+            uart_receive_size = (size_t)COMMAND_PACKET_SIZE; //(size_t)Size;
+
+            memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, COMMAND_PACKET_SIZE); // moves the data over to a buffer that's handled in the receive update
 
             received_new_message = true;
-            HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
+            HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, COMMAND_PACKET_SIZE);
         }
 
         // HAL_UARTEx_ReceiveToIdle_DMA funnels ALL idle-DMA UARTs through this
@@ -93,7 +103,7 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
             HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
         }
         else{
-            HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
+            HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, COMMAND_PACKET_SIZE);
         }
     =}
 

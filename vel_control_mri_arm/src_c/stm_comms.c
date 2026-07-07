@@ -78,8 +78,8 @@ int encode_command_message_to_data_buffer(const CommandMessage *msg, uint8_t *bu
 
 bool decode_data_buffer_to_command_message(CommandMessage *msg, const uint8_t *data_buffer, size_t data_buffer_len) {
     if (data_buffer_len != sizeof(CommandMessage)) {
-        fprintf(stderr, "Unexpected CommandMessage size! Got %zu, expected %zu\n",
-                data_buffer_len, sizeof(CommandMessage));
+        fprintf(stderr, "Unexpected CommandMessage size! Got %u, expected %u\n",
+                (unsigned)data_buffer_len, (unsigned)sizeof(CommandMessage));
         return false;
     }
 

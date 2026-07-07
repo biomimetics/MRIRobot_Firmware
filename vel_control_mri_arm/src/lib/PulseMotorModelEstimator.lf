@@ -19,7 +19,7 @@ preamble {=
 // Placeholder for a future running parameter estimator: the intent is to
 // compare each joint's commanded velocity/pulses against
 // EncoderStateEstimator's position/velocity output to refine that joint's
-// MotorModel (V_min, gain, V_variance, etc.) live, then hand the updated
+// PulseMotorModel (V_min, gain, V_variance, etc.) live, then hand the updated
 // model to Small_DeltaP_Pulse_Controller.lf via its
 // motor_model_update_input for more accurate pulse-duration planning (see
 // that reactor's comment on motor_model_update_input for why it's only
@@ -40,14 +40,14 @@ reactor PulseMotorModelEstimator {
   // position/velocity back to a particular PulseCommand.
   input[7] motor_state_input: MotorState
 
-  output[7] motor_model_output: MotorModel
+  output[7] motor_model_output: PulseMotorModel
 
   // Per-joint running estimate, seeded from pulse_motor_model.h's shared
   // INITIAL_MOTOR_MODEL -- same starting belief
   // Small_DeltaP_Pulse_Controller.lf's own model_ starts from. Not yet
   // refined by anything (see the reactor-level comment above) or sent
   // anywhere.
-  state models_: MotorModel[7]
+  state models_: PulseMotorModel[7]
 
   reaction(startup) {=
     for (int i = 0; i < 7; i++) {

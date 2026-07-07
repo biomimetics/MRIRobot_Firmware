@@ -26,7 +26,7 @@ typedef enum {
   ACTION_STOP
 } MpcAction;
 
-// MotorModel and MotorState now live in pulse_motor_model.h, shared with
+// PulseMotorModel and MotorState now live in pulse_motor_model.h, shared with
 // dpos_pulse_mpc.h -- see that header for why.
 
 // Per-motor controller state and tuning. Each Small_Velocity_Controller
@@ -35,7 +35,7 @@ typedef enum {
 // a single file-scope C global shared across every bank instance, which
 // would let all 7 motors clobber the same controller.
 typedef struct {
-  MotorModel model;
+  PulseMotorModel model;
 
   // ---- MPC tuning ----
   // These three weights all scale terms in the same J() cost comparison

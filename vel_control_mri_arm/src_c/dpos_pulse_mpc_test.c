@@ -6,7 +6,7 @@
 //   gcc -o /tmp/dpos_test dpos_pulse_mpc_test.c dpos_pulse_mpc.c pulse_motor_model.c -lm
 //   /tmp/dpos_test
 //
-// Hand-sets a MotorModel + DposPulseMPC and checks PlanBestPulse's chosen
+// Hand-sets a PulseMotorModel + DposPulseMPC and checks PlanBestPulse's chosen
 // direction/run_duration against a few fixed remainingError values, before
 // any reactor (Small_DeltaP_MPC_Controller.lf) is involved -- see
 // src/lib/SmallDeltaPMPCControl/TODO.md's Stage 1 checklist.

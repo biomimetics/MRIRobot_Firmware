@@ -154,7 +154,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     =}
 
     // this output reaction is placed here to
-    reaction(motor_command_tick) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities, commanded_position_deltas {=
+    reaction(motor_command_tick) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities, commanded_position_deltas, position_offset {=
 
       // ignore the positions for now, use for bounds checking
 
@@ -175,6 +175,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         lf_set(commanded_motor_velocities[i], self->staged_commanded_motor_velocities_[i]);
         lf_set(commanded_position_deltas[i], self->staged_position_deltas_[i]);
         lf_set(force_disable_motor_pins[i], self->force_disable_motor_pins_[i]);
+        lf_set(position_offset[i], self->position_offset_[i]);
       }
       if (PRINT_STATEMACHINE) printf("\n");
       for (int i = 0; i<DOF_NUMBER; i++){
@@ -183,22 +184,21 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
 
     =}
 
-    // Event-driven, not tied to motor_command_tick's cadence -- position_offset
-    // is expected to change at most once every several minutes (see its
-    // output comment above), so this only fires lf_set when
-    // CommandMessage.position_offset_sequence actually advances, rather than
-    // re-sending the same offset every motor_command_tick.
-    reaction(command_message) -> position_offset {=
-      const CommandMessage *msg = &command_message->value;
-      if (msg->position_offset_sequence != self->last_position_offset_sequence_){
-        self->last_position_offset_sequence_ = msg->position_offset_sequence;
-        for (int i = 0; i<DOF_NUMBER; i++){
-          self->position_offset_[i] = msg->position_offset[i];
-          lf_set(position_offset[i], self->position_offset_[i]);
-        }
-      }
-    =}
-    
+    // Disabled -- was event-driven off CommandMessage.position_offset_sequence
+    // advancing, but that didn't seem to be firing reliably. position_offset_
+    // is now updated in reaction(command_message) below and re-sent every
+    // motor_command_tick instead (see position_offset assignment there).
+    // reaction(command_message) -> position_offset {=
+    //   const CommandMessage *msg = &command_message->value;
+    //   if (msg->position_offset_sequence != self->last_position_offset_sequence_){
+    //     self->last_position_offset_sequence_ = msg->position_offset_sequence;
+    //     for (int i = 0; i<DOF_NUMBER; i++){
+    //       self->position_offset_[i] = msg->position_offset[i];
+    //       lf_set(position_offset[i], self->position_offset_[i]);
+    //     }
+    //   }
+    // =}
+
 
     //##### 
     //# Input reactions
@@ -259,6 +259,16 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       for (int i = 0; i<DOF_NUMBER; i++){
         self->staged_commanded_motor_velocities_[i] = self->cmd_msg_.velocities[i];
         self->staged_position_deltas_[i] = self->cmd_msg_.position_deltas[i];
+      }
+
+      // position_offset is now just staged here and re-sent every
+      // motor_command_tick (see reaction(motor_command_tick) above) instead
+      // of being lf_set from its own event-driven reaction.
+      if (self->cmd_msg_.position_offset_sequence != self->last_position_offset_sequence_){
+        self->last_position_offset_sequence_ = self->cmd_msg_.position_offset_sequence;
+        for (int i = 0; i<DOF_NUMBER; i++){
+          self->position_offset_[i] = self->cmd_msg_.position_offset[i];
+        }
       }
 
 

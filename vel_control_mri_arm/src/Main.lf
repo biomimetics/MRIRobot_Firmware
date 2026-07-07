@@ -163,7 +163,7 @@ main reactor {
   // estimator: deltap_bank's per-joint MotorState tells
   // pulse_motor_model_estimator when it's safe to attribute encoder motion
   // to a specific commanded pulse, and pulse_motor_model_estimator's
-  // (currently never-sent) refined MotorModel feeds back into deltap_bank
+  // (currently never-sent) refined PulseMotorModel feeds back into deltap_bank
   // for more accurate pulse-duration planning -- see
   // Small_DeltaP_Pulse_Controller.lf's motor_model_update_input/
   // motor_state_output and PulseMotorModelEstimator.lf.

@@ -13,7 +13,7 @@
 // error, plan pulses to close it directly, with no motion-debt integral
 // anywhere in it.
 //
-// Shares MotorModel/MotorState/PulseCommand and the PredictDelta helper with
+// Shares PulseMotorModel/MotorState/PulseCommand and the PredictDelta helper with
 // pulse_mpc.h (both bang-bang the exact same physical motor) via
 // pulse_motor_model.h -- see that header.
 //
@@ -45,7 +45,7 @@
 
 // Per-motor controller state and tuning.
 typedef struct {
-  MotorModel model;
+  PulseMotorModel model;
 
   // ---- MPC tuning (see dpos_pulse_mpc_planning.md §7) ----
   // All placeholders pending bench characterization -- same "TODO:

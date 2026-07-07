@@ -11,7 +11,7 @@
 // Uses float rather than double throughout -- trades away some numerical
 // accuracy (see GaussianMotion_InvCdf's comment for how much) for speed and
 // for consistency with the rest of this codebase's control-loop math
-// (MotorModel, PulseCommand, etc.), which is float end to end.
+// (PulseMotorModel, PulseCommand, etc.), which is float end to end.
 //
 // NOTE: arrival-time-by-reciprocal-moments (mean(1/V), Var(1/V) via Taylor
 // expansion) is deliberately not provided here. It implicitly assumes

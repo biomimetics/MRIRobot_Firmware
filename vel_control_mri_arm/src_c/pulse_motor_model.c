@@ -5,18 +5,18 @@ float sign_f(float x) {
   return (x >= 0.0f) ? 1.0f : -1.0f;
 }
 
-float PulseMotorModel_PredictDelta(const MotorModel *model, PulseCommand pulse) {
+float PulseMotorModel_PredictDelta(const PulseMotorModel *model, PulseCommand pulse) {
   return pulse.dir * model->gain * model->V_min * pulse.run_duration;
 }
 
-PulseCommand PulseMotorModel_PlanPulseFromPositionDelta(const MotorModel *model, float remainingPositionDelta) {
+PulseCommand PulseMotorModel_PlanPulseFromPositionDelta(const PulseMotorModel *model, float remainingPositionDelta) {
   PulseCommand pulse;
   pulse.dir = sign_f(remainingPositionDelta);
   pulse.run_duration = fabsf(remainingPositionDelta) / (model->gain * model->V_min);
   return pulse;
 }
 
-void PulseMotorModel_StartPulse(PulseMotorState *s, const MotorModel *model, PulseCommand pulse) {
+void PulseMotorModel_StartPulse(PulseMotorState *s, const PulseMotorModel *model, PulseCommand pulse) {
   s->dir = pulse.dir;
   s->plannedPulse = pulse;
   s->state = MOTOR_STARTING;
@@ -25,7 +25,7 @@ void PulseMotorModel_StartPulse(PulseMotorState *s, const MotorModel *model, Pul
   s->commandVelocity = pulse.dir * model->V_min;
 }
 
-void PulseMotorModel_Advance(PulseMotorState *s, const MotorModel *model, float dt, bool stop_early) {
+void PulseMotorModel_Advance(PulseMotorState *s, const PulseMotorModel *model, float dt, bool stop_early) {
   switch (s->state) {
     case MOTOR_STARTING:
       s->stateTimer += dt;

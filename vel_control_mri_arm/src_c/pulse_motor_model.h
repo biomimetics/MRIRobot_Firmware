@@ -23,9 +23,9 @@ typedef struct {
   float T_stop;              // s, hard-stop settle time
   float minimumPulseWidth;   // s, hysteresis guard before STOP eligible
   float V_variance;          // rad^2/s^2, variance of the actual speed around V_min * gain
-} MotorModel;
+} PulseMotorModel;
 
-// Single shared initial-guess MotorModel, all placeholders pending real
+// Single shared initial-guess PulseMotorModel, all placeholders pending real
 // bench characterization -- same values every reactor's own startup used to
 // hard-code individually (see e.g. Small_DeltaP_Pulse_Controller.lf's old
 // V_min_initial/gain_initial/etc. constructor parameters). Centralized here,
@@ -39,13 +39,13 @@ typedef struct {
 // elsewhere (C initializers must be constant expressions, and naming
 // another object isn't one) -- copy it at runtime instead (e.g. in a
 // `reaction(startup)`), the same way each existing reactor already does.
-static const MotorModel INITIAL_MOTOR_MODEL = {
-  0.35f,    // V_min             -- rad/s, ~20 deg/s -- TODO: characterize
-  0.9f,     // gain              -- unitless 0..1 -- TODO: characterize
-  0.005f,   // T_start           -- s (5 ms) -- TODO: characterize further
-  0.001f,   // T_stop            -- s (1 ms), datasheet value, likely optimistic
-  0.04f,    // minimumPulseWidth -- s (40 ms) -- TODO: characterize
-  0.0025f,  // V_variance        -- rad^2/s^2 -- TODO: characterize
+static const PulseMotorModel INITIAL_MOTOR_MODEL = {
+  0.40f,    // V_min             -- rad/s, was ~20 deg/s -- TODO: characterize // 0.872665f
+  0.70f,     // gain              -- unitless 0..1 -- TODO: characterize
+  0.050f,   // T_start           -- s (10 ms) -- TODO: characterize further
+  0.050f,   // T_stop            -- s (10 ms), datasheet value, likely optimistic
+  0.030f,    // minimumPulseWidth -- s (40 ms) -- TODO: characterize
+  0.01f,  // V_variance        -- rad^2/s^2 -- TODO: characterize
 };
 
 // Shared FSM states for any controller that bang-bangs this motor between a
@@ -74,7 +74,7 @@ float sign_f(float x);
 
 // Point estimate of a pulse's effect on the motor's change of position without uncertainty:
 // dir * gain * V_min * run_duration.
-float PulseMotorModel_PredictDelta(const MotorModel *model, PulseCommand pulse);
+float PulseMotorModel_PredictDelta(const PulseMotorModel *model, PulseCommand pulse);
 
 // Generic pulse execution state: which FSM state we're in, the
 // currently-latched direction, elapsed-time timers, the pulse currently
@@ -100,7 +100,7 @@ typedef struct {
 // (dir * model->V_min). Caller is responsible for only calling this while
 // state == MOTOR_STOPPED (i.e. after its own decision logic, run at
 // MOTOR_STOPPED, chooses to start a pulse).
-void PulseMotorModel_StartPulse(PulseMotorState *s, const MotorModel *model, PulseCommand pulse);
+void PulseMotorModel_StartPulse(PulseMotorState *s, const PulseMotorModel *model, PulseCommand pulse);
 
 // Advances the FSM by dt seconds: MOTOR_STARTING -> MOTOR_RUNNING once
 // model->T_start elapses, MOTOR_STOPPING -> MOTOR_STOPPED once
@@ -111,6 +111,6 @@ void PulseMotorModel_StartPulse(PulseMotorState *s, const MotorModel *model, Pul
 // reversed) that should cut the pulse short regardless of its planned
 // duration. MOTOR_STOPPED is left untouched here -- deciding whether/how to
 // leave it is the caller's job (see PulseMotorModel_StartPulse).
-void PulseMotorModel_Advance(PulseMotorState *s, const MotorModel *model, float dt, bool stop_early);
+void PulseMotorModel_Advance(PulseMotorState *s, const PulseMotorModel *model, float dt, bool stop_early);
 
 #endif // PULSE_MOTOR_MODEL_H

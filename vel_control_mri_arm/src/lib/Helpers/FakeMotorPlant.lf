@@ -16,7 +16,7 @@ preamble {=
 // Small_Velocity_Controller.lf's header comment), so nothing else in this
 // repo shows the motor's simulated response.
 //
-// Not a literal reuse of pulse_mpc.h's MotorModel struct -- this is a
+// Not a literal reuse of pulse_mpc.h's PulseMotorModel struct -- this is a
 // separate, simplified reactor for visualization only, kept intentionally
 // decoupled from the controller's own internal model so it can't
 // accidentally mask a controller bug by sharing its assumptions verbatim.
@@ -27,7 +27,7 @@ preamble {=
 // using time constant tau_start while ramping up from near-zero and
 // tau_stop while decaying toward zero -- approximating the startup-command
 // delay / hard-stop settle time the real motor (and the controller's own
-// MotorModel) assumes. position is then Euler-integrated from
+// PulseMotorModel) assumes. position is then Euler-integrated from
 // real_velocity.
 reactor FakeMotorPlant(
   sim_period: time = 1 ms,
