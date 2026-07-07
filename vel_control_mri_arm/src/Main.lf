@@ -18,6 +18,8 @@ import USM from "lib/Drivers/USM.lf"
 import StateMachine from "lib/State_Machine.lf"
 import UART_Handler from "lib/Drivers/UART.lf"
 import Small_DeltaP_MPC_Controller_Bank from "lib/SmallDeltaPMPCControl/Small_DeltaP_MPC_Controller_Bank.lf"
+import EncoderStateEstimator from "lib/EncoderStateEstimator.lf"
+import PulseMotorModelEstimator from "lib/PulseMotorModelEstimator.lf"
 
 // MotorCalibration.lf is a diagnostic reactor for finding the USM/SEA
 // channel <-> physical joint mapping (see that file for usage notes and
@@ -109,6 +111,12 @@ main reactor {
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
   deltap_bank = new Small_DeltaP_MPC_Controller_Bank()  // Per-joint delta-position pulse control, routed between state_machine and usm
+  // Sits inline between qdec and state_machine for USM position/velocity --
+  // see EncoderStateEstimator.lf. Currently just echoes its inputs through.
+  encoder_state_estimator = new EncoderStateEstimator()
+  // Not yet wired to anything downstream -- see PulseMotorModelEstimator.lf.
+  // Doesn't compute or send anything yet.
+  pulse_motor_model_estimator = new PulseMotorModelEstimator()
   // Diagnostic only -- see MotorCalibration.lf for usage notes. Uncomment
   // along with the import above and the wiring below to use it again.
   // motor_calib = new MotorCalibration()
@@ -121,11 +129,20 @@ main reactor {
 
   state_machine.state_message -> uart.state_msg after 0;
 
-  // encoders
-  qdec.qdec_out -> state_machine.motor_encoder_positions
-  qdec.qdec_vel_out -> state_machine.motor_encoder_velocities
+  // encoders -- USM position/velocity now route through
+  // encoder_state_estimator rather than straight to state_machine (see
+  // EncoderStateEstimator.lf); SEA continues straight through unchanged.
+  qdec.qdec_out -> encoder_state_estimator.position_input
+  qdec.qdec_vel_out -> encoder_state_estimator.velocity_input
+  encoder_state_estimator.position_output -> state_machine.motor_encoder_positions
+  encoder_state_estimator.velocity_output -> state_machine.motor_encoder_velocities
   qdec.sea_out -> state_machine.sea_encoder_positions
   qdec.sea_vel_out -> state_machine.sea_encoder_velocities
+
+  // Static per-joint position offset, applied inside encoder_state_estimator
+  // -- see EncoderStateEstimator.lf/State_Machine.lf's position_offset
+  // comments.
+  state_machine.position_offset -> encoder_state_estimator.position_offset_input
 
   state_machine.enable_qdec -> qdec.enable_qdec
   state_machine.reset_qdec -> qdec.reset_qdec
@@ -134,6 +151,13 @@ main reactor {
   state_machine.commanded_motor_velocities -> deltap_bank.command_velocity_input
   state_machine.commanded_position_deltas -> deltap_bank.remaining_error_input
   deltap_bank.command_velocity_output -> usm.speed
+
+  // Commanded velocity also fans out to both estimators above -- see
+  // EncoderStateEstimator.lf/PulseMotorModelEstimator.lf.
+  state_machine.commanded_motor_velocities -> encoder_state_estimator.commanded_velocity_input
+  state_machine.commanded_motor_velocities -> pulse_motor_model_estimator.commanded_velocity_input
+  encoder_state_estimator.position_output -> pulse_motor_model_estimator.position_input
+  encoder_state_estimator.velocity_output -> pulse_motor_model_estimator.velocity_input
 
   // enable_motor_command goes directly from state_machine to usm, bypassing
   // deltap_bank -- coupling it to Small_DeltaP_MPC_Controller's own bang-bang

@@ -123,6 +123,10 @@ void print_command_message(const CommandMessage *msg) {
     for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->position_deltas[i]);
     printf("\n");
 
+    printf("  Position Offset: ");
+    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->position_offset[i]);
+    printf(" (sequence %d)\n", msg->position_offset_sequence);
+
     printf("  Timestamp: %d\n", msg->time_stamp);
     printf("  Index: %d\n", msg->message_index);
 }
@@ -137,6 +141,10 @@ void print_command_message_int(const CommandMessage *msg) {
     printf("  Position Deltas: ");
     for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->position_deltas[i] * FLOAT_PRINT_SCALE));
     printf("\n");
+
+    printf("  Position Offset: ");
+    for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->position_offset[i] * FLOAT_PRINT_SCALE));
+    printf(" (sequence %d)\n", msg->position_offset_sequence);
 
     printf("  Timestamp: %d\n", msg->time_stamp);
     printf("  Index: %d\n", msg->message_index);

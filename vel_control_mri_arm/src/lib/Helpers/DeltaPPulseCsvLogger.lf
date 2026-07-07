@@ -1,0 +1,103 @@
+target C
+
+preamble {=
+  #include "small_deltap_pulse_controller.h"
+  #include <stdio.h>
+  #include <sys/stat.h>
+=}
+
+// CSV logger for Small_DeltaP_Pulse_Controller test harnesses -- the
+// pulse-controller analogue of DeltaPCsvLogger.lf. Kept as its own sibling
+// reactor rather than generalizing DeltaPCsvLogger.lf: keeps the two
+// controllers' test harnesses fully decoupled (DeltaPCsvLogger.lf/
+// DposPulseMPCDebugInfo stay Small_DeltaP_MPC_Controller-only), same
+// reasoning DeltaPCsvLogger.lf itself gives for not folding into
+// CsvLogger.lf.
+//
+// Appends one CSV row per sample_period tick, combining a
+// Small_DeltaP_Pulse_Controller's debug_info (only populated when
+// PRINT_DPULSE is set to 1 in src_c/small_deltap_pulse_controller.h) with a
+// FakeMotorPlant's simulated real_velocity/position, so a run can be
+// plotted afterward (see scripts/plot_deltap_pulse_dwell.py).
+//
+// target_position is optional -- leave it unconnected and the column just
+// reads 0 throughout (same convention as DeltaPCsvLogger.lf).
+//
+// Relies on this program also importing Small_DeltaP_Pulse_Controller.lf
+// (whose target `files` property pulls in
+// small_deltap_pulse_controller.h/pulse_motor_model.h) so that
+// SmallDeltaPPulseControllerDebugInfo is visible here -- this reactor does
+// not declare its own `files`/`cmake-include`.
+//
+// Each row is opened/appended/closed individually (fopen "a", not one
+// handle held open for the whole run) so data already written survives even
+// if the program's timeout kills it mid-run -- same pattern as
+// CsvLogger.lf/DeltaPCsvLogger.lf.
+reactor DeltaPPulseCsvLogger(
+  sample_period: time = 1 ms,
+  csv_path: string = "csv_data/deltap_pulse_test_log.csv"
+) {
+  input debug_info: SmallDeltaPPulseControllerDebugInfo
+  input real_velocity: float
+  input position: float
+  input target_position: float
+
+  state latest_debug_info_: SmallDeltaPPulseControllerDebugInfo
+  state latest_real_velocity_: float = 0.0
+  state latest_position_: float = 0.0
+  state latest_target_position_: float = 0.0
+  state row_count_: int = 0
+
+  timer sample_tick(0, sample_period)
+
+  reaction(startup) {=
+    mkdir("csv_data", 0755); // no-op if it already exists
+
+    FILE *fpt = fopen(self->csv_path, "w");
+    fprintf(fpt,
+        "time_s,remaining_error,command_velocity,pass_through,state,"
+        "planned_dir,planned_run_duration,real_velocity,position,target_position\n");
+    fclose(fpt);
+  =}
+
+  reaction(debug_info) {=
+    self->latest_debug_info_ = debug_info->value;
+  =}
+
+  reaction(real_velocity) {=
+    self->latest_real_velocity_ = real_velocity->value;
+  =}
+
+  reaction(position) {=
+    self->latest_position_ = position->value;
+  =}
+
+  reaction(target_position) {=
+    self->latest_target_position_ = target_position->value;
+  =}
+
+  reaction(sample_tick) {=
+    double now_s = (double) lf_time_logical() * 1e-9;
+    SmallDeltaPPulseControllerDebugInfo *d = &self->latest_debug_info_;
+
+    FILE *fpt = fopen(self->csv_path, "a");
+    fprintf(fpt, "%f,%f,%f,%d,%d,%f,%f,%f,%f,%f\n",
+        now_s,
+        (double) d->remainingError,
+        (double) d->commandVelocity,
+        d->passThrough,
+        (int) d->state,
+        (double) d->plannedPulse.dir,
+        (double) d->plannedPulse.run_duration,
+        (double) self->latest_real_velocity_,
+        (double) self->latest_position_,
+        (double) self->latest_target_position_);
+    fclose(fpt);
+
+    self->row_count_++;
+  =}
+
+  reaction(shutdown) {=
+    printf("[DeltaPPulseCsvLogger] wrote %d rows to %s\n", self->row_count_, self->csv_path);
+  =}
+}

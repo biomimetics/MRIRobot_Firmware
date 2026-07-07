@@ -53,11 +53,32 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     // outputs to Small_DeltaP_MPC_Controller_Bank
     output[7] commanded_position_deltas: float
 
+    // outputs to EncoderStateEstimator -- static per-joint offset added to
+    // motor_encoder_positions there (see EncoderStateEstimator.lf), for
+    // restoring the STM32's estimated position to a pre-known value after
+    // an STM32/FPGA restart. Defaults to zero (no-op offset) below. Set from
+    // CommandMessage's position_offset/position_offset_sequence fields (see
+    // stm_comms.h) -- only re-emitted when position_offset_sequence changes
+    // (reaction(command_message) below), not every motor_command_tick, since
+    // this is expected to change at most once every several minutes.
+    output[7] position_offset: float
+
     // internal copies of inputs
     state motor_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state motor_encoder_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state sea_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state sea_encoder_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
+    // Static per-joint offset for EncoderStateEstimator's position_input --
+    // see position_offset's comment above. Zero (no offset) until a
+    // CommandMessage arrives with a new position_offset_sequence.
+    state position_offset_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    // Last-seen CommandMessage.position_offset_sequence -- lets
+    // reaction(command_message) below tell "a new offset was actually
+    // pushed" apart from "the same CommandMessage.position_offset_sequence
+    // arrived again," since position_offset itself doesn't change nearly
+    // every message the way velocities/position_deltas do.
+    state last_position_offset_sequence_: int = 0
 
     // internal copies of staged outputs
     state state_msg_: StateMessage
@@ -91,17 +112,6 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         }
         else if ((self->last_staged_commanded_motor_velocities_[index] + MOTOR_VELOCITY_MAX_CHANGE) < self->staged_commanded_motor_velocities_[index]){
           self->staged_commanded_motor_velocities_[index] = self->last_staged_commanded_motor_velocities_[index] + MOTOR_VELOCITY_MAX_CHANGE;
-        }
-    =}
-
-    // NO LONGER USED
-    method apply_velocity_deadband(index: int){=
-      if ((self->staged_commanded_motor_velocities_[index] < MOTOR_VELOCITY_DEADBAND_LIMIT) && ((-MOTOR_VELOCITY_DEADBAND_LIMIT < self->staged_commanded_motor_velocities_[index]))){
-          self->staged_commanded_motor_velocities_[index] = 0.0;
-          self->force_disable_motor_pins_[index] = true;
-        }
-        else{
-          self->force_disable_motor_pins_[index] = false;
         }
     =}
 
@@ -171,6 +181,22 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         lf_set(enable_motor_command[i], self->enable_motor_command_);
       }
 
+    =}
+
+    // Event-driven, not tied to motor_command_tick's cadence -- position_offset
+    // is expected to change at most once every several minutes (see its
+    // output comment above), so this only fires lf_set when
+    // CommandMessage.position_offset_sequence actually advances, rather than
+    // re-sending the same offset every motor_command_tick.
+    reaction(command_message) -> position_offset {=
+      const CommandMessage *msg = &command_message->value;
+      if (msg->position_offset_sequence != self->last_position_offset_sequence_){
+        self->last_position_offset_sequence_ = msg->position_offset_sequence;
+        for (int i = 0; i<DOF_NUMBER; i++){
+          self->position_offset_[i] = msg->position_offset[i];
+          lf_set(position_offset[i], self->position_offset_[i]);
+        }
+      }
     =}
     
 

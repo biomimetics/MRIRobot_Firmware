@@ -1,0 +1,302 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
+    "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/small_deltap_pulse_controller.h"
+  ],
+  cmake-include: [
+    "../../../src_c/pulse_motor_model_cmake.cmake",
+    "../../../src_c/gaussian_motion_cmake.cmake"
+  ]
+}
+
+// Single-channel delta-position pulse controller. Sits inside
+// Small_DeltaP_Pulse_Controller_Bank.lf, one instance per joint. Like
+// Small_DeltaP_MPC_Controller.lf, replaces Small_Velocity_Controller.lf's
+// motion-debt design (see
+// ../SmallVelocityControl/Motion_Debt_Limitations.md for why that design
+// struggles), but plans and acts on a single pulse step at a time: rather
+// than searching over a short lookahead of candidate pulses
+// (dpos_pulse_mpc.h/.c), it plans one pulse's duration directly so as to
+// close the remaining position error while keeping the probability of
+// overshoot acceptably small (see gaussian_motion.h for the arrival-time
+// distribution machinery this leans on).
+//
+// remaining_error_input is a locally-fed synthetic value in this stage's
+// test harness (Main_Test_DeltaP*.lf), not yet the real wire signal -- see
+// Small_DeltaP_Comms_Plan.md for the follow-on work that delivers the real
+// signal end to end.
+//
+// This reactor does NOT handle motor enable/disable -- same as
+// Small_Velocity_Controller.lf, that's wired directly from State_Machine.lf
+// to USM.lf in Main.lf.
+//
+// See Small_Velocity_Controller.lf for the reasoning behind putting the
+// #include below at top-level (file-scope) preamble rather than
+// reactor-scoped.
+preamble {=
+  #include "pulse_motor_model.h"
+  #include "gaussian_motion.h"
+  #include "small_deltap_pulse_controller.h"
+  #include <math.h>
+
+  // Nanoseconds -> seconds, for converting LF instant_t/interval_t deltas
+  // into the plain float seconds this controller's math works in.
+  #define NS_TO_S 1e-9f
+
+  // s -- hard ceiling on PlanPulse's run_duration, guarding against bad
+  // edge cases (e.g. GaussianMotion_ArrivalTimeInvCdf returning +INFINITY
+  // when expected_velocity_'s mean isn't far enough from zero relative to
+  // its variance at the requested max_overshoot_probability_ -- see that
+  // function's header comment). Fixed rather than a per-instance
+  // parameter/state -- this is a safety backstop, not a tuning knob.
+  #define MAX_PULSE_DURATION_S 0.5f
+=}
+
+// model_ starts from pulse_motor_model.h's shared INITIAL_MOTOR_MODEL
+// (see reaction(startup) below) rather than its own constructor
+// parameters -- keeps this controller, PulseMotorModelEstimator.lf, and any
+// future reactor starting from exactly the same initial belief about the
+// motor. Remaining constructor parameters below are this controller's own
+// planning tuning, not part of MotorModel.
+reactor Small_DeltaP_Pulse_Controller(
+  control_period: time = 5 ms,
+  max_overshoot_probability_initial: float = 0.05, // unitless 0..1, P(T <= pulse duration) bound the planner must respect -- TODO: characterize
+  filterAlpha_initial: float = 0.1,    // weight on newest sample in the pass-through/
+                                        // small-velocity mode filter (0..1) -- TODO: characterize
+  engagementGapThreshold_initial: float = 0.3, // rad -- small-velocity (pulsing)
+                                               // mode only engages once |remainingError| is
+                                               // at or below this, same role as
+                                               // Small_DeltaP_MPC_Controller's parameter of
+                                               // the same name -- TODO: characterize
+  convergenceLimit_initial: float = 0.017453292 // rad (~1 deg) -- once
+                                               // |remainingError| is at or below this, treat
+                                               // it as converged and don't bother planning a
+                                               // pulse for it -- TODO: characterize
+) {
+  input command_velocity_input: float
+  input remaining_error_input: float
+
+  // Updated MotorModel from an (as yet unbuilt) external parameter
+  // estimator, which would compare planned pulses against encoder/state-
+  // estimator feedback. Not applied immediately on arrival -- see
+  // pending_model_update_/has_pending_model_update_ below and the
+  // application point in control_tick -- to avoid changing V_min/gain/
+  // V_variance/etc. out from under a pulse that's already mid-flight.
+  input motor_model_update_input: MotorModel
+
+  output command_velocity_output: float
+
+  // Which MotorState this instance is currently in (STOPPED/STARTING/
+  // RUNNING/STOPPING), for an external reactor (e.g. the parameter
+  // estimator above) that needs to know when it's safe to attribute
+  // encoder motion to a specific commanded pulse. Set at the end of
+  // control_tick below, every tick.
+  output motor_state_output: MotorState
+
+  // Diagnostics only -- only populated when PRINT_DPULSE is enabled
+  // (small_deltap_pulse_controller.h), same convention as
+  // DposPulseMPCDebugInfo/PRINT_DPOS. For test harnesses/CSV logging (see
+  // Main_Test_DeltaP_Pulse_Dwell.lf).
+  output debug_info: SmallDeltaPPulseControllerDebugInfo
+
+  state model_: MotorModel
+  state pulse_state_: PulseMotorState
+  state filterAlpha_: float = 0.0
+  state desired_velocity_: float = 0.0
+  state remaining_error_: float = 0.0
+  state last_decide_time_: time = 0
+
+  // Expected velocity during a planned pulse (magnitude, direction handled
+  // separately by pulse_state_.dir) and the overshoot-probability bound the
+  // planner must keep the pulse duration under -- see
+  // GaussianMotion_ArrivalTimeCdf/_Tail (gaussian_motion.h) for how these
+  // feed PlanPulse below.
+  state expected_velocity_: GaussianRV
+  state max_overshoot_probability_: float = 0.0
+
+  // EMA of |desiredVelocity| and the small-velocity engagement gap -- same
+  // roles as Small_DeltaP_MPC_Controller's filteredVelocityMagnitude/
+  // engagementGapThreshold: together with model_.V_min, they decide
+  // pass-through vs. small-velocity (pulsing) mode at MOTOR_STOPPED in
+  // control_tick below.
+  state filteredVelocityMagnitude_: float = 0.0
+  state engagementGapThreshold_: float = 0.0
+
+  // rad -- below this, remaining_error_ is treated as converged and no
+  // pulse is planned for it (control_tick below) -- see the constructor
+  // parameter of the same name.
+  state convergenceLimit_: float = 0.0
+
+  // Latches the latest motor_model_update_input until it's safe to apply --
+  // control_tick below only ever applies it while pulse_state_.state ==
+  // MOTOR_STOPPED, so a model update can't land mid-pulse (STARTING/
+  // RUNNING/STOPPING) and change what a pulse already committed to is
+  // assumed to do partway through it.
+  state pending_model_update_: MotorModel
+  state has_pending_model_update_: bool = false
+
+  // true if the last MOTOR_STOPPED decision chose ordinary pass-through
+  // control, false if pulsing mode is engaged (whether or not a pulse was
+  // actually worth starting) -- for telemetry only (debug_info below),
+  // mirrors DposPulseMPC's field of the same name.
+  state passThrough_: bool = true
+
+  timer control_tick(0, control_period)
+
+  // Plans the next pulse to run against the current remaining_error_:
+  // direction from its sign, and a duration bounded so that
+  // P(the motor has already covered remaining_error_ before the pulse ends)
+  // stays at or below max_overshoot_probability_, per
+  // GaussianMotion_ArrivalTimeInvCdf (gaussian_motion.h) -- clamped up to
+  // model_.minimumPulseWidth (same hysteresis floor every other controller
+  // here uses) and down to MAX_PULSE_DURATION_S (safety backstop against
+  // e.g. an unbounded result -- see that constant's comment).
+  method PlanPulse(): PulseCommand {=
+    float dir = sign_f(self->remaining_error_);
+    float distance = fabsf(self->remaining_error_);
+    float run_duration = GaussianMotion_ArrivalTimeInvCdf(self->max_overshoot_probability_, distance, self->expected_velocity_);
+    if (run_duration < self->model_.minimumPulseWidth) {
+      run_duration = self->model_.minimumPulseWidth;
+    }
+    if (run_duration > MAX_PULSE_DURATION_S) {
+      run_duration = MAX_PULSE_DURATION_S;
+    }
+    PulseCommand pulse = {dir, run_duration};
+    return pulse;
+  =}
+
+  reaction(startup) {=
+    self->model_ = INITIAL_MOTOR_MODEL;
+
+    self->filterAlpha_ = self->filterAlpha_initial;
+
+    self->pulse_state_.state = MOTOR_STOPPED;
+    self->pulse_state_.dir = 1.0f;
+    self->pulse_state_.stateTimer = 0.0f;
+    self->pulse_state_.pulseTimer = 0.0f;
+    self->pulse_state_.plannedPulse.dir = 1.0f;
+    self->pulse_state_.plannedPulse.run_duration = 0.0f;
+    self->pulse_state_.commandVelocity = 0.0f;
+
+    self->expected_velocity_.mean = self->model_.V_min * self->model_.gain;
+    self->expected_velocity_.variance = self->model_.V_variance;
+    self->max_overshoot_probability_ = self->max_overshoot_probability_initial;
+    self->engagementGapThreshold_ = self->engagementGapThreshold_initial;
+    self->convergenceLimit_ = self->convergenceLimit_initial;
+
+    self->last_decide_time_ = lf_time_logical();
+  =}
+
+  // Thin cache-only reactions: just copy incoming values into state. No FSM
+  // logic here -- that all lives in the control_tick reaction below.
+  reaction(command_velocity_input) {=
+    self->desired_velocity_ = command_velocity_input->value;
+  =}
+
+  reaction(remaining_error_input) {=
+    self->remaining_error_ = remaining_error_input->value;
+  =}
+
+  // Thin cache-only reaction, same as the two above -- just latches the
+  // update. Applying it (and re-deriving expected_velocity_ from it) is
+  // control_tick's job, gated on MOTOR_STOPPED -- see
+  // pending_model_update_'s comment.
+  reaction(motor_model_update_input) {=
+    self->pending_model_update_ = motor_model_update_input->value;
+    self->has_pending_model_update_ = true;
+  =}
+
+  // Runs the pulse-planning/FSM update at control_period cadence,
+  // independent of when new setpoints arrive from upstream. Mirrors
+  // DposPulseMPC_Update's structure (dpos_pulse_mpc.c): update the velocity
+  // EMA unconditionally, compute RUNNING's early-exit condition, advance the
+  // FSM, then (only at MOTOR_STOPPED) arbitrate pass-through vs. pulsing and
+  // plan/start a pulse -- see that function's comment for why mode
+  // arbitration has to be re-decided at every MOTOR_STOPPED rather than
+  // fixed once.
+  reaction(control_tick) -> command_velocity_output, motor_state_output, debug_info {=
+    instant_t now = lf_time_logical();
+    float dt = (float)(now - self->last_decide_time_) * NS_TO_S;
+    self->last_decide_time_ = now;
+    if (dt < 0.0f) dt = 0.0f; // defensive; logical time is monotonic
+
+    // Updated unconditionally, every call, regardless of which mode is
+    // currently active -- otherwise the STOPPED branch below could never
+    // detect a rise back above V_min while pulsing mode was engaged.
+    self->filteredVelocityMagnitude_ =
+        self->filterAlpha_ * fabsf(self->desired_velocity_) +
+        (1.0f - self->filterAlpha_) * self->filteredVelocityMagnitude_;
+
+    // stop_early: cut a RUNNING pulse short if EITHER demand has clearly
+    // moved back into pass-through range, OR remaining_error_'s sign no
+    // longer matches the latched pulse direction (target moved past/
+    // reversed relative to what this pulse was planned against) -- same two
+    // conditions as DposPulseMPC_Update's RUNNING checks, keyed to
+    // remaining_error_ rather than desired_velocity_ for the same reason:
+    // desired_velocity_ legitimately sits near zero throughout pulsing.
+    bool stop_early = false;
+    if (self->pulse_state_.state == MOTOR_RUNNING) {
+      if (self->filteredVelocityMagnitude_ >= self->model_.V_min) {
+        stop_early = true;
+      } else if (sign_f(self->remaining_error_) != self->pulse_state_.dir) {
+        stop_early = true;
+      }
+    }
+
+    PulseMotorModel_Advance(&self->pulse_state_, &self->model_, dt, stop_early);
+
+    if (self->pulse_state_.state == MOTOR_STOPPED) {
+      // Only safe to apply a pending model update here -- MOTOR_STOPPED,
+      // between pulses, rather than mid-pulse -- see
+      // pending_model_update_'s comment. expected_velocity_ is re-derived
+      // from the new model immediately after, same as startup.
+      if (self->has_pending_model_update_) {
+        self->model_ = self->pending_model_update_;
+        self->expected_velocity_.mean = self->model_.V_min * self->model_.gain;
+        self->expected_velocity_.variance = self->model_.V_variance;
+        self->has_pending_model_update_ = false;
+      }
+
+      // Pass-through eligibility checked first: ordinary continuous
+      // velocity control whenever EITHER the filtered velocity is already
+      // at/above V_min OR the remaining gap is still too large to be worth
+      // closing via pulsing -- pulsing mode requires BOTH conditions to
+      // fail, same arbitration as DposPulseMPC_Update.
+      if (self->filteredVelocityMagnitude_ >= self->model_.V_min ||
+          fabsf(self->remaining_error_) > self->engagementGapThreshold_) {
+        self->passThrough_ = true;
+        self->pulse_state_.commandVelocity = self->desired_velocity_;
+      } else if (fabsf(self->remaining_error_) <= self->convergenceLimit_) {
+        // Already converged -- don't bother planning a pulse for it.
+        self->passThrough_ = false;
+        self->pulse_state_.commandVelocity = 0.0f;
+      } else {
+        self->passThrough_ = false;
+        PulseCommand pulse = PlanPulse();
+        PulseMotorModel_StartPulse(&self->pulse_state_, &self->model_, pulse);
+      }
+    }
+    // MOTOR_STARTING / MOTOR_RUNNING (still mid-pulse) / MOTOR_STOPPING: no
+    // decision here; commandVelocity already holds whatever
+    // PulseMotorModel_StartPulse/PulseMotorModel_Advance set.
+
+    lf_set(command_velocity_output, self->pulse_state_.commandVelocity);
+    lf_set(motor_state_output, self->pulse_state_.state);
+
+#if PRINT_DPULSE
+    SmallDeltaPPulseControllerDebugInfo info;
+    info.state = self->pulse_state_.state;
+    info.passThrough = self->passThrough_;
+    info.remainingError = self->remaining_error_;
+    info.plannedPulse = self->pulse_state_.plannedPulse;
+    info.commandVelocity = self->pulse_state_.commandVelocity;
+    lf_set(debug_info, info);
+#endif
+  =}
+}

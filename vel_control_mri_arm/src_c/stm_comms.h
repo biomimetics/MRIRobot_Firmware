@@ -28,7 +28,7 @@
 // silently misinterpreting bytes -- the two copies of this file
 // (vel_control_mri_arm/src_c and MRIRobot_ROS's mri_arm_hardware) have no
 // shared build system to otherwise catch drift between them.
-#define PROTOCOL_VERSION 1
+#define PROTOCOL_VERSION 2
 
 // =====================
 // TX/RX packet definitions
@@ -63,12 +63,28 @@ typedef enum {
 // and now position_deltas. The old positions[]/sea_positions[]/extra[21]
 // fields were confirmed dead (firmware never read them, host only ever
 // wrote zeros) and are dropped entirely rather than carried forward.
+// position_offset/position_offset_sequence: static per-joint offset for
+// EncoderStateEstimator.lf (see that file and State_Machine.lf's
+// position_offset output), for restoring the STM32's estimated position to
+// a pre-known value after an STM32/FPGA restart. Expected to change at most
+// once every several minutes, event-based rather than every cycle -- unlike
+// every other field here, NOT threaded through construct_command_message
+// below (would mean plumbing two rarely-used parameters through every
+// existing call site for no benefit); host-side code that wants to set a
+// new offset should assign msg.position_offset[i]/msg.position_offset_sequence
+// directly on an already-constructed/zeroed message. position_offset_sequence
+// is a plain increment-on-change counter (NOT a message index) -- host
+// bumps it only when it actually wants the firmware to apply a new offset;
+// State_Machine.lf compares it against the last value it saw to detect that
+// edge rather than reapplying every message_index tick.
 #pragma pack(push, 1)
 typedef struct {
     int behavior_mode;
     float velocities[DOF_NUMBER];       // rad/s, pass-through velocity command
     float position_deltas[DOF_NUMBER];  // rad, remaining position error -> Small_DeltaP_Controller
                                          // (was the dead `positions[]` field)
+    float position_offset[DOF_NUMBER];  // rad, static per-joint offset -- see comment above
+    int position_offset_sequence;       // increment-on-change counter -- see comment above
     int time_stamp;
     int message_index;
 } CommandMessage;

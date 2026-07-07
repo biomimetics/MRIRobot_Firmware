@@ -130,36 +130,11 @@ GaussianRV GaussianMotion_Product(GaussianRV a, GaussianRV b) {
   return out;
 }
 
-GaussianRV GaussianMotion_ReciprocalLinearized(GaussianRV x) {
-  GaussianRV out;
-  float mu = x.mean;
-  out.mean = 1.0f / mu;
-  out.variance = x.variance / (mu * mu * mu * mu);
-  return out;
-}
-
-GaussianRV GaussianMotion_ReciprocalSecondOrder(GaussianRV x) {
-  GaussianRV out;
-  float mu = x.mean;
-  float sigma2 = x.variance;
-  out.mean = (1.0f / mu) * (1.0f + sigma2 / (mu * mu));
-  out.variance = sigma2 / (mu * mu * mu * mu);
-  return out;
-}
-
 GaussianRV GaussianMotion_PositionDistribution(float x0, float time, GaussianRV velocity) {
   GaussianRV out;
   out.mean = x0 + velocity.mean * time;
   out.variance = velocity.variance * time * time;
   return out;
-}
-
-GaussianRV GaussianMotion_ArrivalTimeLinearized(float distance, GaussianRV velocity) {
-  return GaussianMotion_Scale(GaussianMotion_ReciprocalLinearized(velocity), distance);
-}
-
-GaussianRV GaussianMotion_ArrivalTimeSecondOrder(float distance, GaussianRV velocity) {
-  return GaussianMotion_Scale(GaussianMotion_ReciprocalSecondOrder(velocity), distance);
 }
 
 float GaussianMotion_ArrivalTimePdf(float arrival_time, float distance, GaussianRV velocity) {
@@ -168,6 +143,36 @@ float GaussianMotion_ArrivalTimePdf(float arrival_time, float distance, Gaussian
   }
   float v = distance / arrival_time;
   return (distance / (arrival_time * arrival_time)) * GaussianMotion_Pdf(v, velocity);
+}
+
+float GaussianMotion_ArrivalTimeCdf(float arrival_time, float distance, GaussianRV velocity) {
+  if (arrival_time <= 0.0f) {
+    return 0.0f;
+  }
+  return GaussianMotion_Cdf_Tail(distance / arrival_time, velocity);
+}
+
+float GaussianMotion_ArrivalTimeCdf_Tail(float arrival_time, float distance, GaussianRV velocity) {
+  if (arrival_time <= 0.0f) {
+    return 1.0f;
+  }
+  return GaussianMotion_Cdf(distance / arrival_time, velocity);
+}
+
+float GaussianMotion_ArrivalTimeInvCdf(float p, float distance, GaussianRV velocity) {
+  float v_threshold = GaussianMotion_InvCdf_Tail(p, velocity);
+  if (v_threshold <= 0.0f) {
+    return INFINITY;
+  }
+  return distance / v_threshold;
+}
+
+float GaussianMotion_ArrivalTimeInvCdf_Tail(float p, float distance, GaussianRV velocity) {
+  float v_threshold = GaussianMotion_InvCdf(p, velocity);
+  if (v_threshold <= 0.0f) {
+    return INFINITY;
+  }
+  return distance / v_threshold;
 }
 
 void GaussianMotion_Print(const char *name, GaussianRV g) {

@@ -17,12 +17,36 @@
 // estimator has a single, self-contained struct to update without touching
 // any controller's own tuning or FSM state.
 typedef struct {
-  float V_min;              // rad/s, magnitude of the fixed pulse speed
+  float V_min;              // rad/s, magnitude of the fixed pulse command speed
   float gain;                // unitless 0..1, actual/commanded ratio
   float T_start;             // s, startup command delay
   float T_stop;              // s, hard-stop settle time
   float minimumPulseWidth;   // s, hysteresis guard before STOP eligible
+  float V_variance;          // rad^2/s^2, variance of the actual speed around V_min * gain
 } MotorModel;
+
+// Single shared initial-guess MotorModel, all placeholders pending real
+// bench characterization -- same values every reactor's own startup used to
+// hard-code individually (see e.g. Small_DeltaP_Pulse_Controller.lf's old
+// V_min_initial/gain_initial/etc. constructor parameters). Centralized here,
+// same role as motor_config.h's per-joint Motor_Config array, so every
+// downstream reactor (Small_DeltaP_Pulse_Controller.lf,
+// PulseMotorModelEstimator.lf, and any future one) starts from exactly the
+// same initial belief about the motor -- one value to update as
+// characterization improves, rather than the same six numbers duplicated
+// across each reactor's own constructor defaults. Not a compile-time
+// constant expression once copied into a `static` array initializer
+// elsewhere (C initializers must be constant expressions, and naming
+// another object isn't one) -- copy it at runtime instead (e.g. in a
+// `reaction(startup)`), the same way each existing reactor already does.
+static const MotorModel INITIAL_MOTOR_MODEL = {
+  0.35f,    // V_min             -- rad/s, ~20 deg/s -- TODO: characterize
+  0.9f,     // gain              -- unitless 0..1 -- TODO: characterize
+  0.005f,   // T_start           -- s (5 ms) -- TODO: characterize further
+  0.001f,   // T_stop            -- s (1 ms), datasheet value, likely optimistic
+  0.04f,    // minimumPulseWidth -- s (40 ms) -- TODO: characterize
+  0.0025f,  // V_variance        -- rad^2/s^2 -- TODO: characterize
+};
 
 // Shared FSM states for any controller that bang-bangs this motor between a
 // fixed pulse speed and stopped, regardless of how it decides when to

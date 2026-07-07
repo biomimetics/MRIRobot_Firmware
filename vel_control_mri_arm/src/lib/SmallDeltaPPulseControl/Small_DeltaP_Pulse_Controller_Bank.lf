@@ -1,0 +1,53 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
+    "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c"
+  ],
+  cmake-include: [
+    "../../../src_c/pulse_motor_model_cmake.cmake",
+    "../../../src_c/gaussian_motion_cmake.cmake"
+  ]
+}
+
+import Small_DeltaP_Pulse_Controller from "Small_DeltaP_Pulse_Controller.lf"
+
+// Top-level preamble so MotorModel/MotorState are visible where the port
+// declarations below reference them -- same reasoning as
+// Small_DeltaP_MPC_Controller_Bank.lf's own top-level preamble.
+preamble {=
+  #include "pulse_motor_model.h"
+=}
+
+// 7-dof wrapper that sits between StateMachine.lf and USM.lf, routing
+// velocity and remaining-error signals to a bank of single-channel
+// Small_DeltaP_Pulse_Controller instances. Motor enable/disable does NOT
+// route through here -- same as Small_Velocity_Controller_Bank.lf, Main.lf
+// wires State_Machine's enable_motor_command directly to USM instead.
+reactor Small_DeltaP_Pulse_Controller_Bank {
+  input[7] command_velocity_input: float
+  input[7] remaining_error_input: float
+  // Routed through to each Small_DeltaP_Pulse_Controller instance for an
+  // (as yet unbuilt) external parameter-estimator reactor -- see that
+  // input's comment on Small_DeltaP_Pulse_Controller.lf.
+  input[7] motor_model_update_input: MotorModel
+
+  output[7] command_velocity_output: float
+  // Per-joint MotorState (STOPPED/STARTING/RUNNING/STOPPING), routed
+  // straight out from each controller instance -- see that output's
+  // comment on Small_DeltaP_Pulse_Controller.lf.
+  output[7] motor_state_output: MotorState
+
+  controllers = new[7] Small_DeltaP_Pulse_Controller()
+
+  command_velocity_input -> controllers.command_velocity_input
+  remaining_error_input -> controllers.remaining_error_input
+  motor_model_update_input -> controllers.motor_model_update_input
+
+  controllers.command_velocity_output -> command_velocity_output
+  controllers.motor_state_output -> motor_state_output
+}

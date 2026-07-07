@@ -22,10 +22,16 @@ static bool floats_equal(float a, float b) {
 static void test_command_message_round_trip(void) {
     float velocities[DOF_NUMBER] = {0.1f, -0.2f, 0.3f, -0.4f, 0.5f, -0.6f, 0.7f};
     float position_deltas[DOF_NUMBER] = {0.01f, 0.02f, -0.03f, 0.04f, -0.05f, 0.06f, -0.07f};
+    float position_offset[DOF_NUMBER] = {1.1f, -1.2f, 1.3f, -1.4f, 1.5f, -1.6f, 1.7f};
 
     CommandMessage msg;
     zero_command_message(&msg);
     construct_command_message(&msg, 1, velocities, position_deltas, 12345, 7);
+    // position_offset/position_offset_sequence aren't threaded through
+    // construct_command_message (see stm_comms.h's comment on them) --
+    // set directly, the way host-side code setting a new offset will.
+    memcpy(msg.position_offset, position_offset, sizeof(position_offset));
+    msg.position_offset_sequence = 3;
 
     uint8_t data_buf[COMMAND_MSG_SIZE];
     int data_len = encode_command_message_to_data_buffer(&msg, data_buf);
@@ -39,11 +45,13 @@ static void test_command_message_round_trip(void) {
     bool ok = handle_command_message_packet(&decoded, packet, (size_t) pkt_len);
     CHECK(ok, "handle_command_message_packet succeeds on a well-formed packet");
 
-    bool fields_match = decoded.behavior_mode == 1 && decoded.time_stamp == 12345 && decoded.message_index == 7;
+    bool fields_match = decoded.behavior_mode == 1 && decoded.time_stamp == 12345 && decoded.message_index == 7
+        && decoded.position_offset_sequence == 3;
     for (int i = 0; i < DOF_NUMBER; i++) {
         fields_match = fields_match
             && floats_equal(decoded.velocities[i], velocities[i])
-            && floats_equal(decoded.position_deltas[i], position_deltas[i]);
+            && floats_equal(decoded.position_deltas[i], position_deltas[i])
+            && floats_equal(decoded.position_offset[i], position_offset[i]);
     }
     CHECK(fields_match, "decoded CommandMessage fields match the originals");
 }
