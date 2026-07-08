@@ -56,8 +56,8 @@ typedef struct {
 // bench characterization
 static const PulseMotorModel INITIAL_MOTOR_MODEL = {
   0.40f,          // V_min_cmd -- rad/s, was ~20 deg/s -- TODO: characterize // 0.872665f
-  {0.35f, 0.00001f}, // V_real -- {mean rad/s, variance rad^2/s^2} -- TODO: characterize
-  0.100f,         // T_start           -- s (50 ms) -- TODO: characterize further
+  {0.372f, 0.252f}, // V_real -- {mean rad/s, variance rad^2/s^2} -- TODO: characterize
+  0.050f,         // T_start           -- s (50 ms) -- TODO: characterize further
   0.010f,         // T_stop            -- s (50 ms), datasheet value, likely optimistic
   0.001f,         // minimumPulseWidth -- s (1 ms) -- TODO: characterize
 };

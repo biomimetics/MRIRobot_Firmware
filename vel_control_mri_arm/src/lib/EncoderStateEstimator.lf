@@ -63,7 +63,7 @@ reactor EncoderStateEstimator(
   // through (the pre-observer behavior of this reactor) -- kept as a
   // one-line escape hatch for on-hardware A/B comparison while the gains/
   // gates are being characterized.
-  enable_observer: bool = true
+  enable_observer: bool = false
 ) {
   input[7] position_input: float
   input[7] velocity_input: float

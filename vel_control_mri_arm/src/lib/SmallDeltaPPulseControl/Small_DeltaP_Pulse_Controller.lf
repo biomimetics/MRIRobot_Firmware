@@ -42,7 +42,7 @@ preamble {=
 // planning tuning, not part of PulseMotorModel.
 reactor Small_DeltaP_Pulse_Controller(
   control_period: time = 5 ms,
-  max_overshoot_probability: float = 0.10, // unitless 0..1, P(T <= pulse duration) bound the planner must respect -- TODO: characterize
+  max_overshoot_probability: float = 0.05, // unitless 0..1, P(T <= pulse duration) bound the planner must respect -- TODO: characterize
   convergenceLimit_initial: float = 0.034906584, // rad (~2 deg), 
   remaining_error_start_threshold: float = 0.5, // rad, first part of AND statement to trigger pulses
   command_velocity_start_threshold: float = 0.4 // rad/s, second part of AND statement to trigger pulses
@@ -77,6 +77,18 @@ reactor Small_DeltaP_Pulse_Controller(
   // this is a normal signal an estimator depends on, not a diagnostics-only
   // dump gated behind a compile flag.
   output planned_pulse_output: PulseCommand
+
+  // Just passThrough_ below (see its comment) put on the wire
+  // unconditionally, instead of folded into debug_info -- which only ever
+  // gets lf_set under PRINT_DPULSE/PRINT_DPULSE_DEBUG (see control_tick) --
+  // so an external reactor (e.g. a command-bias estimator comparing
+  // command_velocity_output against measured velocity) can gate on "this
+  // sample is a clean commanded-vs-actual comparison, not a pulse in
+  // flight" without needing those debug prints enabled. passThrough_ is
+  // only ever reassigned inside the MOTOR_STOPPED decision block, so it
+  // already reads false for the whole MOTOR_STARTING/RUNNING/STOPPING
+  // duration of any pulse -- no extra state-machine check needed here.
+  output is_passthrough_output: bool
 
   // Diagnostics only -- only populated when PRINT_DPULSE or PRINT_DPULSE_DEBUG
   // is enabled (small_deltap_pulse_controller.h), same convention as
@@ -181,7 +193,7 @@ reactor Small_DeltaP_Pulse_Controller(
   // pass-through vs. pulsing and plan/start a pulse -- see that function's
   // comment for why mode arbitration has to be re-decided at every
   // MOTOR_STOPPED rather than fixed once.
-  reaction(control_tick) -> command_velocity_output, motor_state_output, planned_pulse_output, debug_info {=
+  reaction(control_tick) -> command_velocity_output, motor_state_output, planned_pulse_output, is_passthrough_output, debug_info {=
     // Physical, not logical, time: dt here integrates the pulse FSM's
     // real-world timers (T_start/T_stop/pulseTimer against actual hardware
     // elapsed time), so it should track wall-clock time actually elapsed
@@ -260,6 +272,7 @@ reactor Small_DeltaP_Pulse_Controller(
     lf_set(command_velocity_output, self->pulse_state_.commandVelocity);
     lf_set(motor_state_output, self->pulse_state_.state);
     lf_set(planned_pulse_output, self->pulse_state_.plannedPulse);
+    lf_set(is_passthrough_output, self->passThrough_);
 
 #if PRINT_DPULSE || PRINT_DPULSE_DEBUG
     SmallDeltaPPulseControllerDebugInfo info;

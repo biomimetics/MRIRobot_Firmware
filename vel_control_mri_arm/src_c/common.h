@@ -52,7 +52,7 @@
 
 #define REAL_CPR 2000.0
 #define L2_INTERP_FACTOR 1.0 // this encoder has no interpolation option, so this stays 1.0 -- it's a hardware fact, not a tuning knob
-#define L2_CAL_FACTOR 1.35 // empirical fit (measured 1.3-1.4x) for an unexplained slowdown on the 2000 CPR encoders not captured by CPR_RATIO alone. Refine with a proper speed sweep.
+#define L2_CAL_FACTOR 1.0 // empirical fit (measured 1.3-1.4x) for an unexplained slowdown on the 2000 CPR encoders not captured by CPR_RATIO alone. Refine with a proper speed sweep.
 #define CPR_RATIO ((INITIAL_CPR * INITIAL_INTERP_FACTOR) / (REAL_CPR * L2_INTERP_FACTOR * L2_CAL_FACTOR))
 
 

@@ -128,7 +128,17 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   // long as this stays false. For bringing up/validating the rest of the
   // pipeline (controller, encoder observer, etc.) against a known-fixed
   // model before letting the live estimate start perturbing it.
-  enable_model_updates: bool = false
+  enable_model_updates: bool = false,
+  // Prints the pooled (all-joints, all-time) and per-joint (long-horizon)
+  // observation stats -- mean +- stddev for V_real.mean/T_start/T_stop,
+  // same shape as the epoch-close log's evidence line but never reset, so
+  // it's the equivalent of what an earlier per-pulse-residual version of
+  // this reactor printed (which was very useful for spotting a persistent
+  // per-joint outlier, e.g. the ~5 milli-rad/s V_real cluster on a handful
+  // of joints that turned out to be a real bug). true by default since it's
+  // cheap and this is exactly the kind of thing you want on hand while
+  // characterizing hardware.
+  print_detailed_stats: bool = true
 ) {
   input[7] position_input: float
   input[7] velocity_input: float
@@ -171,6 +181,13 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   state per_joint_observation_stats_5_: PulseMotorModelSampleStats
   state per_joint_observation_stats_6_: PulseMotorModelSampleStats
 
+  // Pooled (all-joints) observation stats, long-horizon like the per-joint
+  // stats above -- NOT epoch_stats_, which resets every epoch close and so
+  // can't answer "what has this reactor seen since startup." Purely for the
+  // print_detailed_stats diagnostic printout in reaction(heartbeat); the
+  // epoch test/step logic above only ever reads epoch_stats_.
+  state pooled_observation_stats_: PulseMotorModelSampleStats
+
   // Non-dud, non-outlier observations folded into the current epoch --
   // the epoch-close trigger (individual fields can have smaller counts,
   // per-field validity -- see field_min_samples above). Reset with
@@ -210,6 +227,7 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   reaction(startup) {=
     self->model_ = INITIAL_MOTOR_MODEL;
     PulseMotorModelSampleStats_Init(&self->epoch_stats_);
+    PulseMotorModelSampleStats_Init(&self->pooled_observation_stats_);
     PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_0_);
     PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_1_);
     PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_2_);
@@ -244,6 +262,46 @@ reactor PulseMotorModelEstimatorMixture_Bank(
         (int) (self->model_.V_real.mean * 1000.0f),
         (int) (self->model_.T_start * 1000.0f),
         (int) (self->model_.T_stop * 1000.0f));
+
+    // Pooled + per-joint long-horizon observation stats -- see
+    // print_detailed_stats' comment for why this is worth having on by
+    // default: it's the only place a persistent per-joint outlier (vs. just
+    // noisy single-epoch evidence) would show up at a glance.
+    if (self->print_detailed_stats) {
+      PulseMotorModelSampleStats *per_joint[7] = {
+        &self->per_joint_observation_stats_0_,
+        &self->per_joint_observation_stats_1_,
+        &self->per_joint_observation_stats_2_,
+        &self->per_joint_observation_stats_3_,
+        &self->per_joint_observation_stats_4_,
+        &self->per_joint_observation_stats_5_,
+        &self->per_joint_observation_stats_6_,
+      };
+
+      printf(
+          "  pooled [n=%lu]: V_real.mean=%d+-%d T_start=%d+-%d T_stop=%d+-%d (milli-units)\r\n",
+          (unsigned long) SampleStats_Count(&self->pooled_observation_stats_.V_real_mean),
+          (int) (SampleStats_Mean(&self->pooled_observation_stats_.V_real_mean) * 1000.0f),
+          (int) (SampleStats_StandardDeviation(&self->pooled_observation_stats_.V_real_mean) * 1000.0f),
+          (int) (SampleStats_Mean(&self->pooled_observation_stats_.T_start) * 1000.0f),
+          (int) (SampleStats_StandardDeviation(&self->pooled_observation_stats_.T_start) * 1000.0f),
+          (int) (SampleStats_Mean(&self->pooled_observation_stats_.T_stop) * 1000.0f),
+          (int) (SampleStats_StandardDeviation(&self->pooled_observation_stats_.T_stop) * 1000.0f));
+
+      for (int j = 0; j < 7; j++) {
+        PulseMotorModelSampleStats *js = per_joint[j];
+        printf(
+            "  joint[%d] [n=%lu]: V_real.mean=%d+-%d T_start=%d+-%d T_stop=%d+-%d (milli-units)\r\n",
+            j,
+            (unsigned long) SampleStats_Count(&js->V_real_mean),
+            (int) (SampleStats_Mean(&js->V_real_mean) * 1000.0f),
+            (int) (SampleStats_StandardDeviation(&js->V_real_mean) * 1000.0f),
+            (int) (SampleStats_Mean(&js->T_start) * 1000.0f),
+            (int) (SampleStats_StandardDeviation(&js->T_start) * 1000.0f),
+            (int) (SampleStats_Mean(&js->T_stop) * 1000.0f),
+            (int) (SampleStats_StandardDeviation(&js->T_stop) * 1000.0f));
+      }
+    }
   =}
 
   // Folds every joint's freshly-arrived observation into the pooled epoch
@@ -316,14 +374,17 @@ reactor PulseMotorModelEstimatorMixture_Bank(
       // would fold model-copy placeholders for the invalid fields).
       if (obs.t_start_valid) {
         SampleStats_Add(&self->epoch_stats_.T_start, obs.values.T_start);
+        SampleStats_Add(&self->pooled_observation_stats_.T_start, obs.values.T_start);
         SampleStats_Add(&per_joint[i]->T_start, obs.values.T_start);
       }
       if (obs.t_stop_valid) {
         SampleStats_Add(&self->epoch_stats_.T_stop, obs.values.T_stop);
+        SampleStats_Add(&self->pooled_observation_stats_.T_stop, obs.values.T_stop);
         SampleStats_Add(&per_joint[i]->T_stop, obs.values.T_stop);
       }
       if (obs.v_real_valid) {
         SampleStats_Add(&self->epoch_stats_.V_real_mean, obs.values.V_real.mean);
+        SampleStats_Add(&self->pooled_observation_stats_.V_real_mean, obs.values.V_real.mean);
         SampleStats_Add(&per_joint[i]->V_real_mean, obs.values.V_real.mean);
       }
       self->epoch_observation_count_++;

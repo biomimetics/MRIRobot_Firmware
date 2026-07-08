@@ -55,6 +55,9 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   // each controller instance -- see that output's comment on
   // Small_DeltaP_Pulse_Controller.lf.
   output[7] planned_pulse_output: PulseCommand
+  // Per-joint pass-through flag, routed straight out from each controller
+  // instance -- see that output's comment on Small_DeltaP_Pulse_Controller.lf.
+  output[7] is_passthrough_output: bool
 
   state last_print_time_: time = 0
 
@@ -67,6 +70,7 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   controllers.command_velocity_output -> command_velocity_output
   controllers.motor_state_output -> motor_state_output
   controllers.planned_pulse_output -> planned_pulse_output
+  controllers.is_passthrough_output -> is_passthrough_output
 
   // Prints the status of all 7 Small_DeltaP_Pulse_Controller instances
   // together, at print_period cadence, when PRINT_DPULSE_DEBUG is enabled

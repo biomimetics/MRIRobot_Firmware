@@ -20,6 +20,8 @@ import UART_Handler from "lib/Drivers/UART.lf"
 import Small_DeltaP_Pulse_Controller_Bank from "lib/SmallDeltaPPulseControl/Small_DeltaP_Pulse_Controller_Bank.lf"
 import EncoderStateEstimator from "lib/EncoderStateEstimator.lf"
 import PulseMotorModelEstimatorMixture_Bank from "lib/PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf"
+import MotorCommandBiasEstimator_Bank from "lib/MotorCommandBiasEstimator/MotorCommandBiasEstimator_Bank.lf"
+import CommandSafetyFilter from "lib/CommandSafetyFilter.lf"
 
 // MotorCalibration.lf is a diagnostic reactor for finding the USM/SEA
 // channel <-> physical joint mapping (see that file for usage notes and
@@ -116,11 +118,17 @@ main reactor {
   // (encoder_state_observer.h), fusing QDEC position/velocity with the USM
   // command via a T_start/T_stop delay line -- hence
   // use_commanded_velocity = true for this (USM) instance.
-  encoder_state_estimator = new EncoderStateEstimator(use_commanded_velocity = true)
+  encoder_state_estimator = new EncoderStateEstimator(use_commanded_velocity = false, enable_observer = true)
   // Owns the shared PulseMotorModel: pools per-pulse observations across
   // all 7 joints and runs the epoch test/step/broadcast update -- see
   // PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
-  pulse_motor_model_estimator = new PulseMotorModelEstimatorMixture_Bank()
+  pulse_motor_model_estimator = new PulseMotorModelEstimatorMixture_Bank(enable_model_updates = true)
+  // Learns each joint's own commanded-vs-actual velocity offset during
+  // ordinary pass-through control -- see MotorCommandBiasEstimator.lf.
+  motor_command_bias_estimator = new MotorCommandBiasEstimator_Bank()
+  // Last stop before usm: adds motor_command_bias_estimator's per-joint
+  // correction onto deltap_bank's command -- see CommandSafetyFilter.lf.
+  command_safety_filter = new CommandSafetyFilter()
   // Diagnostic only -- see MotorCalibration.lf for usage notes. Uncomment
   // along with the import above and the wiring below to use it again.
   // motor_calib = new MotorCalibration()
@@ -154,23 +162,56 @@ main reactor {
   // usm
   state_machine.commanded_motor_velocities -> deltap_bank.command_velocity_input
   state_machine.commanded_position_deltas -> deltap_bank.remaining_error_input
-  deltap_bank.command_velocity_output -> usm.speed
+  // deltap_bank's raw command now goes through command_safety_filter (bias
+  // correction) before it reaches the motor -- see CommandSafetyFilter.lf
+  // and MotorCommandBiasEstimator.lf.
+  deltap_bank.command_velocity_output -> command_safety_filter.command_velocity_input
+  command_safety_filter.command_velocity_output -> usm.speed
+
+  // motor_command_bias_estimator only learns from genuine pass-through
+  // samples (is_passthrough_output) at/above the model's V_min_cmd -- see
+  // MotorCommandBiasEstimator.lf's reactor-level comment -- and needs the
+  // pre-correction command itself (fed straight from deltap_bank, not
+  // command_safety_filter's output) since comparing the ORIGINAL desired
+  // velocity against measured velocity is what yields the total bias still
+  // owed, independent of whatever correction is already being applied.
+  deltap_bank.command_velocity_output -> motor_command_bias_estimator.commanded_velocity_input
+  deltap_bank.is_passthrough_output -> motor_command_bias_estimator.is_passthrough_input
+  encoder_state_estimator.velocity_output -> motor_command_bias_estimator.velocity_input
+  // after 0: same reasoning as the motor_model_output feeds below -- this
+  // reactor's motor_model_input is produced by pulse_motor_model_estimator's
+  // epoch reaction, which this connection would otherwise loop back into
+  // within the same zero-delay instant.
+  pulse_motor_model_estimator.motor_model_output -> motor_command_bias_estimator.motor_model_input after 0
+  motor_command_bias_estimator.bias_output -> command_safety_filter.command_bias_input
+  encoder_state_estimator.velocity_output -> command_safety_filter.velocity_input
 
   // encoder_state_estimator watches the command actually sent to the USM
-  // (deltap_bank's output -- correct in both pass-through and pulsing
-  // modes), NOT state_machine.commanded_motor_velocities, which sits near
-  // zero while a joint is pulsing -- see EncoderStateEstimator.lf.
+  // (command_safety_filter's bias-corrected output -- correct in both
+  // pass-through and pulsing modes, and now also bias-corrected), NOT
+  // state_machine.commanded_motor_velocities, which sits near zero while a
+  // joint is pulsing -- see EncoderStateEstimator.lf.
   //
-  // The motor_model_output feeds (here and into deltap_bank below) carry
-  // `after 0` (one microstep, zero physical delay -- same as
-  // state_machine.state_message above): now that the mixture bank's epoch
-  // reaction actually produces motor_model_output, these edges close a
-  // zero-delay causality loop (control_tick -> motor_state ->
-  // estimators -> epoch reaction -> motor_model -> back into the
-  // consumers' cache reactions, whose implicit intra-reactor ordering
-  // feeds the producing reactions declared after them). A one-epoch-old
-  // model landing one microstep later is semantically irrelevant here.
-  deltap_bank.command_velocity_output -> encoder_state_estimator.commanded_velocity_input
+  // `after 0` here breaks a real cycle introduced by command_safety_filter:
+  // encoder_state_estimator's own velocity_output feeds
+  // motor_command_bias_estimator (above), whose bias_output feeds
+  // command_safety_filter, whose command_velocity_output would otherwise
+  // feed straight back into this same reactor's commanded_velocity_input --
+  // and QDEC's 10 ms tag routinely coincides with deltap_bank's 5 ms
+  // control_tick, so this isn't just a theoretical same-tag collision. One
+  // microstep of staleness on the commanded-velocity cache is
+  // inconsequential here, same reasoning as every other `after 0` below.
+  //
+  // The motor_model_output feed just below carries the same `after 0` (one
+  // microstep, zero physical delay -- same as state_machine.state_message
+  // above): now that the mixture bank's epoch reaction actually produces
+  // motor_model_output, this edge closes a zero-delay causality loop
+  // (control_tick -> motor_state -> estimators -> epoch reaction ->
+  // motor_model -> back into the consumers' cache reactions, whose implicit
+  // intra-reactor ordering feeds the producing reactions declared after
+  // them). A one-epoch-old model landing one microstep later is
+  // semantically irrelevant here.
+  command_safety_filter.command_velocity_output -> encoder_state_estimator.commanded_velocity_input after 0
   deltap_bank.motor_state_output -> encoder_state_estimator.motor_state_input
   pulse_motor_model_estimator.motor_model_output -> encoder_state_estimator.motor_model_input after 0
 

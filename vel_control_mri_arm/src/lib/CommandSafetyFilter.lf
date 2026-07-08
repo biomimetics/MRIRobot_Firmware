@@ -1,0 +1,134 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../src_c/pulse_motor_model.h", "../../src_c/pulse_motor_model.c",
+    "../../src_c/gaussian_motion.h", "../../src_c/gaussian_motion.c",
+    "../../src_c/stats.h", "../../src_c/stats.c"
+  ],
+  cmake-include: [
+    "../../src_c/pulse_motor_model_cmake.cmake",
+    "../../src_c/gaussian_motion_cmake.cmake",
+    "../../src_c/stats_cmake.cmake"
+  ]
+}
+
+preamble {=
+  #include "pulse_motor_model.h" // sign_f
+=}
+
+// Sits between Small_DeltaP_Pulse_Controller_Bank.lf and USM.lf: the last
+// stop for a joint's command velocity before it reaches the motor. For now
+// this only does one thing -- apply command_bias_input
+// (MotorCommandBiasEstimator_Bank.lf's bias_output, warm-started from
+// motor_configs[i]->command_bias and refined from there by live samples --
+// see that reactor's reactor-level comment) onto command_velocity_input, so
+// the USM actually gets a bias-corrected command instead of the raw
+// pulse-controller output. Deliberately just ONE bias term here, not a
+// hard-coded-plus-learned sum: motor_config's prior and the live estimate
+// are the same quantity at different points in its lifetime, and
+// MotorCommandBiasEstimator.lf is the one place that already knows how to
+// blend them (warm start, then step away via step_alpha/
+// max_step_per_update) -- this reactor treats whatever it receives
+// identically either way.
+//
+// command_bias_input is MAGNITUDE-domain (how much faster/slower than
+// |commanded| the motor tends to actually run, direction-agnostic -- see
+// MotorCommandBiasEstimator.lf), so applying it takes two things this
+// reactor is the right place to do, not the estimator:
+//   - sign: the correction has to point the same way the joint is actually
+//     being commanded to move (sign_f(command_velocity_input)), not always
+//     positive -- an earlier version of this reactor added the bias
+//     directly as a signed rad/s value and only ever corrected one
+//     direction correctly.
+//   - a hard gate at exactly zero commanded velocity: with no commanded
+//     motion at all there is nothing to correct FOR, and letting the bias
+//     term leak through produced a nonzero command_velocity_output (motion)
+//     out of a zero command, which is exactly the failure mode a "safety
+//     filter" exists to prevent.
+//
+// velocity_input (EncoderStateEstimator.lf's filtered actual velocity) is
+// wired in but deliberately unused past caching for now -- this reactor is
+// named for where future safety logic belongs (e.g. clamping the corrected
+// command if measured velocity diverges too far from what was commanded, or
+// rate-limiting a sudden bias swing), not for everything it does today.
+// Kept as an input from the start so that logic can land here without
+// another round of Main.lf rewiring.
+//
+// Deliberately a single flat 7-wide reactor, not a bank/single split like
+// Small_DeltaP_Pulse_Controller_Bank.lf or
+// PulseMotorModelEstimatorMixture_Bank.lf -- there's no per-joint state
+// machine here, just per-channel arithmetic, so there's nothing a
+// single-channel instance would encapsulate that this reactor doesn't
+// already keep separate via the input/state arrays below.
+reactor CommandSafetyFilter {
+  // The pulse controller's actual command for this joint --
+  // Small_DeltaP_Pulse_Controller_Bank.lf's command_velocity_output. rad/s,
+  // signed.
+  input[7] command_velocity_input: float
+  // This joint's total command bias -- MotorCommandBiasEstimator_Bank.lf's
+  // bias_output, already warm-started from motor_configs[i]->command_bias
+  // at that reactor's own startup (see MotorCommandBiasEstimator.lf), so
+  // this is a real value from tick one, not just a live residual. rad/s,
+  // magnitude-domain (see the reactor-level comment there).
+  input[7] command_bias_input: float
+  // This joint's filtered actual velocity -- EncoderStateEstimator.lf's
+  // velocity_output. Reserved for future safety checks -- see the
+  // reactor-level comment above.
+  input[7] velocity_input: float
+
+  // Bias-corrected command velocity -- wire straight into USM.lf's speed
+  // input in place of Small_DeltaP_Pulse_Controller_Bank.lf's direct output.
+  output[7] command_velocity_output: float
+
+  // Cached per-joint, since command_bias_input/velocity_input each arrive on
+  // their own tag independent of command_velocity_input -- same pattern as
+  // EncoderStateEstimator.lf's cache states.
+  state last_bias_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state last_velocity_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
+  // Thin cache-only reactions, declared/reacted-to before
+  // command_velocity_input's reaction (where the correction is actually
+  // applied) so that reaction's caches are already fresh -- same convention
+  // as EncoderStateEstimator.lf.
+  reaction(command_bias_input) {=
+    for (int i = 0; i < command_bias_input_width; i++) {
+      if (command_bias_input[i]->is_present) {
+        self->last_bias_[i] = command_bias_input[i]->value;
+      }
+    }
+  =}
+
+  reaction(velocity_input) {=
+    for (int i = 0; i < velocity_input_width; i++) {
+      if (velocity_input[i]->is_present) {
+        self->last_velocity_[i] = velocity_input[i]->value;
+      }
+    }
+  =}
+
+  // The actual correction, per joint:
+  //   command_velocity_input == 0  =>  command_velocity_output = 0
+  //   otherwise                    =>  command_velocity_input +
+  //                                     sign_f(command_velocity_input) *
+  //                                     last_bias_[i]
+  // Off command_velocity_input's trigger so the output tracks the pulse
+  // controller's own cadence rather than waiting on a fresh bias/velocity
+  // sample.
+  reaction(command_velocity_input) -> command_velocity_output {=
+    for (int i = 0; i < command_velocity_input_width; i++) {
+      if (!command_velocity_input[i]->is_present) continue;
+
+      float cmd = command_velocity_input[i]->value;
+      if (cmd == 0.0f) {
+        lf_set(command_velocity_output[i], 0.0f);
+        continue;
+      }
+
+      lf_set(command_velocity_output[i], cmd + sign_f(cmd) * self->last_bias_[i]);
+    }
+  =}
+}
