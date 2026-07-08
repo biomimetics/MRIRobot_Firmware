@@ -46,13 +46,15 @@
 #define INITIAL_CPR 1440.0 //5760.0 //1440.0
 #define INITIAL_INTERP_FACTOR 4.0 // either 1, 2, or 4
 
-#define REAL_CPR 2000.0
-#define L2_INTERP_FACTOR 1.0
-#define CPR_RATIO ((INITIAL_CPR * INITIAL_INTERP_FACTOR) / (REAL_CPR * L2_INTERP_FACTOR))
-
 #define REAL_CPR_BASE 10000.0
 #define E2_INTERP_FACTOR 1.0
 #define CPR_RATIO_BASE ((INITIAL_CPR * INITIAL_INTERP_FACTOR) / (REAL_CPR_BASE * E2_INTERP_FACTOR))
+
+#define REAL_CPR 2000.0
+#define L2_INTERP_FACTOR 1.0 // this encoder has no interpolation option, so this stays 1.0 -- it's a hardware fact, not a tuning knob
+#define L2_CAL_FACTOR 1.35 // empirical fit (measured 1.3-1.4x) for an unexplained slowdown on the 2000 CPR encoders not captured by CPR_RATIO alone. Refine with a proper speed sweep.
+#define CPR_RATIO ((INITIAL_CPR * INITIAL_INTERP_FACTOR) / (REAL_CPR * L2_INTERP_FACTOR * L2_CAL_FACTOR))
+
 
 #define INITIAL_PWM_RPM_MAX 250.0
 #define PWM_RPM_MAX (INITIAL_PWM_RPM_MAX * CPR_RATIO)
