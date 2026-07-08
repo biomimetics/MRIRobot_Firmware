@@ -118,17 +118,17 @@ main reactor {
   // (encoder_state_observer.h), fusing QDEC position/velocity with the USM
   // command via a T_start/T_stop delay line -- hence
   // use_commanded_velocity = true for this (USM) instance.
-  encoder_state_estimator = new EncoderStateEstimator(use_commanded_velocity = false, enable_observer = true)
+  encoder_state_estimator = new EncoderStateEstimator(use_commanded_velocity = false, enable_observer = false)
   // Owns the shared PulseMotorModel: pools per-pulse observations across
   // all 7 joints and runs the epoch test/step/broadcast update -- see
   // PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
-  pulse_motor_model_estimator = new PulseMotorModelEstimatorMixture_Bank(enable_model_updates = true)
+  pulse_motor_model_estimator = new PulseMotorModelEstimatorMixture_Bank(enable_model_updates = false)
   // Learns each joint's own commanded-vs-actual velocity offset during
   // ordinary pass-through control -- see MotorCommandBiasEstimator.lf.
   motor_command_bias_estimator = new MotorCommandBiasEstimator_Bank()
   // Last stop before usm: adds motor_command_bias_estimator's per-joint
   // correction onto deltap_bank's command -- see CommandSafetyFilter.lf.
-  command_safety_filter = new CommandSafetyFilter()
+  command_safety_filter = new CommandSafetyFilter(safety_checks_enabled = false)
   // Diagnostic only -- see MotorCalibration.lf for usage notes. Uncomment
   // along with the import above and the wiring below to use it again.
   // motor_calib = new MotorCalibration()
@@ -167,6 +167,11 @@ main reactor {
   // and MotorCommandBiasEstimator.lf.
   deltap_bank.command_velocity_output -> command_safety_filter.command_velocity_input
   command_safety_filter.command_velocity_output -> usm.speed
+  // command_safety_filter's sending_motor_commands/motor_active/
+  // motor_is_responding/motor_direction_fault outputs aren't consumed
+  // anywhere yet -- see CommandSafetyFilter.lf for what they report. Left
+  // unwired until something downstream (logging, UART telemetry,
+  // state_machine) needs them.
 
   // motor_command_bias_estimator only learns from genuine pass-through
   // samples (is_passthrough_output) at/above the model's V_min_cmd -- see

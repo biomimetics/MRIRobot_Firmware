@@ -23,6 +23,7 @@ import MotorCommandBiasEstimator from "MotorCommandBiasEstimator.lf"
 // PulseMotorModelEstimatorMixture_Bank.lf's own top-level preamble.
 preamble {=
   #include "pulse_motor_model.h"
+  #include <stdio.h>
 =}
 
 // 7-dof wrapper that routes each joint's commanded/actual velocity,
@@ -45,6 +46,15 @@ reactor MotorCommandBiasEstimator_Bank {
   // estimator instance -- see that output's comment on
   // MotorCommandBiasEstimator.lf.
   output[7] bias_output: float
+
+  // Diagnostic-only, same reasoning as
+  // Small_DeltaP_Pulse_Controller_Bank.lf's own startup print -- this
+  // reactor has no init work of its own beyond the static `new[7]` wiring
+  // below.
+  reaction(startup) {=
+    printf("[STARTUP] MotorCommandBiasEstimator_Bank: entering startup\r\n");
+    printf("[STARTUP] MotorCommandBiasEstimator_Bank: exiting startup\r\n");
+  =}
 
   estimators = new[7] MotorCommandBiasEstimator()
 

@@ -28,6 +28,7 @@ preamble {=
   #include "gaussian_motion.h"
   #include "small_deltap_pulse_controller.h"
   #include <math.h>
+  #include <stdio.h>
 
   // Nanoseconds -> seconds, for converting LF instant_t/interval_t deltas
   // into the plain float seconds this controller's math works in.
@@ -42,7 +43,7 @@ preamble {=
 // planning tuning, not part of PulseMotorModel.
 reactor Small_DeltaP_Pulse_Controller(
   control_period: time = 5 ms,
-  max_overshoot_probability: float = 0.05, // unitless 0..1, P(T <= pulse duration) bound the planner must respect -- TODO: characterize
+  max_overshoot_probability: float = 0.02, // unitless 0..1, P(T <= pulse duration) bound the planner must respect -- TODO: characterize
   convergenceLimit_initial: float = 0.034906584, // rad (~2 deg), 
   remaining_error_start_threshold: float = 0.5, // rad, first part of AND statement to trigger pulses
   command_velocity_start_threshold: float = 0.4 // rad/s, second part of AND statement to trigger pulses
@@ -147,6 +148,7 @@ reactor Small_DeltaP_Pulse_Controller(
   timer control_tick(0, control_period)
 
   reaction(startup) {=
+    printf("[STARTUP] Small_DeltaP_Pulse_Controller: entering startup\r\n");
     self->model_ = INITIAL_MOTOR_MODEL;
 
     self->pulse_state_.state = MOTOR_STOPPED;
@@ -164,6 +166,7 @@ reactor Small_DeltaP_Pulse_Controller(
 
     self->remaining_error_start_threshold_ = self->remaining_error_start_threshold;
     self->command_velocity_start_threshold_ = self->command_velocity_start_threshold;
+    printf("[STARTUP] Small_DeltaP_Pulse_Controller: exiting startup\r\n");
   =}
 
   // Thin cache-only reactions: just copy incoming values into state. No FSM

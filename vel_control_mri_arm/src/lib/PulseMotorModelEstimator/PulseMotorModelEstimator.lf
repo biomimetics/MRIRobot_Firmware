@@ -251,6 +251,7 @@ reactor PulseMotorModelEstimator(
   state watchdog_resets_: int = 0
 
   reaction(startup) {=
+    printf("[STARTUP] PulseMotorModelEstimator: entering startup\r\n");
     self->model_ = INITIAL_MOTOR_MODEL;
 
     self->last_motor_state_ = MOTOR_STOPPED;
@@ -259,6 +260,7 @@ reactor PulseMotorModelEstimator(
     self->last_planned_pulse_.pulse_height = 0.0f;
 
     self->onset_source_ = PULSE_ONSET_NONE;
+    printf("[STARTUP] PulseMotorModelEstimator: exiting startup\r\n");
   =}
 
   // Cache-only for last_position_, plus the position-onset and T_stop

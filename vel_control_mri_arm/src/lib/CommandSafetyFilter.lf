@@ -18,11 +18,20 @@ target C {
 
 preamble {=
   #include "pulse_motor_model.h" // sign_f
+  #include <math.h> // fabsf
+  #include <stdio.h>
+
+  // dir_fault_state_ values -- see motor_direction_fault's reaction-level
+  // comment below for the state machine these drive.
+  #define DIR_FAULT_OK 0        // passing the (bias-corrected) command straight through
+  #define DIR_FAULT_HOLDING 1   // direction mismatch seen -- command forced to 0, waiting to resend
+  #define DIR_FAULT_WATCHING 2  // just resent the command -- watching for the mismatch to clear
+  #define DIR_FAULT_BLOCKED 3   // resend didn't fix it -- command forced to 0 until it goes to 0 itself
 =}
 
 // Sits between Small_DeltaP_Pulse_Controller_Bank.lf and USM.lf: the last
-// stop for a joint's command velocity before it reaches the motor. For now
-// this only does one thing -- apply command_bias_input
+// stop for a joint's command velocity before it reaches the motor. Applies
+// command_bias_input
 // (MotorCommandBiasEstimator_Bank.lf's bias_output, warm-started from
 // motor_configs[i]->command_bias and refined from there by live samples --
 // see that reactor's reactor-level comment) onto command_velocity_input, so
@@ -50,21 +59,78 @@ preamble {=
 //     out of a zero command, which is exactly the failure mode a "safety
 //     filter" exists to prevent.
 //
-// velocity_input (EncoderStateEstimator.lf's filtered actual velocity) is
-// wired in but deliberately unused past caching for now -- this reactor is
-// named for where future safety logic belongs (e.g. clamping the corrected
+// velocity_input (EncoderStateEstimator.lf's filtered actual velocity) now
+// feeds the two safety checks below (motor_is_responding,
+// motor_direction_fault) in addition to being cached -- this reactor is
+// named for where safety logic belongs (e.g. also clamping the corrected
 // command if measured velocity diverges too far from what was commanded, or
 // rate-limiting a sudden bias swing), not for everything it does today.
-// Kept as an input from the start so that logic can land here without
-// another round of Main.lf rewiring.
+//
+// Two safety checks run per joint, both off command_velocity_input's own
+// cadence (see that reaction's comment for the full state machine):
+//   - motor_is_responding: is measured velocity actually leaving 0 when a
+//     nonzero command has had enough time (past the motor's own known
+//     startup delay) to take effect. Informational only for now -- doesn't
+//     touch command_velocity_output.
+//   - motor_direction_fault: is the motor moving the direction it was
+//     actually commanded to. USM.lf's direction pins are known to sometimes
+//     not refresh, so this DOES gate command_velocity_output -- hold at 0,
+//     retry once, then block until the command returns to 0 if the retry
+//     doesn't fix it.
+// Plus sending_motor_commands/motor_active, a pair rather than a single
+// flag so a monitoring reactor can pick which edge behavior it wants:
+// sending_motor_commands is the raw cmd != 0 (immediate both ways),
+// motor_active copies it going true but lags by motor_active_hold going
+// false, so a monitor watching motor_active doesn't see a premature false
+// while the checks above are still working out a response/direction issue.
 //
 // Deliberately a single flat 7-wide reactor, not a bank/single split like
 // Small_DeltaP_Pulse_Controller_Bank.lf or
-// PulseMotorModelEstimatorMixture_Bank.lf -- there's no per-joint state
-// machine here, just per-channel arithmetic, so there's nothing a
-// single-channel instance would encapsulate that this reactor doesn't
-// already keep separate via the input/state arrays below.
-reactor CommandSafetyFilter {
+// PulseMotorModelEstimatorMixture_Bank.lf -- the per-joint state machine
+// the direction-fault check needs is small enough (one int + one instant_t)
+// that a bank/single split would just be more files for the same
+// state-array pattern the rest of this reactor already uses.
+reactor CommandSafetyFilter(
+  // Kill switch for the two safety checks below (motor_is_responding and
+  // the direction-fault gate on command_velocity_output) -- false collapses
+  // this reactor back to ONLY the bias correction (the pre-session
+  // behavior): motor_is_responding always reports true and
+  // command_velocity_output is never held/blocked by a direction mismatch.
+  // sending_motor_commands/motor_active are unaffected either way -- they're
+  // just cmd != 0 bookkeeping, not a safety check. Added as an
+  // instant on-hardware rule-out switch (flip in Main.lf) rather than
+  // deleting/re-adding the logic each time it's suspected of causing an
+  // on-hardware issue -- see this reactor's git history for how expensive
+  // that got.
+  safety_checks_enabled: bool = true,
+  // How long a joint is allowed to show ~0 measured velocity against a
+  // nonzero command before motor_is_responding goes false. Must stay above
+  // the motor's own startup command delay (INITIAL_MOTOR_MODEL.T_start,
+  // ~50 ms -- see pulse_motor_model.h) or every command would trip this the
+  // instant it goes nonzero; the extra margin below is deliberate slack on
+  // top of that, not a characterized value.
+  response_check_delay: time = 150 ms,
+  // rad/s -- |measured velocity| at or below this counts as "not moving"
+  // for both the motor_is_responding and direction-fault checks. Encoder
+  // noise floor, not characterized.
+  velocity_zero_threshold: float = 0.02,
+  // How long to hold the command at 0 after a direction-mismatch is caught,
+  // before resending it -- long enough that the control board has clearly
+  // dropped and can pick back up the (hopefully corrected) direction pin,
+  // not characterized against real hardware yet.
+  direction_fault_hold: time = 50 ms,
+  // How long to watch measured velocity after resending before declaring
+  // the resend successful -- must be long enough to clear the motor's own
+  // startup delay again, same reasoning as response_check_delay.
+  direction_fault_watch: time = 150 ms,
+  // How long motor_active stays true after sending_motor_commands goes
+  // false, before it's allowed to drop to false itself -- deliberately
+  // conservative (bigger than response_check_delay/direction_fault_watch)
+  // so a reactor using motor_active as a "is this joint doing anything"
+  // monitoring flag doesn't get a premature false and miss trailing motion/
+  // faults that are still being worked out above. Not characterized.
+  motor_active_hold: time = 300 ms
+) {
   // The pulse controller's actual command for this joint --
   // Small_DeltaP_Pulse_Controller_Bank.lf's command_velocity_output. rad/s,
   // signed.
@@ -76,19 +142,75 @@ reactor CommandSafetyFilter {
   // magnitude-domain (see the reactor-level comment there).
   input[7] command_bias_input: float
   // This joint's filtered actual velocity -- EncoderStateEstimator.lf's
-  // velocity_output. Reserved for future safety checks -- see the
-  // reactor-level comment above.
+  // velocity_output. Drives motor_is_responding/motor_direction_fault below
+  // -- see the reactor-level comment above.
   input[7] velocity_input: float
 
   // Bias-corrected command velocity -- wire straight into USM.lf's speed
   // input in place of Small_DeltaP_Pulse_Controller_Bank.lf's direct output.
   output[7] command_velocity_output: float
 
+  // True whenever this joint is being sent a nonzero command velocity --
+  // just cmd != 0, no filtering. Lets downstream reactors (logging, other
+  // safety checks) tell "commanded to hold still" apart from "commanded to
+  // move but not moving yet/at all" without re-deriving it from
+  // command_velocity_input themselves.
+  output[7] sending_motor_commands: bool
+
+  // True as soon as sending_motor_commands goes true; stays true until
+  // motor_active_hold after sending_motor_commands goes false. Deliberately
+  // laggy on the way down (see motor_active_hold's comment) -- this is the
+  // flag a monitoring reactor should watch if it wants "is this joint
+  // active" without having to add its own debounce against
+  // sending_motor_commands flapping true/false/true across a couple of
+  // ticks.
+  output[7] motor_active: bool
+
+  // False when this joint has had a nonzero command for longer than
+  // response_check_delay while measured velocity has stayed at ~0 --
+  // i.e. the motor doesn't appear to be responding to commands at all.
+  // Informational only for now (see the reactor-level comment above) --
+  // does not affect command_velocity_output.
+  output[7] motor_is_responding: bool
+
+  // True while this joint's command is being held/blocked at 0 by the
+  // direction-mismatch check below (DIR_FAULT_HOLDING, _WATCHING, or
+  // _BLOCKED) -- see that reaction's comment for the state machine.
+  output[7] motor_direction_fault: bool
+
   // Cached per-joint, since command_bias_input/velocity_input each arrive on
   // their own tag independent of command_velocity_input -- same pattern as
   // EncoderStateEstimator.lf's cache states.
   state last_bias_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
   state last_velocity_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
+  // motor_is_responding bookkeeping: the logical time each joint's command
+  // last went from 0 to nonzero (-1 while the command is currently 0), and
+  // the last value computed so it can be held steady tick-to-tick instead
+  // of flapping while still inside response_check_delay's grace window.
+  state cmd_active_since_: instant_t[7] = {-1, -1, -1, -1, -1, -1, -1}
+  state motor_is_responding_: bool[7] = {true, true, true, true, true, true, true}
+
+  // Direction-fault state machine, per joint -- see motor_direction_fault's
+  // reaction-level comment below. dir_fault_deadline_ is the logical time
+  // the current HOLDING/WATCHING period ends.
+  state dir_fault_state_: int[7] = {0, 0, 0, 0, 0, 0, 0}
+  state dir_fault_deadline_: instant_t[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  // motor_active bookkeeping: whether sending_motor_commands was true last
+  // tick (to catch the true->false transition once, not every tick it
+  // stays false), the current output value, and the logical time it's next
+  // allowed to drop to false -- see motor_active's port-level comment.
+  state sending_prev_: bool[7] = {false, false, false, false, false, false, false}
+  state motor_active_: bool[7] = {false, false, false, false, false, false, false}
+  state motor_active_deadline_: instant_t[7] = {0, 0, 0, 0, 0, 0, 0}
+
+  // Diagnostic-only -- this reactor has no init work (all states above are
+  // array-literal-initialized, no startup reaction needed otherwise).
+  reaction(startup) {=
+    printf("[STARTUP] CommandSafetyFilter: entering startup\r\n");
+    printf("[STARTUP] CommandSafetyFilter: exiting startup\r\n");
+  =}
 
   // Thin cache-only reactions, declared/reacted-to before
   // command_velocity_input's reaction (where the correction is actually
@@ -110,25 +232,174 @@ reactor CommandSafetyFilter {
     }
   =}
 
-  // The actual correction, per joint:
+  // The bias correction, direction-fault gating, and the two informational
+  // flags, all per joint:
   //   command_velocity_input == 0  =>  command_velocity_output = 0
   //   otherwise                    =>  command_velocity_input +
   //                                     sign_f(command_velocity_input) *
   //                                     last_bias_[i]
+  //   (then possibly forced to 0 by the direction-fault state machine below)
+  //
   // Off command_velocity_input's trigger so the output tracks the pulse
   // controller's own cadence rather than waiting on a fresh bias/velocity
-  // sample.
-  reaction(command_velocity_input) -> command_velocity_output {=
+  // sample -- also what lets the direction-fault state machine below use
+  // command_velocity_input's own cadence as its clock instead of needing a
+  // separate timer/logical action.
+  //
+  // motor_is_responding: false once a nonzero command has gone
+  // response_check_delay without measured velocity leaving the
+  // velocity_zero_threshold band around 0 -- i.e. the motor doesn't appear
+  // to be moving at all in response to being commanded to. Latched true
+  // again as soon as measured velocity is seen moving, or the command
+  // returns to 0. Purely informational for now -- see the reactor-level
+  // comment above; nothing here touches command_velocity_output for this
+  // check.
+  //
+  // motor_direction_fault: the control board is known to sometimes fail to
+  // refresh its direction pin, so USM.lf ends up driving a joint the wrong
+  // way relative to what was actually commanded (see USM.lf's
+  // compute_directions_from_speeds/set_direction_pins). Caught here by
+  // comparing sign_f(measured velocity) against sign_f(commanded velocity)
+  // once measured velocity is large enough to trust
+  // (velocity_zero_threshold), and handled with a small per-joint state
+  // machine (DIR_FAULT_* -- see preamble):
+  //   OK      -- pass the corrected command through; a mismatch moves to
+  //              HOLDING and forces this tick's output to 0.
+  //   HOLDING -- output held at 0 for direction_fault_hold, then the
+  //              command is resent (one retry) and state moves to WATCHING.
+  //   WATCHING -- command passes through again; if the mismatch is still
+  //              there once measured velocity is trustworthy again, the
+  //              resend has failed and state moves to BLOCKED (output
+  //              forced to 0). Otherwise, once direction_fault_watch
+  //              elapses without the mismatch reappearing, state returns
+  //              to OK.
+  //   BLOCKED -- output forced to 0 regardless of command until
+  //              command_velocity_input itself returns to exactly 0, which
+  //              unconditionally resets state to OK (the "we need to see
+  //              zero commanded velocities again" recovery path).
+  // A command of exactly 0 always resets state to OK and outputs 0,
+  // regardless of what state the joint was in -- there's nothing to
+  // correct FOR at zero command, same reasoning as the bias gate this
+  // reaction already had.
+  reaction(command_velocity_input)
+      -> command_velocity_output, sending_motor_commands, motor_active,
+      motor_is_responding, motor_direction_fault {=
+    instant_t now = lf_time_logical();
+
     for (int i = 0; i < command_velocity_input_width; i++) {
       if (!command_velocity_input[i]->is_present) continue;
 
       float cmd = command_velocity_input[i]->value;
-      if (cmd == 0.0f) {
-        lf_set(command_velocity_output[i], 0.0f);
-        continue;
+      float measured = self->last_velocity_[i];
+      bool cmd_nonzero = (cmd != 0.0f);
+      bool measured_trustworthy = fabsf(measured) > self->velocity_zero_threshold;
+
+      lf_set(sending_motor_commands[i], cmd_nonzero);
+
+      // -- motor_active: laggy version of sending_motor_commands --
+      if (cmd_nonzero) {
+        self->motor_active_[i] = true;
+      } else {
+        if (self->sending_prev_[i]) {
+          // Just went inactive this tick -- start the hold-off window.
+          self->motor_active_deadline_[i] = now + self->motor_active_hold;
+        }
+        self->motor_active_[i] = (now < self->motor_active_deadline_[i]);
+      }
+      self->sending_prev_[i] = cmd_nonzero;
+      lf_set(motor_active[i], self->motor_active_[i]);
+
+      // -- motor_is_responding --
+      if (!self->safety_checks_enabled) {
+        // Kill switch on -- see safety_checks_enabled's comment. Always
+        // reports true, and don't let cmd_active_since_ accumulate while
+        // disabled so re-enabling doesn't immediately see a stale elapsed
+        // time and trip.
+        self->cmd_active_since_[i] = -1;
+        self->motor_is_responding_[i] = true;
+      } else if (!cmd_nonzero) {
+        self->cmd_active_since_[i] = -1;
+        self->motor_is_responding_[i] = true;
+      } else {
+        if (self->cmd_active_since_[i] < 0) {
+          self->cmd_active_since_[i] = now;
+        }
+        if (measured_trustworthy) {
+          self->motor_is_responding_[i] = true;
+        } else if (now - self->cmd_active_since_[i] >= self->response_check_delay) {
+          self->motor_is_responding_[i] = false;
+        }
+      }
+      lf_set(motor_is_responding[i], self->motor_is_responding_[i]);
+
+      // -- direction-fault state machine + command_velocity_output --
+      float corrected_cmd = cmd_nonzero ? (cmd + sign_f(cmd) * self->last_bias_[i]) : 0.0f;
+      bool direction_mismatch = measured_trustworthy && (sign_f(measured) != sign_f(cmd));
+      float output_value;
+      bool fault_flag;
+
+      if (!self->safety_checks_enabled) {
+        // Kill switch on -- collapse to plain bias-corrected pass-through,
+        // same as this reactor's pre-safety-check behavior, and reset the
+        // state machine so re-enabling doesn't resume mid-HOLDING/WATCHING/
+        // BLOCKED against a stale mismatch.
+        self->dir_fault_state_[i] = DIR_FAULT_OK;
+        output_value = corrected_cmd;
+        fault_flag = false;
+      } else if (!cmd_nonzero) {
+        self->dir_fault_state_[i] = DIR_FAULT_OK;
+        output_value = 0.0f;
+        fault_flag = false;
+      } else {
+        switch (self->dir_fault_state_[i]) {
+          case DIR_FAULT_HOLDING:
+            fault_flag = true;
+            if (now >= self->dir_fault_deadline_[i]) {
+              self->dir_fault_state_[i] = DIR_FAULT_WATCHING;
+              self->dir_fault_deadline_[i] = now + self->direction_fault_watch;
+              output_value = corrected_cmd; // one resend attempt
+            } else {
+              output_value = 0.0f;
+            }
+            break;
+
+          case DIR_FAULT_WATCHING:
+            fault_flag = true;
+            if (direction_mismatch) {
+              // Resend didn't fix it -- block until the command drops to 0.
+              self->dir_fault_state_[i] = DIR_FAULT_BLOCKED;
+              output_value = 0.0f;
+            } else if (now >= self->dir_fault_deadline_[i]) {
+              self->dir_fault_state_[i] = DIR_FAULT_OK;
+              fault_flag = false;
+              output_value = corrected_cmd;
+            } else {
+              output_value = corrected_cmd;
+            }
+            break;
+
+          case DIR_FAULT_BLOCKED:
+            fault_flag = true;
+            output_value = 0.0f;
+            break;
+
+          case DIR_FAULT_OK:
+          default:
+            if (direction_mismatch) {
+              self->dir_fault_state_[i] = DIR_FAULT_HOLDING;
+              self->dir_fault_deadline_[i] = now + self->direction_fault_hold;
+              output_value = 0.0f;
+              fault_flag = true;
+            } else {
+              output_value = corrected_cmd;
+              fault_flag = false;
+            }
+            break;
+        }
       }
 
-      lf_set(command_velocity_output[i], cmd + sign_f(cmd) * self->last_bias_[i]);
+      lf_set(command_velocity_output[i], output_value);
+      lf_set(motor_direction_fault[i], fault_flag);
     }
   =}
 }

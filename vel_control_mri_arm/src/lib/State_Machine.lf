@@ -140,10 +140,12 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     =}
 
     reaction(startup) -> enable_qdec, reset_qdec{=
+      printf("[STARTUP] StateMachine: entering startup\r\n");
       lf_set(enable_qdec, true); // turn the encoders on right at the start
       lf_set(reset_qdec, true);
 
       printf("State Machine has finished startup!\n");
+      printf("[STARTUP] StateMachine: exiting startup\r\n");
       =}
     
     reaction(slow_status_tick) {=

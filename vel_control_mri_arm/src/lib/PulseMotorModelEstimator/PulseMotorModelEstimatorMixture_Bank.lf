@@ -225,6 +225,7 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   timer heartbeat(0, 5 s)
 
   reaction(startup) {=
+    printf("[STARTUP] PulseMotorModelEstimatorMixture_Bank: entering startup\r\n");
     self->model_ = INITIAL_MOTOR_MODEL;
     PulseMotorModelSampleStats_Init(&self->epoch_stats_);
     PulseMotorModelSampleStats_Init(&self->pooled_observation_stats_);
@@ -235,6 +236,7 @@ reactor PulseMotorModelEstimatorMixture_Bank(
     PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_4_);
     PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_5_);
     PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_6_);
+    printf("[STARTUP] PulseMotorModelEstimatorMixture_Bank: exiting startup\r\n");
   =}
 
   reaction(heartbeat) {=

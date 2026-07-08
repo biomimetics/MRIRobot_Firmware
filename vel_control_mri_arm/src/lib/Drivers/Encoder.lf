@@ -474,6 +474,7 @@ reactor QDEC(sample_period: time = 5 ms){
   =}
 
   reaction(startup) {=
+    printf("[STARTUP] QDEC: entering startup\r\n");
     MX_DMA_Init();
     MX_UART3_Init();
     MX_GPIO_Init();
@@ -503,6 +504,7 @@ reactor QDEC(sample_period: time = 5 ms){
 
     reference_tick = HAL_GetTick(); // gives miliseconds since last reboot
     printf("QDEC has finished startup!\n");
+    printf("[STARTUP] QDEC: exiting startup\r\n");
   =}
 
   // Wall-clock heartbeat confirming FPGA packets are actually arriving --

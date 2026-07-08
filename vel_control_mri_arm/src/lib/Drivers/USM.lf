@@ -284,6 +284,7 @@ reactor USM {
 
 
   reaction(startup) {=
+    printf("[STARTUP] USM: entering startup\r\n");
     // for debugging
     reference_tick_usm = HAL_GetTick();
 
@@ -310,6 +311,7 @@ reactor USM {
     set_direction_pins();
 
     printf("USM has finished startup!\n");
+    printf("[STARTUP] USM: exiting startup\r\n");
   =}
 
   reaction(force_disable_motor_pins) {=

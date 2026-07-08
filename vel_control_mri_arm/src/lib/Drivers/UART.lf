@@ -108,9 +108,10 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
     =}
 
     reaction (startup){=
-        
+        printf("[STARTUP] UART_Handler: entering startup\r\n");
         receiveToIdle_DMA_Init();
         printf("UART has finished startup!\n");
+        printf("[STARTUP] UART_Handler: exiting startup\r\n");
     =}
 
     reaction (state_msg){=

@@ -125,20 +125,21 @@ reactor MotorCommandBiasEstimator(
   // purpose, same "backstop not a tuning knob" reasoning as
   // pulse_motor_model.h's PULSE_MODEL_* bounds. TODO: tighten once real
   // per-joint bias magnitudes are characterized on hardware.
-  max_bias_magnitude: float = 1.0,
+  max_bias_magnitude: float = 0.500,
   // Whole-sample outlier trim on the raw (commanded_velocity - velocity)
   // bias sample, same role/shape as
   // PulseMotorModelEstimatorMixture_Bank.lf's outlier_sigma/
   // outlier_min_samples -- inert (SampleStats_IsOutlier always false) until
   // bias_stats_ has outlier_min_samples, so an instance's first few samples
   // are never rejected against an untrustworthy mean.
-  outlier_sigma: float = 4.0,
+  outlier_sigma: float = 2.0,
   outlier_min_samples: int = 10,
   // Wall-clock cadence for reaction(heartbeat)'s status print -- slow on
   // purpose (this is a background health check, not per-sample tracing;
   // PRINT_MCB_DEBUG above is for that), same 5 s default as
   // PulseMotorModelEstimatorMixture_Bank.lf's own heartbeat.
-  heartbeat_period: time = 5 s
+  heartbeat_period: time = 5 s,
+  update_bias: bool = true
 ) {
   // The command actually sent to the USM for this joint --
   // Small_DeltaP_Pulse_Controller.lf's command_velocity_output, which
@@ -209,6 +210,7 @@ reactor MotorCommandBiasEstimator(
   timer heartbeat(0, heartbeat_period)
 
   reaction(startup) -> bias_output {=
+    printf("[STARTUP] MotorCommandBiasEstimator[%d]: entering startup\r\n", self->bank_index);
     self->model_ = INITIAL_MOTOR_MODEL;
     SampleStats_Init(&self->bias_stats_);
 
@@ -219,6 +221,7 @@ reactor MotorCommandBiasEstimator(
     // there via step_alpha/max_step_per_update.
     self->smoothed_bias_ = motor_configs[self->bank_index]->command_bias;
     lf_set(bias_output, self->smoothed_bias_);
+    printf("[STARTUP] MotorCommandBiasEstimator[%d]: exiting startup\r\n", self->bank_index);
   =}
 
   // Thin cache-only reactions, declared/reacted-to before velocity_input's
@@ -289,7 +292,11 @@ reactor MotorCommandBiasEstimator(
     } else if (step < -self->max_step_per_update) {
       step = -self->max_step_per_update;
     }
-    self->smoothed_bias_ += step;
+
+    // actually handles the update
+    if (self->update_bias){
+      self->smoothed_bias_ += step;
+    }
 
     if (self->smoothed_bias_ > self->max_bias_magnitude) {
       self->smoothed_bias_ = self->max_bias_magnitude;
@@ -298,7 +305,10 @@ reactor MotorCommandBiasEstimator(
     }
 
     self->updates_++;
-    lf_set(bias_output, self->smoothed_bias_);
+
+    
+      lf_set(bias_output, self->smoothed_bias_);
+
   =}
 
   reaction(heartbeat) {=
