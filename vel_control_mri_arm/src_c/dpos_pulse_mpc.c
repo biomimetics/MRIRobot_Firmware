@@ -90,7 +90,7 @@ float DposPulseMPC_EvaluateLookahead(const DposPulseMPC *c, PulseCommand pulse, 
 
 PulseCommand DposPulseMPC_PlanBestPulse(const DposPulseMPC *c, float remainingError, int depth) {
   float dir = sign_f(remainingError);
-  float speed = c->model.gain * c->model.V_min;
+  float speed = c->model.gain * c->model.V_min_cmd;
   // Naive point estimate for the run_duration that would zero remainingError
   // in expectation (ignoring noise) -- grid center, planning doc §7 item 3.
   float naive_duration = fabsf(remainingError) / speed;
@@ -153,7 +153,7 @@ void DposPulseMPC_Update(DposPulseMPC *c, float desiredVelocity, float remaining
   // pass-through/small-velocity mode decision below and the RUNNING
   // pass-through-recovery early-exit. Updated unconditionally, every call,
   // regardless of which mode is currently active -- otherwise the STOPPED
-  // branch below could never detect a rise back above V_min while
+  // branch below could never detect a rise back above V_min_cmd while
   // small-velocity mode was engaged (same reasoning as PulseMPC_Update).
   c->filteredVelocityMagnitude =
       c->filterAlpha * fabsf(desiredVelocity) + (1.0f - c->filterAlpha) * c->filteredVelocityMagnitude;
@@ -170,7 +170,7 @@ void DposPulseMPC_Update(DposPulseMPC *c, float desiredVelocity, float remaining
   // FSM.
   bool stop_early = false;
   if (c->pulseState.state == MOTOR_RUNNING) {
-    if (c->filteredVelocityMagnitude >= c->model.V_min) {
+    if (c->filteredVelocityMagnitude >= c->model.V_min_cmd) {
       // 1. Demand has clearly moved back into pass-through range -- stop so
       // control can return to MOTOR_STOPPED and hand off as soon as
       // possible, same reasoning as PulseMPC_Update's equivalent check.
@@ -198,10 +198,10 @@ void DposPulseMPC_Update(DposPulseMPC *c, float desiredVelocity, float remaining
     // the small-velocity floor gate -- see the note above for why this
     // can't be a separate early-return at the top of the function. Engages
     // ordinary continuous velocity control whenever EITHER the filtered
-    // velocity is already at/above V_min OR the remaining gap is still too
+    // velocity is already at/above V_min_cmd OR the remaining gap is still too
     // large to be worth closing via pulsing (Small_DeltaP_Controller_Plan.md
     // §2.3) -- small-velocity mode requires BOTH conditions to fail.
-    if (c->filteredVelocityMagnitude >= c->model.V_min || fabsf(remainingError) > c->engagementGapThreshold) {
+    if (c->filteredVelocityMagnitude >= c->model.V_min_cmd || fabsf(remainingError) > c->engagementGapThreshold) {
       c->passThrough = true;
       c->pulseState.commandVelocity = desiredVelocity;
       return;

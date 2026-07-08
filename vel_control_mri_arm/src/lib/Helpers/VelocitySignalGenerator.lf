@@ -6,7 +6,7 @@ preamble {=
 
 // Generates a slow triangle wave: 0 -> +amplitude -> 0 -> -amplitude -> 0,
 // looping every cycle_period. Default amplitude is 40 deg/s (well above the
-// default V_min ~17 deg/s), so the trajectory spends most of its time in
+// default V_min_cmd ~17 deg/s), so the trajectory spends most of its time in
 // pass-through mode and dips into small-velocity bang-bang mode near each
 // zero-crossing -- exercising both modes and the transitions between them.
 //

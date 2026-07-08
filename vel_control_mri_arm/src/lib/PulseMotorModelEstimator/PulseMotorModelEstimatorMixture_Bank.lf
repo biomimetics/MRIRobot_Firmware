@@ -1,0 +1,190 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
+    "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/stats.h", "../../../src_c/stats.c"
+  ],
+  cmake-include: [
+    "../../../src_c/pulse_motor_model_cmake.cmake",
+    "../../../src_c/gaussian_motion_cmake.cmake",
+    "../../../src_c/stats_cmake.cmake"
+  ]
+}
+
+import PulseMotorModelEstimator from "PulseMotorModelEstimator.lf"
+
+// Top-level preamble so PulseMotorModel/MotorState are visible where the
+// port declarations below reference them -- same reasoning as
+// Small_DeltaP_Pulse_Controller_Bank.lf's own top-level preamble.
+preamble {=
+  #include "pulse_motor_model.h"
+  #include <stdio.h>
+=}
+
+// 7-dof wrapper that sits between EncoderStateEstimator/State_Machine and
+// Small_DeltaP_Pulse_Controller_Bank, routing each joint's position/
+// velocity/commanded-velocity/motor-state signals to a bank of
+// single-channel PulseMotorModelEstimator instances -- same instantiation
+// split as Small_DeltaP_Pulse_Controller_Bank.lf, but NOT the same
+// per-joint-passthrough wiring: the big assumption behind this reactor is
+// that all 7 joints are fundamentally the same physical motor/gearbox, so
+// rather than handing back 7 independent per-joint PulseMotorModels, this
+// reactor pools every joint's residual_output (see that port's comment on
+// PulseMotorModelEstimator.lf) into a single shared/fused belief, via
+// PulseMotorModelSampleStats (pulse_motor_model.h) -- more, more-diverse
+// pulse observations per unit time than any one joint could supply on its
+// own. Nothing here turns the pooled stats into an updated PulseMotorModel
+// yet (see reaction(estimators.residual_output) below) -- this reactor only
+// accumulates them; motor_model_output is declared but no reaction ever
+// sets it.
+reactor PulseMotorModelEstimatorMixture_Bank {
+  input[7] position_input: float
+  input[7] velocity_input: float
+  input[7] commanded_velocity_input: float
+  input[7] motor_state_input: MotorState
+  input[7] planned_pulse_input: PulseCommand
+
+  output[7] motor_model_output: PulseMotorModel
+
+  // Running stats over every joint's residual_output, pooled together --
+  // per the reactor-level comment above, every joint's residual is raw
+  // material for one shared/fused belief rather than 7 independent ones.
+  state residual_stats_: PulseMotorModelSampleStats
+
+  // Per-joint copy of the same running stats, kept purely for the
+  // diagnostic printout below -- NOT used for anything the pooling/fusion
+  // logic itself does (that's still all residual_stats_ above, per the
+  // "same physical motor" assumption). Lets us watch for one joint being a
+  // persistent outlier relative to the pooled belief, which residual_stats_
+  // alone would hide.
+  //
+  // Individually-named states rather than a PulseMotorModelSampleStats[7]
+  // array: unlike this codebase's existing float[7]/bool[7] state arrays
+  // (always given an explicit {0.0, ...} initializer), a 7-element array of
+  // this much larger nested struct (6 SampleStats members each) came out
+  // corrupted on hardware -- SampleStats_Count on some joints read back
+  // flash-address-range garbage (e.g. 0x08007fb5) instead of a real count.
+  // Individual named states are the same pattern proven to work for single
+  // (non-array) struct states elsewhere (e.g. model_: PulseMotorModel in
+  // PulseMotorModelEstimator.lf) -- reaction(estimators.residual_output)
+  // below builds a local pointer array from these to index by joint.
+  state per_joint_residual_stats_0_: PulseMotorModelSampleStats
+  state per_joint_residual_stats_1_: PulseMotorModelSampleStats
+  state per_joint_residual_stats_2_: PulseMotorModelSampleStats
+  state per_joint_residual_stats_3_: PulseMotorModelSampleStats
+  state per_joint_residual_stats_4_: PulseMotorModelSampleStats
+  state per_joint_residual_stats_5_: PulseMotorModelSampleStats
+  state per_joint_residual_stats_6_: PulseMotorModelSampleStats
+
+  // Counts every residual folded into residual_stats_ above (across all
+  // joints, not per-joint) -- purely so the diagnostic printf below can
+  // throttle itself to every 10th update instead of spamming a line per
+  // pulse.
+  state update_count_: int = 0
+
+  estimators = new[7] PulseMotorModelEstimator()
+
+  position_input -> estimators.position_input
+  velocity_input -> estimators.velocity_input
+  commanded_velocity_input -> estimators.commanded_velocity_input
+  motor_state_input -> estimators.motor_state_input
+  planned_pulse_input -> estimators.planned_pulse_input
+
+  // Diagnostic only -- see reaction(heartbeat) below. Independent of the
+  // every-10th-update printf in reaction(estimators.residual_output): this
+  // one fires on a wall-clock cadence regardless of how many (if any)
+  // residuals have actually landed, so it's useful for confirming the
+  // pipeline is alive even when samples are slow/not arriving at all.
+  timer heartbeat(0, 5 s)
+
+  reaction(startup) {=
+    PulseMotorModelSampleStats_Init(&self->residual_stats_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_0_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_1_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_2_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_3_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_4_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_5_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_6_);
+  =}
+
+  reaction(heartbeat) {=
+    printf(
+        "PulseMotorModelEstimatorMixture heartbeat: residual_stats_ n=%lu\r\n",
+        (unsigned long) SampleStats_Count(&self->residual_stats_.V_real_mean));
+  =}
+
+  // Folds every joint's freshly-arrived residual_output into
+  // residual_stats_ above -- presence on this multiport trigger *is* "a new
+  // residual just landed for this joint," same convention as the port
+  // itself (see its comment on PulseMotorModelEstimator.lf). Nothing yet
+  // reads residual_stats_ back out; the actual fusion/model-update logic is
+  // a later step (see the reactor-level comment above).
+  reaction(estimators.residual_output) {=
+    // Local pointer array, built from the 7 individually-declared states
+    // above -- see per_joint_residual_stats_0_'s comment for why this isn't
+    // itself a PulseMotorModelSampleStats[7] state array.
+    PulseMotorModelSampleStats *per_joint[7] = {
+      &self->per_joint_residual_stats_0_,
+      &self->per_joint_residual_stats_1_,
+      &self->per_joint_residual_stats_2_,
+      &self->per_joint_residual_stats_3_,
+      &self->per_joint_residual_stats_4_,
+      &self->per_joint_residual_stats_5_,
+      &self->per_joint_residual_stats_6_,
+    };
+
+    for (int i = 0; i < estimators_width; i++) {
+      if (estimators[i].residual_output->is_present) {
+        PulseMotorModelSampleStats_Add(&self->residual_stats_, estimators[i].residual_output->value);
+        PulseMotorModelSampleStats_Add(per_joint[i], estimators[i].residual_output->value);
+        self->update_count_++;
+
+        // Diagnostic only, every 10th pooled update -- milli-scaled ints
+        // rather than %f, same convention as
+        // small_deltap_pulse_controller.c's SmallDeltaPPulse_PrintDebugInfo
+        // (this platform's printf doesn't reliably support floats). Prints
+        // the pooled stats, then every joint's own copy right underneath in
+        // the same block, so a joint that's a persistent outlier relative
+        // to the pooled belief (which might be masking a real per-joint
+        // issue) is visible at a glance instead of buried across separate
+        // log lines.
+        if (self->update_count_ % 10 == 0) {
+          // V_real.variance omitted -- always 0 for now (see that field's
+          // comment in pulse_motor_model.h), so it wouldn't say anything a
+          // reader couldn't already assume.
+          printf(
+              "PulseMotorModelEstimatorMixture residual_stats_ [n=%lu]: "
+              "V_real.mean=%d+-%d T_start=%d+-%d T_stop=%d+-%d (milli-units)\r\n",
+              (unsigned long) SampleStats_Count(&self->residual_stats_.V_real_mean),
+              (int) (SampleStats_Mean(&self->residual_stats_.V_real_mean) * 1000.0f),
+              (int) (SampleStats_StandardDeviation(&self->residual_stats_.V_real_mean) * 1000.0f),
+              (int) (SampleStats_Mean(&self->residual_stats_.T_start) * 1000.0f),
+              (int) (SampleStats_StandardDeviation(&self->residual_stats_.T_start) * 1000.0f),
+              (int) (SampleStats_Mean(&self->residual_stats_.T_stop) * 1000.0f),
+              (int) (SampleStats_StandardDeviation(&self->residual_stats_.T_stop) * 1000.0f));
+
+          for (int j = 0; j < 7; j++) {
+            PulseMotorModelSampleStats *joint_stats = per_joint[j];
+            printf(
+                "  joint[%d] residual_stats_ [n=%lu]: "
+                "V_real.mean=%d+-%d T_start=%d+-%d T_stop=%d+-%d (milli-units)\r\n",
+                j,
+                (unsigned long) SampleStats_Count(&joint_stats->V_real_mean),
+                (int) (SampleStats_Mean(&joint_stats->V_real_mean) * 1000.0f),
+                (int) (SampleStats_StandardDeviation(&joint_stats->V_real_mean) * 1000.0f),
+                (int) (SampleStats_Mean(&joint_stats->T_start) * 1000.0f),
+                (int) (SampleStats_StandardDeviation(&joint_stats->T_start) * 1000.0f),
+                (int) (SampleStats_Mean(&joint_stats->T_stop) * 1000.0f),
+                (int) (SampleStats_StandardDeviation(&joint_stats->T_stop) * 1000.0f));
+          }
+        }
+      }
+    }
+  =}
+}

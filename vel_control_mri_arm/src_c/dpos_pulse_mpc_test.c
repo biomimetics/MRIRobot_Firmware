@@ -16,7 +16,7 @@
 
 static DposPulseMPC MakeController(void) {
   DposPulseMPC c = {0};
-  c.model.V_min = 0.2f;
+  c.model.V_min_cmd = 0.2f;
   c.model.gain = 0.9f;
   c.model.T_start = 0.025f;
   c.model.T_stop = 0.001f;

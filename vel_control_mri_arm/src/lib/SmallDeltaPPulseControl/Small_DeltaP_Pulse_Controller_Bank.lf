@@ -7,11 +7,13 @@ target C {
   files: [
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/stats.h", "../../../src_c/stats.c",
     "../../../src_c/small_deltap_pulse_controller.h", "../../../src_c/small_deltap_pulse_controller.c"
   ],
   cmake-include: [
     "../../../src_c/pulse_motor_model_cmake.cmake",
     "../../../src_c/gaussian_motion_cmake.cmake",
+    "../../../src_c/stats_cmake.cmake",
     "../../../src_c/small_deltap_pulse_controller_cmake.cmake"
   ]
 }
@@ -49,6 +51,10 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   // straight out from each controller instance -- see that output's
   // comment on Small_DeltaP_Pulse_Controller.lf.
   output[7] motor_state_output: MotorState
+  // Per-joint currently-committed PulseCommand, routed straight out from
+  // each controller instance -- see that output's comment on
+  // Small_DeltaP_Pulse_Controller.lf.
+  output[7] planned_pulse_output: PulseCommand
 
   state last_print_time_: time = 0
 
@@ -60,6 +66,7 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
 
   controllers.command_velocity_output -> command_velocity_output
   controllers.motor_state_output -> motor_state_output
+  controllers.planned_pulse_output -> planned_pulse_output
 
   // Prints the status of all 7 Small_DeltaP_Pulse_Controller instances
   // together, at print_period cadence, when PRINT_DPULSE_DEBUG is enabled

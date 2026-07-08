@@ -4,7 +4,7 @@
 
 void PulseMPC_GetDebugInfo(const PulseMPC *c, float desiredVelocity, SVCDebugInfo *out) {
   out->state = c->state;
-  out->passThrough = (c->state == MOTOR_STOPPED) && (c->filteredVelocityMagnitude >= c->model.V_min);
+  out->passThrough = (c->state == MOTOR_STOPPED) && (c->filteredVelocityMagnitude >= c->model.V_min_cmd);
   out->dir = c->dir;
   out->desiredVelocity = desiredVelocity;
   out->commandVelocity = c->commandVelocity;
@@ -47,17 +47,17 @@ float PulseMPC_EvaluateCost(const PulseMPC *c, MpcAction action, float desiredVe
       float dir_candidate = sign_f(desiredVelocity);
       float horizon_remaining = c->H - c->model.T_start;
       if (horizon_remaining < 0.0f) horizon_remaining = 0.0f;
-      float predicted = c->motionDebt - dir_candidate * c->model.gain * c->model.V_min * horizon_remaining;
+      float predicted = c->motionDebt - dir_candidate * c->model.gain * c->model.V_min_cmd * horizon_remaining;
       return c->W_debt * fabsf(predicted) + c->W_switch;
     }
 
     case ACTION_CONTINUE: {
-      float predicted = c->motionDebt - c->dir * c->model.gain * c->model.V_min * c->H;
+      float predicted = c->motionDebt - c->dir * c->model.gain * c->model.V_min_cmd * c->H;
       return c->W_debt * fabsf(predicted) + c->W_pulse * c->pulseTimer;
     }
 
     case ACTION_STOP: {
-      float D_stop = c->model.V_min * c->model.gain * c->model.T_stop;
+      float D_stop = c->model.V_min_cmd * c->model.gain * c->model.T_stop;
       float predicted = c->motionDebt - c->dir * D_stop;
       return c->W_debt * fabsf(predicted) + c->W_switch;
     }
@@ -76,11 +76,11 @@ void PulseMPC_ApplyAction(PulseMPC *c, MpcAction action, float desiredVelocity) 
       c->stateTimer = 0.0f;
       c->pulseTimer = 0.0f;
       c->dir = sign_f(desiredVelocity);
-      c->commandVelocity = c->dir * c->model.V_min;
+      c->commandVelocity = c->dir * c->model.V_min_cmd;
       break;
 
     case ACTION_CONTINUE:
-      c->commandVelocity = c->dir * c->model.V_min;
+      c->commandVelocity = c->dir * c->model.V_min_cmd;
       break;
 
     case ACTION_STOP:
@@ -103,12 +103,12 @@ void PulseMPC_ValidateWeights(PulseMPC *c) {
 
   float horizon_remaining = c->H - c->model.T_start;
   if (horizon_remaining < 0.0f) horizon_remaining = 0.0f;
-  float max_w_switch = c->W_debt * c->model.gain * c->model.V_min * horizon_remaining;
+  float max_w_switch = c->W_debt * c->model.gain * c->model.V_min_cmd * horizon_remaining;
 
   if (c->W_switch >= max_w_switch) {
     float capped = 0.95f * max_w_switch;
     printf(
-        "WARNING: PulseMPC W_switch (%d milli) >= W_debt*gain*V_min*(H-T_start) (%d milli) -- "
+        "WARNING: PulseMPC W_switch (%d milli) >= W_debt*gain*V_min_cmd*(H-T_start) (%d milli) -- "
         "START would never beat IDLE once motionDebt is large, so the motor would never move "
         "no matter how much error accumulates. Capping W_switch to %d milli (95%% of margin).\r\n",
         (int) (c->W_switch * 1000.0f), (int) (max_w_switch * 1000.0f), (int) (capped * 1000.0f));
@@ -127,7 +127,7 @@ void PulseMPC_Update(PulseMPC *c, float desiredVelocity, float dt) {
       c->filterAlpha * desiredVelocity + (1.0f - c->filterAlpha) * c->filteredVelocity;
 
   float actualVelocityEstimate =
-      (c->state == MOTOR_RUNNING) ? (c->dir * c->model.gain * c->model.V_min) : 0.0f;
+      (c->state == MOTOR_RUNNING) ? (c->dir * c->model.gain * c->model.V_min_cmd) : 0.0f;
   // Deadband applies only to the desired side of the debt accumulation --
   // command noise/jitter below this magnitude shouldn't slowly build into a
   // debt that eventually forces a spurious pulse. actualVelocityEstimate
@@ -174,7 +174,7 @@ void PulseMPC_Update(PulseMPC *c, float desiredVelocity, float dt) {
     // the normal IDLE-vs-START cost comparison -- see the note above the
     // switch statement for why this can't be a separate early-return at
     // the top of the function.
-    if (c->filteredVelocityMagnitude >= c->model.V_min) {
+    if (c->filteredVelocityMagnitude >= c->model.V_min_cmd) {
       c->commandVelocity = desiredVelocity;
       c->motionDebt = 0.0f; // don't carry stale debt into the next small-velocity episode
       return;
@@ -198,16 +198,16 @@ void PulseMPC_Update(PulseMPC *c, float desiredVelocity, float dt) {
     // this pulse should end" cases where waiting for motionDebt to
     // accumulate enough to tip the cost comparison would just mean running
     // pointlessly (or wrongly) for longer than necessary.
-    if (c->filteredVelocityMagnitude >= c->model.V_min) {
+    if (c->filteredVelocityMagnitude >= c->model.V_min_cmd) {
       // 1. Demand has clearly moved back into normal/pass-through range --
       // stop so control can return to MOTOR_STOPPED and hand off to
       // pass-through as soon as possible. Without this, J(CONTINUE) credits
-      // a full gain*V_min*H of assumed debt repayment every tick, which
+      // a full gain*V_min_cmd*H of assumed debt repayment every tick, which
       // stays cheaper than J(STOP) indefinitely once motionDebt is large,
-      // so the controller could otherwise stay stuck bang-banging at V_min
+      // so the controller could otherwise stay stuck bang-banging at V_min_cmd
       // long after it should have handed off to pass-through.
       PulseMPC_ApplyAction(c, ACTION_STOP, desiredVelocity);
-    } else if (fabsf(c->filteredVelocity) < 0.1f * c->model.V_min) {
+    } else if (fabsf(c->filteredVelocity) < 0.1f * c->model.V_min_cmd) {
       // 2. Commanded velocity has dropped to (near) zero -- no reason to
       // keep pulsing in the old direction. motionDebt is reset here for
       // the same reason as case 3 below: it was accumulated relative to a
@@ -217,7 +217,7 @@ void PulseMPC_Update(PulseMPC *c, float desiredVelocity, float dt) {
       PulseMPC_ApplyAction(c, ACTION_STOP, desiredVelocity);
       c->motionDebt = 0.0f;
     } else if (sign_f(c->filteredVelocity) != c->dir) {
-      // 3. Demand has reversed direction while still below V_min -- stop
+      // 3. Demand has reversed direction while still below V_min_cmd -- stop
       // so the next START can re-latch dir correctly, rather than
       // continuing to run (and accumulate debt) in the wrong direction
       // until the cost comparison eventually catches up.
@@ -225,7 +225,7 @@ void PulseMPC_Update(PulseMPC *c, float desiredVelocity, float dt) {
       // motionDebt MUST also be reset here, not just the state: it was
       // accumulated while running in the OLD direction, so it carries the
       // OLD direction's sign. If left alone, the next START's cost
-      // (motionDebt - dir_candidate*gain*V_min*horizon) would combine a
+      // (motionDebt - dir_candidate*gain*V_min_cmd*horizon) would combine a
       // stale, wrong-signed debt with the new (correct) dir_candidate --
       // subtracting a term of the opposite sign from debt INCREASES
       // |predicted| instead of reducing it, making START in the new

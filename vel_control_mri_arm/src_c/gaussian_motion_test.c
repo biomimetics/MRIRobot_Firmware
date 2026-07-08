@@ -4,7 +4,7 @@
 // directly:
 //
 //   cd vel_control_mri_arm/src_c
-//   gcc -o /tmp/gaussian_motion_test gaussian_motion_test.c gaussian_motion.c -lm
+//   gcc -o /tmp/gaussian_motion_test gaussian_motion_test.c gaussian_motion.c stats.c -lm
 //   /tmp/gaussian_motion_test
 #include "gaussian_motion.h"
 #include <math.h>
@@ -21,13 +21,13 @@ int main(void) {
   {
     GaussianRV a = {.mean = 2.0f, .variance = 1.0f};
     GaussianRV b = {.mean = 3.0f, .variance = 4.0f};
-    GaussianRV sum = GaussianMotion_Add(a, b);
+    GaussianRV sum = GaussianRV_Add(a, b);
     if (fabsf(sum.mean - 5.0f) > 1e-6f || fabsf(sum.variance - 5.0f) > 1e-6f) {
       printf("FAIL: Add gave mean=%.6f variance=%.6f, expected 5.0/5.0\n", (double) sum.mean, (double) sum.variance);
       ok = 0;
     }
 
-    GaussianRV scaled = GaussianMotion_Scale(a, 3.0f);
+    GaussianRV scaled = GaussianRV_Scale(a, 3.0f);
     if (fabsf(scaled.mean - 6.0f) > 1e-6f || fabsf(scaled.variance - 9.0f) > 1e-6f) {
       printf("FAIL: Scale gave mean=%.6f variance=%.6f, expected 6.0/9.0\n", (double) scaled.mean, (double) scaled.variance);
       ok = 0;
@@ -55,28 +55,28 @@ int main(void) {
   // test would use -- float epsilon, not the ~1e-9 the underlying rational
   // approximation could achieve in exact arithmetic.
   {
-    if (fabsf(GaussianMotion_Cdf(velocity.mean, velocity) - 0.5f) > 1e-6f) {
-      printf("FAIL: Cdf at mean expected 0.5, got %.9f\n", (double) GaussianMotion_Cdf(velocity.mean, velocity));
+    if (fabsf(GaussianRV_Cdf(velocity.mean, velocity) - 0.5f) > 1e-6f) {
+      printf("FAIL: Cdf at mean expected 0.5, got %.9f\n", (double) GaussianRV_Cdf(velocity.mean, velocity));
       ok = 0;
     }
 
     float x = 5.3f;
-    float cdf_sum = GaussianMotion_Cdf(x, velocity) + GaussianMotion_Cdf_Tail(x, velocity);
+    float cdf_sum = GaussianRV_Cdf(x, velocity) + GaussianRV_Cdf_Tail(x, velocity);
     if (fabsf(cdf_sum - 1.0f) > 1e-6f) {
       printf("FAIL: Cdf(x) + Cdf_Tail(x) = %.9f, expected 1.0\n", (double) cdf_sum);
       ok = 0;
     }
 
     float p = 0.9f;
-    float quantile = GaussianMotion_InvCdf(p, velocity);
-    float roundtrip = GaussianMotion_Cdf(quantile, velocity);
+    float quantile = GaussianRV_InvCdf(p, velocity);
+    float roundtrip = GaussianRV_Cdf(quantile, velocity);
     if (fabsf(roundtrip - p) > 1e-4f) {
       printf("FAIL: Cdf(InvCdf(%.2f)) = %.9f, expected %.2f\n", (double) p, (double) roundtrip, (double) p);
       ok = 0;
     }
 
-    float tail_quantile = GaussianMotion_InvCdf_Tail(p, velocity);
-    float tail_roundtrip = GaussianMotion_Cdf_Tail(tail_quantile, velocity);
+    float tail_quantile = GaussianRV_InvCdf_Tail(p, velocity);
+    float tail_roundtrip = GaussianRV_Cdf_Tail(tail_quantile, velocity);
     if (fabsf(tail_roundtrip - p) > 1e-4f) {
       printf("FAIL: Cdf_Tail(InvCdf_Tail(%.2f)) = %.9f, expected %.2f\n", (double) p, (double) tail_roundtrip, (double) p);
       ok = 0;

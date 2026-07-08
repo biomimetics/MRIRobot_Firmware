@@ -1,0 +1,51 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
+    "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/stats.h", "../../../src_c/stats.c"
+  ],
+  cmake-include: [
+    "../../../src_c/pulse_motor_model_cmake.cmake",
+    "../../../src_c/gaussian_motion_cmake.cmake",
+    "../../../src_c/stats_cmake.cmake"
+  ]
+}
+
+import PulseMotorModelEstimator from "PulseMotorModelEstimator.lf"
+
+// Top-level preamble so PulseMotorModel/MotorState are visible where the
+// port declarations below reference them -- same reasoning as
+// Small_DeltaP_Pulse_Controller_Bank.lf's own top-level preamble.
+preamble {=
+  #include "pulse_motor_model.h"
+=}
+
+// 7-dof wrapper that sits between EncoderStateEstimator/State_Machine and
+// Small_DeltaP_Pulse_Controller_Bank, routing each joint's position/
+// velocity/commanded-velocity/motor-state signals to a bank of
+// single-channel PulseMotorModelEstimator instances -- same split as
+// Small_DeltaP_Pulse_Controller_Bank.lf.
+reactor PulseMotorModelEstimator_Bank {
+  input[7] position_input: float
+  input[7] velocity_input: float
+  input[7] commanded_velocity_input: float
+  input[7] motor_state_input: MotorState
+  input[7] planned_pulse_input: PulseCommand
+
+  output[7] motor_model_output: PulseMotorModel
+
+  estimators = new[7] PulseMotorModelEstimator()
+
+  position_input -> estimators.position_input
+  velocity_input -> estimators.velocity_input
+  commanded_velocity_input -> estimators.commanded_velocity_input
+  motor_state_input -> estimators.motor_state_input
+  planned_pulse_input -> estimators.planned_pulse_input
+
+  estimators.motor_model_output -> motor_model_output
+}

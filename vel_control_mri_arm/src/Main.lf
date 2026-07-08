@@ -19,7 +19,7 @@ import StateMachine from "lib/State_Machine.lf"
 import UART_Handler from "lib/Drivers/UART.lf"
 import Small_DeltaP_Pulse_Controller_Bank from "lib/SmallDeltaPPulseControl/Small_DeltaP_Pulse_Controller_Bank.lf"
 import EncoderStateEstimator from "lib/EncoderStateEstimator.lf"
-import PulseMotorModelEstimator from "lib/PulseMotorModelEstimator.lf"
+import PulseMotorModelEstimatorMixture_Bank from "lib/PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf"
 
 // MotorCalibration.lf is a diagnostic reactor for finding the USM/SEA
 // channel <-> physical joint mapping (see that file for usage notes and
@@ -114,9 +114,10 @@ main reactor {
   // Sits inline between qdec and state_machine for USM position/velocity --
   // see EncoderStateEstimator.lf. Currently just echoes its inputs through.
   encoder_state_estimator = new EncoderStateEstimator()
-  // Not yet wired to anything downstream -- see PulseMotorModelEstimator.lf.
+  // Not yet wired to anything downstream -- see
+  // PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
   // Doesn't compute or send anything yet.
-  pulse_motor_model_estimator = new PulseMotorModelEstimator()
+  pulse_motor_model_estimator = new PulseMotorModelEstimatorMixture_Bank()
   // Diagnostic only -- see MotorCalibration.lf for usage notes. Uncomment
   // along with the import above and the wiring below to use it again.
   // motor_calib = new MotorCalibration()
@@ -153,21 +154,24 @@ main reactor {
   deltap_bank.command_velocity_output -> usm.speed
 
   // Commanded velocity also fans out to both estimators above -- see
-  // EncoderStateEstimator.lf/PulseMotorModelEstimator.lf.
+  // EncoderStateEstimator.lf/PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
   state_machine.commanded_motor_velocities -> encoder_state_estimator.commanded_velocity_input
   state_machine.commanded_motor_velocities -> pulse_motor_model_estimator.commanded_velocity_input
   encoder_state_estimator.position_output -> pulse_motor_model_estimator.position_input
   encoder_state_estimator.velocity_output -> pulse_motor_model_estimator.velocity_input
 
   // Closes the loop between the pulse controller bank and its parameter
-  // estimator: deltap_bank's per-joint MotorState tells
-  // pulse_motor_model_estimator when it's safe to attribute encoder motion
-  // to a specific commanded pulse, and pulse_motor_model_estimator's
-  // (currently never-sent) refined PulseMotorModel feeds back into deltap_bank
-  // for more accurate pulse-duration planning -- see
+  // estimator: deltap_bank's per-joint MotorState and currently-committed
+  // PulseCommand tell pulse_motor_model_estimator when it's safe to
+  // attribute encoder motion to a specific commanded pulse and what motion
+  // to expect from it, and pulse_motor_model_estimator's (currently
+  // never-sent) refined PulseMotorModel feeds back into deltap_bank for
+  // more accurate pulse-duration planning -- see
   // Small_DeltaP_Pulse_Controller.lf's motor_model_update_input/
-  // motor_state_output and PulseMotorModelEstimator.lf.
+  // motor_state_output/planned_pulse_output and
+  // PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
   deltap_bank.motor_state_output -> pulse_motor_model_estimator.motor_state_input
+  deltap_bank.planned_pulse_output -> pulse_motor_model_estimator.planned_pulse_input
   pulse_motor_model_estimator.motor_model_output -> deltap_bank.motor_model_update_input
 
   // enable_motor_command goes directly from state_machine to usm, bypassing

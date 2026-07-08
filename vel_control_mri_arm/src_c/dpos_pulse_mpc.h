@@ -49,7 +49,7 @@ typedef struct {
 
   // ---- MPC tuning (see dpos_pulse_mpc_planning.md §7) ----
   // All placeholders pending bench characterization -- same "TODO:
-  // characterize" treatment as model.V_min/gain/etc. Unlike PulseMPC's
+  // characterize" treatment as model.V_min_cmd/gain/etc. Unlike PulseMPC's
   // W_debt/W_switch, there is no coupled inequality between these that can
   // silently deadlock STOPPED->START (see planning doc §7 item 4), so there
   // is no PulseMPC_ValidateWeights analogue here.
@@ -70,7 +70,7 @@ typedef struct {
   // (Small_DeltaP_Controller_Plan.md §2.3): while the remaining gap is still
   // large, ordinary continuous velocity control is trusted to close most of
   // it faster than pulsing would. TODO: characterize -- likely on the order
-  // of a few pulses' worth of travel at V_min.
+  // of a few pulses' worth of travel at V_min_cmd.
   float engagementGapThreshold;
 
   // ---- Controller state ----
@@ -165,7 +165,7 @@ PulseCommand DposPulseMPC_PlanBestPulse(const DposPulseMPC *c, float remainingEr
 // Every call updates filteredVelocityMagnitude regardless of mode. Only at
 // MOTOR_STOPPED is the pass-through vs. small-velocity decision (re-)made:
 // ordinary continuous velocity control is used (commandVelocity =
-// desiredVelocity) unless BOTH filteredVelocityMagnitude < model.V_min AND
+// desiredVelocity) unless BOTH filteredVelocityMagnitude < model.V_min_cmd AND
 // |remainingError| <= engagementGapThreshold (Small_DeltaP_Controller_Plan.md
 // §2.3) -- otherwise small-velocity mode's STOPPED->START gate runs: a
 // direct cost comparison (mirroring PulseMPC_EvaluateCost's ACTION_IDLE vs
@@ -177,7 +177,7 @@ PulseCommand DposPulseMPC_PlanBestPulse(const DposPulseMPC *c, float remainingEr
 // stopping-distance recheck (planning doc's intro note and §6).
 //
 // While RUNNING, this computes a stop_early condition (true if EITHER
-// filteredVelocityMagnitude has climbed back to/above V_min -- demand has
+// filteredVelocityMagnitude has climbed back to/above V_min_cmd -- demand has
 // clearly moved into pass-through range, so stop and hand control back as
 // soon as possible -- OR the freshly-supplied remainingError's sign no
 // longer matches the latched dir -- the target has moved past/reversed

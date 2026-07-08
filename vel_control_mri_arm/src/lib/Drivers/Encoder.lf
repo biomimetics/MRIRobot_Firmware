@@ -57,8 +57,6 @@ reactor QDEC(sample_period: time = 5 ms){
   // SEA velocity, radians/sec -- from the FPGA's own velocity estimate.
   state sea_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
-  state prev_time: time = 0
-
   // timer_states
   state timer_start_: uint32_t = 0
   state timer_elapsed_time_sec_: double = 0.0
@@ -503,7 +501,6 @@ reactor QDEC(sample_period: time = 5 ms){
       self->qdec_convert_sea_to_rad_[i] = 1.0f / (motor_configs[i]->sea_cpr * motor_configs[i]->sea_radius);
     }
 
-    self->prev_time = lf_time_physical(); //lf_time_physical(); //lf_time_physical_elapsed
     reference_tick = HAL_GetTick(); // gives miliseconds since last reboot
     printf("QDEC has finished startup!\n");
   =}

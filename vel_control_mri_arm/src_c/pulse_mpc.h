@@ -78,7 +78,7 @@ typedef struct {
                               // for that purpose only) -- keeps command noise/jitter
                               // near zero from slowly accumulating into a debt that
                               // eventually triggers a spurious pulse. Should stay small
-                              // relative to V_min. See PulseMPC_Update.
+                              // relative to V_min_cmd. See PulseMPC_Update.
 
   // ---- Controller state ----
   MotorState state;
@@ -134,12 +134,12 @@ void PulseMPC_ApplyAction(PulseMPC *c, MpcAction action, float desiredVelocity);
 // Validates (and corrects, with a printed warning) MPC tuning weights that
 // would otherwise make PulseMPC_Update structurally unable to ever start
 // moving, no matter how large motionDebt grows. Call once after setting
-// model.gain/model.V_min/model.T_start, H, W_debt, and W_switch (e.g. from
+// model.gain/model.V_min_cmd/model.T_start, H, W_debt, and W_switch (e.g. from
 // startup), before first use.
 //
 // The controlling inequality (see ACTION_START in PulseMPC_EvaluateCost):
 // once |motionDebt| is large, START only ever beats IDLE if
-//   W_switch < W_debt * gain * V_min * (H - T_start)
+//   W_switch < W_debt * gain * V_min_cmd * (H - T_start)
 // If this doesn't hold, START is permanently more expensive than IDLE no
 // matter how large debt grows -- the motor just sits still forever while
 // debt accumulates without bound (this is exactly the "steady-state error
@@ -170,15 +170,15 @@ void PulseMPC_ValidateWeights(PulseMPC *c);
 //
 // Every call updates a slow EMA filter of |desiredVelocity|
 // (filteredVelocityMagnitude). Only when the controller is at rest
-// (MOTOR_STOPPED) does that filtered estimate get checked against V_min:
-// at/above V_min, ordinary continuous velocity commands are trusted and
+// (MOTOR_STOPPED) does that filtered estimate get checked against V_min_cmd:
+// at/above V_min_cmd, ordinary continuous velocity commands are trusted and
 // passed straight through (commandVelocity = desiredVelocity, motionDebt
 // held at 0 so no stale debt carries into the next small-velocity episode);
-// below V_min, the normal small-velocity FCS-MPC debt accumulation and
+// below V_min_cmd, the normal small-velocity FCS-MPC debt accumulation and
 // action selection engages. Deciding only while MOTOR_STOPPED means an
 // in-progress pulse always finishes cleanly before mode can change, and
 // filtering (rather than a hysteresis band) means a desiredVelocity
-// hovering near V_min doesn't flip modes tick-to-tick -- how much
+// hovering near V_min_cmd doesn't flip modes tick-to-tick -- how much
 // smoothing is controlled by filterAlpha.
 //
 // While RUNNING, two additional debounced early-exits force an immediate

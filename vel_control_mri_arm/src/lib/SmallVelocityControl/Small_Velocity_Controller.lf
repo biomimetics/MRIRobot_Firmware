@@ -16,14 +16,14 @@ target C {
 
 // Single-channel hybrid velocity controller. Sits inside
 // Small_Velocity_Controller_Bank.lf, one instance per joint. For ordinary
-// velocity commands (|desiredVelocity| >= V_min), this passes the command
+// velocity commands (|desiredVelocity| >= V_min_cmd), this passes the command
 // straight through -- these ultrasonic motors are fine at normal speeds.
-// Only once the commanded velocity drops below V_min (~10 deg/s, where
+// Only once the commanded velocity drops below V_min_cmd (~10 deg/s, where
 // these motors behave unpredictably under continuous commands) does it
 // engage an open-loop Finite-Control-Set MPC (FCS-MPC) that bang-bangs the
-// motor between 0 and V_min, using a motion-debt accumulator to track the
+// motor between 0 and V_min_cmd, using a motion-debt accumulator to track the
 // desired average velocity via pulse timing. No encoder feedback is used --
-// the debt update is model-predicted (dir*gain*V_min while running, 0
+// the debt update is model-predicted (dir*gain*V_min_cmd while running, 0
 // otherwise), since encoder signals aren't trusted yet and a higher-level
 // ROS2 process already closes the loop on trajectory/fine-positioning.
 // Adapted from the reference example in fcs_mpc_example.c (kept unmodified
@@ -81,7 +81,7 @@ reactor Small_Velocity_Controller(
   minimumPulseWidth_initial: time = 20 ms, // hysteresis guard before STOP eligible -- TODO: characterize
   W_debt_initial: float = 1.0,          // MPC cost weight -- TODO: characterize
   W_switch_initial: float = 0.05,       // MPC cost weight -- TODO: characterize.
-                                         // Must satisfy W_debt*gain*V_min*(H-T_start) > W_switch
+                                         // Must satisfy W_debt*gain*V_min_cmd*(H-T_start) > W_switch
                                          // or START will never beat IDLE once debt is large,
                                          // regardless of how large debt grows -- see PulseMPC_EvaluateCost's
                                          // ACTION_START case.
@@ -111,7 +111,7 @@ reactor Small_Velocity_Controller(
   timer control_tick(0, control_period)
 
   reaction(startup) {=
-    self->controller_.model.V_min = self->V_min_initial;
+    self->controller_.model.V_min_cmd = self->V_min_initial;
     self->controller_.model.gain = self->gain_initial;
     self->controller_.model.T_start = (float) self->T_start_initial * NS_TO_S;
     self->controller_.model.T_stop = (float) self->T_stop_initial * NS_TO_S;

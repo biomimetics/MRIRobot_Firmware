@@ -1,15 +1,20 @@
 #ifndef GAUSSIAN_MOTION_H
 #define GAUSSIAN_MOTION_H
 
-// 1-D Gaussian uncertainty propagation for a constant-velocity motion model:
-// V ~ N(mean, variance), held constant over the interval of interest.
-// Provides generic Gaussian random-variable algebra (add/subtract/scale/
-// product/reciprocal) plus two motion-specific applications built on top of
-// it: the position distribution after time t, and the arrival-time
-// distribution/likelihood for covering a fixed distance at velocity V.
+#include "stats.h"
+
+// Motion-specific applications of a 1-D Gaussian uncertainty model: a
+// constant-velocity V ~ N(mean, variance), held constant over the interval
+// of interest, applied to the position distribution after time t and to the
+// arrival-time distribution/likelihood for covering a fixed distance at
+// velocity V. The generic Gaussian random-variable type and its basic
+// statistics/algebra (add/subtract/scale/product/Cdf/InvCdf/etc.) live in
+// stats.h/.c instead -- this file only keeps the functions that actually
+// interpret a GaussianRV as a velocity or position, not plain distribution
+// math.
 //
 // Uses float rather than double throughout -- trades away some numerical
-// accuracy (see GaussianMotion_InvCdf's comment for how much) for speed and
+// accuracy (see GaussianRV_InvCdf's comment for how much) for speed and
 // for consistency with the rest of this codebase's control-loop math
 // (PulseMotorModel, PulseCommand, etc.), which is float end to end.
 //
@@ -22,54 +27,6 @@
 // below sidestep this: they're exact change-of-variables transforms of
 // velocity's own density/CDF, valid for any velocity.mean (including near
 // zero), as long as velocity is physically one-signed over the interval.
-
-typedef struct {
-  float mean;
-  float variance;
-} GaussianRV;
-
-// ---- Basic statistics ----
-
-float GaussianMotion_StdDev(GaussianRV g);
-
-// Gaussian density of g, evaluated at x.
-float GaussianMotion_Pdf(float x, GaussianRV g);
-
-// Standard normal (Phi^-1) quantile function, scaled/shifted to g: returns x
-// such that P(X <= x) = p for X ~ g. Domain 0 < p < 1 (p == 0/1 map to
-// +-INFINITY, outside [0,1] returns NAN). The underlying rational
-// approximation (Acklam's) is accurate to ~1e-9 relative error in exact
-// arithmetic, but computed here in float -- so actual accuracy is capped at
-// float epsilon (~1e-7), not the ~1e-9 the coefficients could otherwise
-// deliver.
-float GaussianMotion_InvCdf(float p, GaussianRV g);
-
-// Same as InvCdf, but for the upper tail: returns x such that P(X >= x) = p
-float GaussianMotion_InvCdf_Tail(float p, GaussianRV g);
-
-// P(X <= x) for X ~ g.
-float GaussianMotion_Cdf(float x, GaussianRV g);
-
-// P(X >= x) for X ~ g (== 1 - Cdf(x, g), but computed directly for tail
-// precision -- see the .c file).
-float GaussianMotion_Cdf_Tail(float x, GaussianRV g);
-
-// ---- Generic Gaussian propagation (assumes independence throughout) ----
-
-// Z = X + Y
-GaussianRV GaussianMotion_Add(GaussianRV a, GaussianRV b);
-
-// Z = X - Y
-GaussianRV GaussianMotion_Subtract(GaussianRV a, GaussianRV b);
-
-// Y = k*X
-GaussianRV GaussianMotion_Scale(GaussianRV x, float k);
-
-// Z = X*Y. Mean and variance are both exact given independence --
-// Var(XY) = Var(X)*Var(Y) + mean(X)^2*Var(Y) + mean(Y)^2*Var(X). Note the
-// true distribution of a product of two Gaussians is not itself Gaussian --
-// these are its first two moments, not a distributional claim.
-GaussianRV GaussianMotion_Product(GaussianRV a, GaussianRV b);
 
 // ---- Motion models: constant velocity V ~ N(mean, variance) over [0, t] ----
 
@@ -102,7 +59,7 @@ float GaussianMotion_ArrivalTimeCdf(float arrival_time, float distance, Gaussian
 // probability). Equivalent to 1 - ArrivalTimeCdf(...), but computed
 // directly as P(V <= distance/arrival_time) via velocity's own (non-tail)
 // Cdf, for the same tail-precision reason Cdf/Cdf_Tail are both provided
-// above. Returns 1 for arrival_time <= 0 (arrival cannot have happened
+// in stats.h. Returns 1 for arrival_time <= 0 (arrival cannot have happened
 // yet).
 float GaussianMotion_ArrivalTimeCdf_Tail(float arrival_time, float distance, GaussianRV velocity);
 
@@ -112,7 +69,7 @@ float GaussianMotion_ArrivalTimeCdf_Tail(float arrival_time, float distance, Gau
 // deadline" a single-pulse planner wants directly (plan a pulse no longer
 // than this and the chance you've already covered `distance`, and are now
 // overshooting, is bounded by p). Computed as distance / (the velocity
-// threshold v such that P(V >= v) = p), via GaussianMotion_InvCdf_Tail --
+// threshold v such that P(V >= v) = p), via GaussianRV_InvCdf_Tail --
 // same exact-transform approach as ArrivalTimeCdf, so this too stays valid
 // for velocity.mean near zero. Domain 0 < p < 1, same as InvCdf_Tail.
 // Returns +INFINITY if that velocity threshold is <= 0 (including the
@@ -125,7 +82,7 @@ float GaussianMotion_ArrivalTimeInvCdf(float p, float distance, GaussianRV veloc
 // P(T >= arrival_time) = p, i.e. the arrival_time by which there's exactly
 // probability p that arrival has NOT yet happened. Computed as distance /
 // (the velocity threshold v such that P(V <= v) = p), via
-// GaussianMotion_InvCdf. Same domain/+INFINITY/near-zero-mean notes as
+// GaussianRV_InvCdf. Same domain/+INFINITY/near-zero-mean notes as
 // ArrivalTimeInvCdf.
 float GaussianMotion_ArrivalTimeInvCdf_Tail(float p, float distance, GaussianRV velocity);
 

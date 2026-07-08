@@ -270,10 +270,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
           self->position_offset_[i] = self->cmd_msg_.position_offset[i];
         }
       }
-
-
     =}
-    
 
     // TODO: Add sanity checks to the encoder readings to ensure that there isn't a connection error or something.
     reaction(motor_encoder_positions) {=
@@ -283,13 +280,9 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     =}
 
     reaction(motor_encoder_velocities) {=
-      //printf("State Machine: Got velocities of:\n");
       for (int i = 0; i<DOF_NUMBER; i++){
         self->motor_encoder_velocities_[i] = motor_encoder_velocities[i]->value;
-        //printf("%d:", (int) (motor_encoder_velocities[i]->value*1000));
-        //printf("%d, ", (int) (self->motor_encoder_velocities_[i]*1000));
       }
-      //printf("\n");
     =}
 
     reaction(sea_encoder_positions) {=

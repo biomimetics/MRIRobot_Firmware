@@ -24,7 +24,7 @@ target C {
 // dpos_pulse_mpc_planning.md for the full design rationale and the exact
 // planning math (src_c/dpos_pulse_mpc.h/.c).
 //
-// For ordinary velocity commands (|desiredVelocity| >= V_min) or while the
+// For ordinary velocity commands (|desiredVelocity| >= V_min_cmd) or while the
 // remaining position error is still too large to be worth closing via
 // pulsing, this passes the velocity command straight through -- same
 // pass-through behavior as Small_Velocity_Controller, folding in
@@ -53,7 +53,7 @@ preamble {=
 
 // Constructor parameters below are the initial-guess motor model / MPC
 // tuning values, all placeholders pending real bench characterization --
-// same caveat as Small_Velocity_Controller.lf's parameters. V_min/gain/
+// same caveat as Small_Velocity_Controller.lf's parameters. V_min_cmd/gain/
 // T_start/T_stop/minimumPulseWidth default to the same values as
 // Small_Velocity_Controller so the two controllers stay comparable.
 reactor Small_DeltaP_MPC_Controller(
@@ -87,7 +87,7 @@ reactor Small_DeltaP_MPC_Controller(
   timer control_tick(0, control_period)
 
   reaction(startup) {=
-    self->controller_.model.V_min = self->V_min_initial;
+    self->controller_.model.V_min_cmd = self->V_min_initial;
     self->controller_.model.gain = self->gain_initial;
     self->controller_.model.T_start = (float) self->T_start_initial * NS_TO_S;
     self->controller_.model.T_stop = (float) self->T_stop_initial * NS_TO_S;

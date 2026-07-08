@@ -1,0 +1,488 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
+    "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/stats.h", "../../../src_c/stats.c"
+  ],
+  cmake-include: [
+    "../../../src_c/pulse_motor_model_cmake.cmake",
+    "../../../src_c/gaussian_motion_cmake.cmake",
+    "../../../src_c/stats_cmake.cmake"
+  ]
+}
+
+preamble {=
+  #include "pulse_motor_model.h"
+  #include "stats.h"
+  #include <math.h>
+  #include <stdio.h>
+
+  // Nanoseconds -> seconds, same conversion/reasoning as
+  // Small_DeltaP_Pulse_Controller.lf's own NS_TO_S -- this reactor times
+  // T_start/T_stop observations against physical time the same way that
+  // reactor's control_tick does.
+  #define NS_TO_S 1e-9f
+
+  // Set to 1 for live on-hardware tracing of edge detection/observation
+  // capture below -- same role/convention as small_deltap_pulse_controller.h's
+  // PRINT_DPULSE_DEBUG. Temporary diagnostic while chasing why
+  // all_observations_complete_ never seems to latch on real hardware; flip
+  // to 0 once that's root-caused.
+  #define PRINT_PME_DEBUG 0
+=}
+
+// Single-channel running parameter estimator: watches this joint's
+// Small_DeltaP_Pulse_Controller (via motor_state_input/planned_pulse_input)
+// alongside EncoderStateEstimator's position/velocity output, and collects
+// raw per-pulse observations of the physical PulseMotorModel this joint
+// actually seems to have. This reactor only *gathers* those observations
+// (see each reaction's comment below for which one) -- nothing here yet
+// turns them into an updated PulseMotorModel; motor_model_output is
+// declared but no reaction ever sets it.
+//
+// Sits inside PulseMotorModelEstimator_Bank.lf, one instance per joint --
+// same split as Small_DeltaP_Pulse_Controller.lf /
+// Small_DeltaP_Pulse_Controller_Bank.lf.
+reactor PulseMotorModelEstimator(
+  // rad -- shared by both edge-detectors below, on opposite sides: while
+  // MOTOR_STARTING/MOTOR_RUNNING, |position - pulse_start_position_| has to
+  // clear this before we call the motor actually moving (our observation of
+  // T_start); while MOTOR_STOPPING, consecutive position_input samples have
+  // to stay under this before we call the motor actually stopped (our
+  // observation of T_stop). Has to sit above encoder noise either way.
+  // TODO: characterize against actual encoder noise floor.
+  movement_detection_threshold: float = 0.01,
+  // Multiplier on (model_.T_start + MAX_PULSE_DURATION_S + model_.T_stop)
+  // -- pulse_motor_model.h's ceiling on a planned pulse's run_duration --
+  // giving how long after a pulse begins (the STARTING edge) this reactor
+  // will wait before concluding the pulse is lost (e.g. a stuck/misbehaving
+  // Small_DeltaP_Pulse_Controller, or a dropped motor_state_input/
+  // planned_pulse_input connection) and giving up on its observations
+  // rather than waiting on them forever -- see the watchdog check in
+  // reaction(position_input) below. Deliberately generous: false-negatives
+  // (missing a genuinely stuck pulse) just mean one joint stops
+  // contributing observations for a while; false-positives (giving up on a
+  // pulse that would've finished normally) silently drop real data. TODO:
+  // tighten once a real false-positive/negative rate can be characterized.
+  pulse_timeout_safety_factor: float = 4.0,
+  // s -- minimum (stopping_start_time_ - real_motion_start_time_) this
+  // reactor will trust as a real V_real window. Below this, a pulse whose
+  // planned run_duration is very short (e.g. a near-convergence correction)
+  // can leave MOTOR_RUNNING almost the instant it's entered -- pulseTimer
+  // keeps accumulating through MOTOR_STARTING's dead time, so a short
+  // enough run_duration can already be exceeded the moment MOTOR_RUNNING
+  // begins. When that happens the window collapses to ~0 duration, and
+  // dividing a real (nonzero) position delta by a ~0 duration would produce
+  // a wildly wrong V_real point estimate -- worse than not having one at
+  // all. See the pulse_ended branch of reaction(motor_state_input) below,
+  // which skips sending residual_output entirely for a pulse whose window
+  // doesn't clear this. TODO: characterize against real pulse timing rather
+  // than this placeholder.
+  min_running_duration_s: float = 0.02
+) {
+  input position_input: float
+  input velocity_input: float
+  input commanded_velocity_input: float
+  // Which MotorState this joint's Small_DeltaP_Pulse_Controller is
+  // currently in (STOPPED/STARTING/RUNNING/STOPPING) -- see that reactor's
+  // motor_state_output. Lets this estimator tell "this motion happened
+  // during a specific commanded pulse" apart from "this motion happened
+  // during ordinary pass-through," which matters for attributing observed
+  // position/velocity back to a particular PulseCommand, and drives all
+  // the per-pulse edge detection below.
+  input motor_state_input: MotorState
+  // The pulse this joint's Small_DeltaP_Pulse_Controller currently has
+  // committed to (dir/run_duration/pulse_height) -- see that reactor's
+  // planned_pulse_output. Paired with motor_state_input, this is what a
+  // future estimator needs to know what motion to *expect* (via
+  // PulseMotorModel_PredictDelta against model_ below) so it can compare
+  // that against what position_input/velocity_input actually *observed*
+  // once the pulse finishes.
+  input planned_pulse_input: PulseCommand
+
+  output motor_model_output: PulseMotorModel
+
+  // This pulse's element-wise residual (point_estimate_ - model_ -- see
+  // residual_'s comment below), sent exactly once per completed pulse: only
+  // ever lf_set from inside the all_observations_complete_ branch of
+  // reaction(motor_state_input) below, so its presence on any given tick
+  // *is* the "a fresh residual is ready" signal -- no separate bool needed,
+  // callers just trigger off this port. For PulseMotorModelEstimatorMixture_
+  // Bank.lf (or any other reactor pooling residuals across joints) to
+  // consume.
+  output residual_output: PulseMotorModel
+
+  // Running estimate, seeded from pulse_motor_model.h's shared
+  // INITIAL_MOTOR_MODEL -- same starting belief Small_DeltaP_Pulse_
+  // Controller.lf's own model_ starts from. Not yet refined by anything
+  // (see the reactor-level comment above) or sent anywhere.
+  state model_: PulseMotorModel
+
+  // Latest observed MotorState/PulseCommand, cached from motor_state_input/
+  // planned_pulse_input every time either arrives, and the latest observed
+  // position/velocity, cached the same way from position_input/
+  // velocity_input -- so the edge-detection logic below always has a
+  // current value to compare against even though these four inputs each
+  // arrive on their own independent tag.
+  state last_motor_state_: MotorState
+  state last_planned_pulse_: PulseCommand
+  state last_position_: float = 0.0
+  state last_velocity_: float = 0.0
+
+  // ---- T_start observation: timer armed at STOPPED/other -> STARTING,
+  // stopped once position_input shows real movement (see
+  // reaction(position_input) below) -- checked through MOTOR_STARTING *and*
+  // MOTOR_RUNNING, not just MOTOR_STARTING: MOTOR_STARTING is dead time by
+  // definition ("pulse command should be active but we shouldn't expect to
+  // see motor movement yet" -- MotorState's own comment in
+  // pulse_motor_model.h), and the MOTOR_STARTING -> MOTOR_RUNNING
+  // transition is a fixed timer (model_.T_start) rather than
+  // motion-triggered, so real movement often doesn't cross
+  // movement_detection_threshold until after the state has already
+  // advanced to MOTOR_RUNNING. Checking only MOTOR_STARTING missed T_start
+  // on most real pulses as a result. ----
+  state pulse_start_position_: float = 0.0 // position_ latched at the STARTING edge -- T_start's baseline, and the pulse's pre-motion position for position_delta_ below
+  state pulse_start_time_: time = 0        // physical time at the STARTING edge
+  state has_t_start_observation_: bool = false // latches true once this pulse's T_start has been observed, so reaction(position_input) only fires once per pulse
+  state t_start_observation_s_: float = 0.0 // seconds, most recent single-pulse observation of T_start
+
+  // ---- V_real observation: NOT the mean/variance of running_velocity_stats_
+  // below -- raw per-sample velocity readings during MOTOR_RUNNING turned
+  // out to be far too noisy a way to estimate V_real (pulse velocity is
+  // rarely smoothly measured), so the actual per-pulse V_real point
+  // estimate instead comes from position-delta/duration over the window
+  // from when real motion actually began to when it's commanded to stop:
+  // (running_end_position_ - real_motion_start_position_) / (time from
+  // real_motion_start_time_ to the RUNNING -> STOPPING edge). Deliberately
+  // NOT the STARTING -> RUNNING edge for the window's start: that edge is a
+  // fixed timer (model_.T_start) rather than motion-triggered, and
+  // T_start's own residual shows the model's T_start is a substantial
+  // underestimate of the real dead time -- using that edge as the window
+  // start would fold a chunk of genuine dead time (near-zero velocity) into
+  // the average, biasing V_real low. real_motion_start_position_/_time_ are
+  // instead captured at the same moment T_start's observation latches (see
+  // reaction(position_input) below), i.e. empirically, not off the model's
+  // belief. See reaction(motor_state_input) below for running_end_position_/
+  // has_running_window_observation_ and the point-estimate computation in
+  // its pulse_ended branch. running_velocity_stats_ is kept only as a
+  // diagnostic/completeness signal (see has_running_window_observation_
+  // below for what actually gates completeness now). ----
+  state running_velocity_stats_: SampleStats
+  state real_motion_start_time_: time = 0        // physical time at the moment T_start's observation latches (see reaction(position_input)) -- empirical motion onset, not the model-timer-driven STARTING -> RUNNING edge
+  state real_motion_start_position_: float = 0.0 // position_ latched at that same moment
+  state running_end_position_: float = 0.0   // position_ latched at the RUNNING -> STOPPING edge -- frozen there, unlike stopping_last_checked_position_ below which keeps moving throughout MOTOR_STOPPING
+  state has_running_window_observation_: bool = false // latches true at the RUNNING -> STOPPING edge, once running_end_position_ (and, given has_t_start_observation_, a valid running duration) is available
+
+  // ---- T_stop observation: timer armed at RUNNING -> STOPPING, stopped
+  // once position_input shows the motor has actually come to rest (see
+  // reaction(position_input) below) -- mirrors T_start's detection above as
+  // closely as possible (same movement_detection_threshold, same
+  // once-per-pulse latch), just checking for an absence of movement between
+  // consecutive samples instead of an accumulated movement away from a
+  // fixed baseline (a fixed baseline can't detect "stopped": the motor
+  // keeps coasting throughout MOTOR_STOPPING, so position never comes back
+  // near where MOTOR_STOPPING began).
+  state stopping_start_time_: time = 0     // physical time at the STOPPING edge
+  state stopping_last_checked_position_: float = 0.0 // position_ as of the previous position_input sample taken while MOTOR_STOPPING
+  state has_t_stop_observation_: bool = false // latches true once this pulse's T_stop has been observed, so reaction(position_input) only fires once per pulse
+  state t_stop_observation_s_: float = 0.0 // seconds, most recent single-pulse observation of T_stop
+
+  // ---- Whole-pulse position delta: pulse_start_position_ above vs.
+  // position_ latched at the final STOPPING -> STOPPED edge -- a secondary,
+  // lower-noise way to get at the same velocity this pulse commanded,
+  // averaged over the whole pulse rather than sampled instantaneously like
+  // running_velocity_stats_ above. ----
+  state has_position_delta_observation_: bool = false
+  state position_delta_observation_: float = 0.0 // rad, pulse_end_position_ - pulse_start_position_
+
+  // True once every observation above has landed for the pulse that just
+  // finished (checked/set at the STOPPING -> STOPPED edge below, reset back
+  // to false at the next STARTING edge) -- a future estimator's signal that
+  // this pulse's observations are safe to consume, rather than it having to
+  // re-check all four has_*_observation_ flags itself. No delay/action
+  // needed to compute this: has_t_start_observation_/has_t_stop_observation_
+  // latch during STARTING/STOPPING respectively, strictly before STOPPED is
+  // ever reached, and position_delta_observation_ is computed in this same
+  // STOPPED-edge branch -- so everything this check needs is already
+  // current by the time it runs.
+  state all_observations_complete_: bool = false
+
+  // Latches true once the watchdog in reaction(position_input) below has
+  // already reset this pulse's observations -- so it only fires (and
+  // prints) once per stuck pulse instead of every position_input tick.
+  // Reset back to false at the next STARTING edge.
+  state watchdog_fired_: bool = false
+
+  // This pulse's point estimate of the whole PulseMotorModel (assembled via
+  // PulseMotorModel_PointEstimateFromObservations out of
+  // t_start_observation_s_/t_stop_observation_s_ and the position-delta/
+  // duration V_real estimate over the RUNNING window -- see that state's
+  // comment above), and the element-wise residual against model_ (via
+  // PulseMotorModel_Subtract) -- both computed once, right alongside
+  // all_observations_complete_ above, and both stale/meaningless before
+  // all_observations_complete_ is true. residual_ is also sent out via
+  // residual_output below; nothing yet folds it back into this instance's
+  // own model_ or sends motor_model_output -- that's this joint's local
+  // belief, left alone pending whatever PulseMotorModelEstimatorMixture_
+  // Bank.lf (or another future combining reactor) decides to do with the
+  // pooled residuals.
+  state point_estimate_: PulseMotorModel
+  state residual_: PulseMotorModel
+
+  reaction(startup) {=
+    self->model_ = INITIAL_MOTOR_MODEL;
+
+    self->last_motor_state_ = MOTOR_STOPPED;
+    self->last_planned_pulse_.dir = 1.0f;
+    self->last_planned_pulse_.run_duration = 0.0f;
+    self->last_planned_pulse_.pulse_height = 0.0f;
+
+    SampleStats_Init(&self->running_velocity_stats_);
+  =}
+
+  // Cache-only for last_position_, plus the T_start/T_stop observations --
+  // T_start checked while MOTOR_STARTING *or* MOTOR_RUNNING (see the
+  // movement_detection_threshold comment above for why MOTOR_RUNNING has to
+  // be included too), until has_t_start_observation_ latches true for the
+  // current pulse; T_stop the same but for MOTOR_STOPPING/
+  // has_t_stop_observation_ (both reset at their respective edges in
+  // reaction(motor_state_input) below).
+  reaction(position_input) {=
+    self->last_position_ = position_input->value;
+
+    // Watchdog: if we've been anywhere other than MOTOR_STOPPED for way
+    // longer than a pulse should ever take, assume this pulse is lost (see
+    // pulse_timeout_safety_factor's comment above) and give up on its
+    // observations rather than waiting on them forever. Runs off
+    // position_input rather than a timer of its own since position_input
+    // keeps arriving at the encoder's own cadence regardless of whatever
+    // might be wrong with motor_state_input/Small_DeltaP_Pulse_Controller.
+    if (self->last_motor_state_ != MOTOR_STOPPED && !self->watchdog_fired_) {
+      float expected_max_pulse_s = self->model_.T_start + MAX_PULSE_DURATION_S + self->model_.T_stop;
+      float timeout_s = expected_max_pulse_s * self->pulse_timeout_safety_factor;
+      float elapsed_s = (float) (lf_time_physical() - self->pulse_start_time_) * NS_TO_S;
+      if (elapsed_s > timeout_s) {
+        self->has_t_start_observation_ = false;
+        self->has_t_stop_observation_ = false;
+        self->has_position_delta_observation_ = false;
+        self->has_running_window_observation_ = false;
+        self->all_observations_complete_ = false;
+        SampleStats_Init(&self->running_velocity_stats_);
+        self->watchdog_fired_ = true;
+#if PRINT_PME_DEBUG
+        printf("PME: WATCHDOG pulse lost (stuck in %s for %d ms > %d ms timeout), observations reset\r\n",
+               MotorState_Name(self->last_motor_state_),
+               (int) (elapsed_s * 1000.0f),
+               (int) (timeout_s * 1000.0f));
+#endif
+      }
+    }
+
+    if ((self->last_motor_state_ == MOTOR_STARTING || self->last_motor_state_ == MOTOR_RUNNING) && !self->has_t_start_observation_) {
+      float moved = fabsf(self->last_position_ - self->pulse_start_position_);
+      if (moved >= self->movement_detection_threshold) {
+        instant_t now = lf_time_physical();
+        self->t_start_observation_s_ = (float)(now - self->pulse_start_time_) * NS_TO_S;
+        self->has_t_start_observation_ = true;
+        // Empirical motion-onset snapshot for the V_real window -- see
+        // real_motion_start_time_'s comment above for why this, not the
+        // STARTING -> RUNNING edge, anchors that window's start.
+        self->real_motion_start_time_ = now;
+        self->real_motion_start_position_ = self->last_position_;
+#if PRINT_PME_DEBUG
+        printf("PME: T_start observed, %d ms (moved %d milli-rad >= threshold %d)\r\n",
+               (int) (self->t_start_observation_s_ * 1000.0f),
+               (int) (moved * 1000.0f),
+               (int) (self->movement_detection_threshold * 1000.0f));
+#endif
+      }
+    }
+
+    if (self->last_motor_state_ == MOTOR_STOPPING && !self->has_t_stop_observation_) {
+      float moved = fabsf(self->last_position_ - self->stopping_last_checked_position_);
+      self->stopping_last_checked_position_ = self->last_position_;
+      if (moved < self->movement_detection_threshold) {
+        instant_t now = lf_time_physical();
+        self->t_stop_observation_s_ = (float)(now - self->stopping_start_time_) * NS_TO_S;
+        self->has_t_stop_observation_ = true;
+#if PRINT_PME_DEBUG
+        printf("PME: T_stop observed, %d ms (moved %d milli-rad < threshold %d)\r\n",
+               (int) (self->t_stop_observation_s_ * 1000.0f),
+               (int) (moved * 1000.0f),
+               (int) (self->movement_detection_threshold * 1000.0f));
+#endif
+      }
+    }
+  =}
+
+  // Cache-only for last_velocity_, plus V_real sample collection while
+  // MOTOR_RUNNING.
+  reaction(velocity_input) {=
+    self->last_velocity_ = velocity_input->value;
+
+    if (self->last_motor_state_ == MOTOR_RUNNING) {
+      SampleStats_Add(&self->running_velocity_stats_, self->last_velocity_);
+    }
+  =}
+
+  // Per-pulse edge detection: compares the incoming MotorState against
+  // last_motor_state_ (still holding the *previous* tick's value at this
+  // point) to arm/reset each observation above at the right transition,
+  // then updates last_motor_state_ itself last.
+  reaction(motor_state_input) -> residual_output {=
+    MotorState previous = self->last_motor_state_;
+    MotorState next = motor_state_input->value;
+
+#if PRINT_PME_DEBUG
+    if (previous != next) {
+      printf("PME: edge %s -> %s\r\n",
+             MotorState_Name(previous),
+             MotorState_Name(next));
+    }
+#endif
+
+    // A pulse just ended -- either normally (STOPPING -> STOPPED) or
+    // because Small_DeltaP_Pulse_Controller re-armed a new one before ever
+    // putting a visible MOTOR_STOPPED on the wire (STOPPING -> STARTING, or
+    // even RUNNING -> STARTING, directly). That reactor's control_tick now
+    // guards against collapsing STOPPED -> STARTING into the same tick it
+    // just landed on STOPPED (see its state_before_advance comment), so the
+    // second case shouldn't happen anymore in practice -- this is kept as
+    // defense-in-depth so a missed STOPPED can never again silently drop a
+    // pulse's observations. previous != MOTOR_STARTING in the second
+    // disjunct is required, not redundant: motor_state_input fires every
+    // control_tick even when the value hasn't changed, so without it this
+    // would also (wrongly) fire on every repeated STARTING tick.
+    bool entered_stopped_normally = (previous != MOTOR_STOPPED && next == MOTOR_STOPPED);
+    bool skipped_straight_to_starting =
+        (next == MOTOR_STARTING && previous != MOTOR_STARTING && previous != MOTOR_STOPPED);
+    bool pulse_ended = entered_stopped_normally || skipped_straight_to_starting;
+
+    if (pulse_ended) {
+      // Pulse fully complete (or as complete as it's going to get): this
+      // pulse's whole-duration position delta.
+      self->position_delta_observation_ = self->last_position_ - self->pulse_start_position_;
+      self->has_position_delta_observation_ = true;
+
+      // All four observations landed for this pulse? (see
+      // all_observations_complete_'s comment above for why this can be
+      // checked synchronously, right here, with no action/delay.)
+      self->all_observations_complete_ =
+          self->has_t_start_observation_ &&
+          self->has_t_stop_observation_ &&
+          self->has_position_delta_observation_ &&
+          self->has_running_window_observation_;
+
+#if PRINT_PME_DEBUG
+      printf("PME: pulse done (%s -> %s%s), complete=%d (t_start=%d t_stop=%d pos_delta=%d running_window=%d v_samples=%lu) posDelta=%d milli-rad\r\n",
+             MotorState_Name(previous), MotorState_Name(next),
+             skipped_straight_to_starting ? ", STOPPED skipped" : "",
+             (int) self->all_observations_complete_,
+             (int) self->has_t_start_observation_,
+             (int) self->has_t_stop_observation_,
+             (int) self->has_position_delta_observation_,
+             (int) self->has_running_window_observation_,
+             (unsigned long) SampleStats_Count(&self->running_velocity_stats_),
+             (int) (self->position_delta_observation_ * 1000.0f));
+#endif
+
+      // Point estimate + residual, right away -- see
+      // point_estimate_/residual_'s comment above for why nothing does
+      // anything with them yet. residual_output is only ever lf_set here,
+      // so its presence downstream doubles as "a fresh residual is ready."
+      if (self->all_observations_complete_) {
+        float running_duration_s = (float) (self->stopping_start_time_ - self->real_motion_start_time_) * NS_TO_S;
+
+        // Below min_running_duration_s (see that parameter's comment), the
+        // window is too degenerate to trust a position-delta/duration ratio
+        // from -- skip sending a residual entirely rather than falling back
+        // to some placeholder value, which would silently inject a wrong
+        // "observation" into PulseMotorModelEstimatorMixture_Bank.lf's
+        // pooled/per-joint stats (this is exactly what an earlier version of
+        // this code did, defaulting to 0 velocity and producing a
+        // suspiciously exact, tightly-clustered wrong residual on hardware).
+        if (running_duration_s > self->min_running_duration_s) {
+          // V_real from position-delta/duration over the RUNNING window, not
+          // running_velocity_stats_ -- see that state's comment above for
+          // why. variance is left at 0 here deliberately: this is one point
+          // measurement, not a distribution -- the pulse-to-pulse SPREAD of
+          // these point estimates (what PulseMotorModelEstimatorMixture_
+          // Bank.lf's residual_stats_ pools across many pulses) is the
+          // actual V_real variance worth having; manufacturing a per-pulse
+          // variance out of a single measurement would just be noise
+          // dressed up as a number.
+          GaussianRV v_real_estimate;
+          // fabsf: model_.V_real.mean (like V_min_cmd) is a magnitude --
+          // direction is carried separately via PulseCommand.dir everywhere
+          // else in this codebase (see e.g. PulseMotorModel_PredictDelta) --
+          // but running_end_position_ - real_motion_start_position_ is
+          // signed. Without fabsf here, negative-direction pulses would
+          // produce a residual near -2*model_.V_real.mean instead of near 0.
+          v_real_estimate.mean = fabsf(self->running_end_position_ - self->real_motion_start_position_) / running_duration_s;
+          v_real_estimate.variance = 0.0f;
+
+          self->point_estimate_ = PulseMotorModel_PointEstimateFromObservations(
+              &self->model_, self->t_start_observation_s_, self->t_stop_observation_s_, v_real_estimate);
+          self->residual_ = PulseMotorModel_Subtract(self->point_estimate_, self->model_);
+          lf_set(residual_output, self->residual_);
+        }
+#if PRINT_PME_DEBUG
+        else {
+          printf("PME: pulse skipped -- running_duration_s degenerate (%d ms <= %d ms min)\r\n",
+                 (int) (running_duration_s * 1000.0f),
+                 (int) (self->min_running_duration_s * 1000.0f));
+        }
+#endif
+      }
+    }
+
+    if (previous != MOTOR_STARTING && next == MOTOR_STARTING) {
+      // Pulse begins: latch T_start's baseline/timer and this pulse's
+      // pre-motion position (also position_delta_observation_'s baseline).
+      // Runs after the pulse_ended block above, which needed the OLD
+      // pulse_start_position_ (the pulse that just ended) still intact.
+      self->pulse_start_position_ = self->last_position_;
+      self->pulse_start_time_ = lf_time_physical();
+      self->has_t_start_observation_ = false;
+      self->has_running_window_observation_ = false;
+      self->watchdog_fired_ = false;
+      // New pulse -- last pulse's completeness no longer applies.
+      self->all_observations_complete_ = false;
+    }
+
+    if (previous != MOTOR_RUNNING && next == MOTOR_RUNNING) {
+      // Steady-state motion begins: reset the single-pulse velocity stats --
+      // diagnostic only now (see running_velocity_stats_'s comment above).
+      // The V_real window's start is anchored empirically, from T_start's
+      // own observation (real_motion_start_time_/_position_), not this edge.
+      SampleStats_Init(&self->running_velocity_stats_);
+    }
+
+    if (previous != MOTOR_STOPPING && next == MOTOR_STOPPING) {
+      // Pulse is being cut off: arm T_stop's timer and seed the
+      // consecutive-sample position check with the position as of this
+      // edge (still moving, so this first comparison should not by itself
+      // read as "stopped"). Also closes out the RUNNING window opened
+      // above: running_end_position_ freezes here, unlike
+      // stopping_last_checked_position_ which keeps moving throughout
+      // MOTOR_STOPPING.
+      self->stopping_start_time_ = lf_time_physical();
+      self->stopping_last_checked_position_ = self->last_position_;
+      self->has_t_stop_observation_ = false;
+
+      self->running_end_position_ = self->last_position_;
+      self->has_running_window_observation_ = true;
+    }
+
+    self->last_motor_state_ = next;
+  =}
+
+  reaction(planned_pulse_input) {=
+    self->last_planned_pulse_ = planned_pulse_input->value;
+  =}
+}
