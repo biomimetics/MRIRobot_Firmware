@@ -12,6 +12,23 @@
 // parameter -- this is a safety backstop, not a tuning knob.
 #define MAX_PULSE_DURATION_S 0.5f
 
+// Hard physical bounds on the fields a live parameter estimator is allowed
+// to move (see PulseMotorModel_ClampToPhysicalBounds below). Safety
+// backstops, not tuning knobs -- like MAX_PULSE_DURATION_S above, these
+// exist so a bad epoch of observations can never produce a model that
+// plans absurd pulses. V_REAL_MEAN_MIN especially: a near-zero V_real.mean
+// sends GaussianMotion_ArrivalTimeInvCdf toward +INFINITY (see
+// PulseMotorModel_PlanPulseWithOvershootBound) -- MAX_PULSE_DURATION_S
+// backstops that too, but the model should never get there in the first
+// place. V_REAL_MEAN_MAX matches motor_config.h's max_speed.
+#define PULSE_MODEL_T_START_MIN_S 0.005f
+#define PULSE_MODEL_T_START_MAX_S 1.0f
+#define PULSE_MODEL_T_STOP_MIN_S 0.001f
+#define PULSE_MODEL_T_STOP_MAX_S 0.3f
+#define PULSE_MODEL_V_REAL_MEAN_MIN 0.05f
+#define PULSE_MODEL_V_REAL_MEAN_MAX 12.566f
+#define PULSE_MODEL_V_REAL_VARIANCE_MIN 1e-6f
+
 // Physical/open-loop motor model, shared bang-bang FSM shape, pulse command
 // type, and pulse-outcome prediction helper -- split out so any controller
 // that bang-bangs the same physical motor (pulse_mpc.c's motion-debt design,
@@ -39,9 +56,9 @@ typedef struct {
 // bench characterization
 static const PulseMotorModel INITIAL_MOTOR_MODEL = {
   0.40f,          // V_min_cmd -- rad/s, was ~20 deg/s -- TODO: characterize // 0.872665f
-  {0.30f, 0.00001f}, // V_real -- {mean rad/s, variance rad^2/s^2} -- TODO: characterize
+  {0.35f, 0.00001f}, // V_real -- {mean rad/s, variance rad^2/s^2} -- TODO: characterize
   0.100f,         // T_start           -- s (50 ms) -- TODO: characterize further
-  0.100f,         // T_stop            -- s (50 ms), datasheet value, likely optimistic
+  0.010f,         // T_stop            -- s (50 ms), datasheet value, likely optimistic
   0.001f,         // minimumPulseWidth -- s (1 ms) -- TODO: characterize
 };
 
@@ -78,6 +95,54 @@ typedef struct {
 // commanded/measured velocity's direction needs latching.
 float sign_f(float x);
 
+// Which detector latched a pulse's motion onset -- diagnostic, carried in
+// PulseModelObservation below so per-pulse logging can attribute T_start
+// quality to the detector that produced it (position-threshold crossing has
+// velocity-dependent latency; velocity-threshold crossing has roughly
+// constant observer lag -- see PulseMotorModelEstimator.lf).
+typedef enum {
+  PULSE_ONSET_NONE = 0,     // no motion onset was ever detected this pulse
+  PULSE_ONSET_POSITION = 1, // accumulated position crossed movement_detection_threshold
+  PULSE_ONSET_VELOCITY = 2  // filtered velocity crossed onset_velocity_fraction * V_real.mean
+} PulseOnsetSource;
+
+// Human-readable name, for debug printfs -- lives in pulse_motor_model.c
+// for the same preamble-transclusion reason as MotorState_Name above.
+const char *PulseOnsetSource_Name(PulseOnsetSource s);
+
+// One completed pulse's worth of raw observations, with PER-FIELD validity:
+// a pulse that missed only its T_start observation (e.g. motion onset
+// landed after the FSM had already left RUNNING) still carries a perfectly
+// good T_stop and position delta, so requiring all observations at once --
+// what an earlier all-or-nothing version of PulseMotorModelEstimator.lf
+// did -- silently threw away most of the usable data. Consumers
+// (PulseMotorModelEstimatorMixture_Bank.lf) fold each field only when its
+// flag is set.
+//
+// `values` carries the observed numbers in PulseMotorModel shape; fields
+// whose flag is false, and the never-observed fields
+// (V_min_cmd/minimumPulseWidth), just hold copies of the estimator's
+// current model -- read them only through the flags.
+typedef struct {
+  PulseMotorModel values;
+  bool t_start_valid;
+  bool t_stop_valid;
+  bool v_real_valid;
+  // True = the pulse commanded motion but the whole-pulse position delta
+  // never cleared the dud threshold (see PulseMotorModelEstimator.lf's
+  // dud_position_delta_factor): no real motion happened, so every
+  // observed-field flag above is false -- a noise-latched onset on a
+  // motionless pulse would otherwise fold a confident, tightly-clustered,
+  // WRONG V_real ~= 0 into the pooled stats. Still sent (rather than
+  // suppressed) because a dud is real evidence in its own right: the pulse
+  // was below the motor's real minimum effective width/dead time.
+  bool dud;
+  PulseOnsetSource onset_source;
+  float running_window_s;     // s, duration of the V_real window (0 if none) -- quality/diagnostic
+  float position_delta;       // rad, signed whole-pulse position delta
+  float planned_run_duration; // s, the planned MOTOR_RUNNING time of the pulse this observed -- for dud analysis
+} PulseModelObservation;
+
 // Point estimate of a pulse's effect on the motor's change of position without uncertainty:
 // dir * V_real.mean * run_duration.
 float PulseMotorModel_PredictDelta(const PulseMotorModel *model, PulseCommand pulse);
@@ -110,10 +175,18 @@ PulseMotorModel PulseMotorModel_PointEstimateFromObservations(const PulseMotorMo
 // is a diagnostic difference between them, not a distribution.
 PulseMotorModel PulseMotorModel_Subtract(PulseMotorModel a, PulseMotorModel b);
 
+// Clamps every estimator-movable field of *m into the PULSE_MODEL_*
+// bounds above (T_start, T_stop, V_real.mean/.variance -- V_min_cmd and
+// minimumPulseWidth are never estimator-moved, see
+// PulseMotorModel_PointEstimateFromObservations, so they're left alone).
+// Call after every model update a live estimator produces, before the
+// updated model is sent anywhere.
+void PulseMotorModel_ClampToPhysicalBounds(PulseMotorModel *m);
+
 // Running sample statistics over a stream of PulseMotorModel-shaped values
-// (e.g. per-pulse residuals -- see PulseMotorModel_Subtract above -- pooled
-// across many pulses/joints, per the "all 7 joints are the same motor"
-// assumption behind PulseMotorModelEstimatorMixture_Bank.lf) -- one
+// (e.g. raw per-pulse observations pooled across many pulses/joints, per
+// the "all 7 joints are the same motor" assumption behind
+// PulseMotorModelEstimatorMixture_Bank.lf's epoch stats) -- one
 // SampleStats (stats.h) per scalar field, V_real's GaussianRV split into
 // its mean and variance since SampleStats itself only tracks a single
 // running scalar.
@@ -125,7 +198,9 @@ typedef struct {
   // delta/duration is one point measurement, not a distribution), so this
   // field just accumulates a running stat over a stream of zeros for now.
   // The actual V_real variance worth having is the pulse-to-pulse SPREAD of
-  // V_real_mean above, not this field -- kept here rather than removed in
+  // V_real_mean above, not this field -- which is exactly what
+  // PulseMotorModelEstimatorMixture_Bank.lf's epoch close now folds into
+  // the shared model's V_real.variance. Kept here rather than removed in
   // case a future per-pulse variance estimate (e.g. from multiple
   // running_velocity_stats_ samples) replaces the always-0 placeholder.
   SampleStats V_real_variance;

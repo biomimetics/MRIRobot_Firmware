@@ -1,6 +1,7 @@
 #ifndef STATS_H
 #define STATS_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*==========================================================
@@ -112,6 +113,41 @@ float SampleStats_SampleVariance(const SampleStats *s);
 float SampleStats_PopulationVariance(const SampleStats *s);
 
 float SampleStats_StandardDeviation(const SampleStats *s);
+
+
+/*----------------------------------------------------------
+ * Hypothesis-test-shaped helpers
+ *----------------------------------------------------------*/
+
+/*
+ * One-sample z-test: is the sample mean statistically
+ * significantly different from `reference`?
+ *
+ * True iff n >= min_count AND
+ *
+ *     |mean - reference| > z_threshold * stddev / sqrt(n)
+ *
+ * (i.e. reference lies outside the mean's z_threshold-sigma
+ * confidence interval). z_threshold ~2.0 for the usual ~95%
+ * level. A z-test rather than a proper t-test: at the
+ * min_count values callers use (>= ~20) the two differ by a
+ * few percent on the threshold, not worth carrying a
+ * t-distribution table for.
+ *
+ * A zero-variance sample (all n observations identical) with
+ * mean != reference tests as different -- consistent with the
+ * formula (the confidence interval has zero width).
+ */
+bool SampleStats_MeanDiffersFrom(const SampleStats *s, float reference, float z_threshold, uint32_t min_count);
+
+/*
+ * True iff n >= min_count AND x lies more than
+ * sigma_threshold sample standard deviations from the sample
+ * mean. Below min_count this always returns false -- with too
+ * few samples the mean/stddev aren't trustworthy enough to
+ * reject anything against.
+ */
+bool SampleStats_IsOutlier(const SampleStats *s, float x, float sigma_threshold, uint32_t min_count);
 
 
 /*==========================================================

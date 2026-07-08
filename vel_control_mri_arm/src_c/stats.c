@@ -215,6 +215,32 @@ float SampleStats_StandardDeviation(const SampleStats *s)
 }
 
 
+/*----------------------------------------------------------
+ * Hypothesis-test-shaped helpers (see stats.h)
+ *----------------------------------------------------------*/
+
+bool SampleStats_MeanDiffersFrom(const SampleStats *s, float reference, float z_threshold, uint32_t min_count)
+{
+    if (s->n < min_count)
+        return false;
+
+    float standard_error =
+        SampleStats_StandardDeviation(s) / sqrtf((float)s->n);
+
+    return fabsf(SampleStats_Mean(s) - reference) >
+           z_threshold * standard_error;
+}
+
+bool SampleStats_IsOutlier(const SampleStats *s, float x, float sigma_threshold, uint32_t min_count)
+{
+    if (s->n < min_count)
+        return false;
+
+    return fabsf(x - SampleStats_Mean(s)) >
+           sigma_threshold * SampleStats_StandardDeviation(s);
+}
+
+
 /*==========================================================
  * Distribution conversions
  *==========================================================*/

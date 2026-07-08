@@ -1,0 +1,82 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  }
+}
+
+// Placeholder for a future proper state estimator: the intent is to fuse
+// USM encoder position/velocity with the actual commanded velocity (e.g.
+// filtering noise, detecting stiction, reconciling against a PulseMotorModel)
+// before handing cleaned position/velocity estimates on to
+// State_Machine.lf. Sits inline between Encoder.lf's QDEC and
+// State_Machine.lf now so that estimation logic can be added here later
+// without re-wiring Main.lf again.
+//
+// For now this just passes position/velocity straight through unchanged.
+// commanded_velocity_input is accepted and cached but not yet used by
+// anything -- a future estimator would need it (e.g. to compare commanded
+// vs. actual motion), so it's wired in ahead of time.
+//
+// Only wired to USM signals, not SEA -- SEA position/velocity continue to
+// go directly from Encoder.lf to State_Machine.lf (see Main.lf), since
+// this estimator's future job (motor-side state estimation feeding
+// PulseMotorModelEstimator.lf) is specifically about the USM/motor-shaft
+// signal, not the SEA spring deflection. If this reactor is reused for the
+// SEAs later on, use_commanded_velocity_ below is the switch to flip.
+reactor EncoderStateEstimator(
+  use_commanded_velocity: bool = false // does nothing yet
+) {
+  input[7] position_input: float
+  input[7] velocity_input: float
+  input[7] commanded_velocity_input: float
+
+  // Static per-joint offset from State_Machine.lf, added to position_input
+  // below before it reaches position_output. Defaults to zero (see
+  // position_offset_'s state default) -- State_Machine.lf's own
+  // position_offset output stays at zero until a not-yet-defined ROS2 UART
+  // message updates it there, for restoring the STM32's estimated position
+  // to a pre-known value after an STM32/FPGA restart.
+  input[7] position_offset_input: float
+
+  output[7] position_output: float
+  output[7] velocity_output: float
+
+  state commanded_velocity_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  state position_offset_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
+  // Does nothing yet -- see the constructor parameter of the same name.
+  state use_commanded_velocity_: bool = false
+
+  reaction(startup) {=
+    self->use_commanded_velocity_ = self->use_commanded_velocity;
+  =}
+
+  // Thin cache-only reaction -- not consumed by anything yet, see the
+  // reactor-level comment above.
+  reaction(commanded_velocity_input) {=
+    for (int i = 0; i < commanded_velocity_input_width; i++) {
+      self->commanded_velocity_[i] = commanded_velocity_input[i]->value;
+    }
+  =}
+
+  // Thin cache-only reaction, same as commanded_velocity_input's above.
+  reaction(position_offset_input) {=
+    for (int i = 0; i < position_offset_input_width; i++) {
+      self->position_offset_[i] = position_offset_input[i]->value;
+    }
+  =}
+
+  reaction(position_input) -> position_output {=
+    for (int i = 0; i < position_input_width; i++) {
+      lf_set(position_output[i], position_input[i]->value + self->position_offset_[i]);
+    }
+  =}
+
+  reaction(velocity_input) -> velocity_output {=
+    for (int i = 0; i < velocity_input_width; i++) {
+      lf_set(velocity_output[i], velocity_input[i]->value);
+    }
+  =}
+}

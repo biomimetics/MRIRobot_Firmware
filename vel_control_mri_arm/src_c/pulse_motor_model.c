@@ -15,6 +15,15 @@ const char *MotorState_Name(MotorState s) {
   }
 }
 
+const char *PulseOnsetSource_Name(PulseOnsetSource s) {
+  switch (s) {
+    case PULSE_ONSET_NONE: return "none";
+    case PULSE_ONSET_POSITION: return "pos";
+    case PULSE_ONSET_VELOCITY: return "vel";
+    default: return "?";
+  }
+}
+
 float PulseMotorModel_PredictDelta(const PulseMotorModel *model, PulseCommand pulse) {
   return pulse.dir * model->V_real.mean * pulse.run_duration;
 }
@@ -51,6 +60,21 @@ PulseMotorModel PulseMotorModel_Subtract(PulseMotorModel a, PulseMotorModel b) {
   out.T_stop = a.T_stop - b.T_stop;
   out.minimumPulseWidth = a.minimumPulseWidth - b.minimumPulseWidth;
   return out;
+}
+
+static float clamp_f(float x, float min, float max) {
+  if (x < min) return min;
+  if (x > max) return max;
+  return x;
+}
+
+void PulseMotorModel_ClampToPhysicalBounds(PulseMotorModel *m) {
+  m->T_start = clamp_f(m->T_start, PULSE_MODEL_T_START_MIN_S, PULSE_MODEL_T_START_MAX_S);
+  m->T_stop = clamp_f(m->T_stop, PULSE_MODEL_T_STOP_MIN_S, PULSE_MODEL_T_STOP_MAX_S);
+  m->V_real.mean = clamp_f(m->V_real.mean, PULSE_MODEL_V_REAL_MEAN_MIN, PULSE_MODEL_V_REAL_MEAN_MAX);
+  if (m->V_real.variance < PULSE_MODEL_V_REAL_VARIANCE_MIN) {
+    m->V_real.variance = PULSE_MODEL_V_REAL_VARIANCE_MIN;
+  }
 }
 
 void PulseMotorModelSampleStats_Init(PulseMotorModelSampleStats *s) {

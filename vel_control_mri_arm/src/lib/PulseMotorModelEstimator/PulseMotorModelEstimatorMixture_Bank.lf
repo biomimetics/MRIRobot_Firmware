@@ -33,16 +33,83 @@ preamble {=
 // split as Small_DeltaP_Pulse_Controller_Bank.lf, but NOT the same
 // per-joint-passthrough wiring: the big assumption behind this reactor is
 // that all 7 joints are fundamentally the same physical motor/gearbox, so
-// rather than handing back 7 independent per-joint PulseMotorModels, this
-// reactor pools every joint's residual_output (see that port's comment on
-// PulseMotorModelEstimator.lf) into a single shared/fused belief, via
-// PulseMotorModelSampleStats (pulse_motor_model.h) -- more, more-diverse
-// pulse observations per unit time than any one joint could supply on its
-// own. Nothing here turns the pooled stats into an updated PulseMotorModel
-// yet (see reaction(estimators.residual_output) below) -- this reactor only
-// accumulates them; motor_model_output is declared but no reaction ever
-// sets it.
-reactor PulseMotorModelEstimatorMixture_Bank {
+// each joint's raw per-pulse observations (see observation_output's comment
+// on PulseMotorModelEstimator.lf) are pooled into one shared model belief --
+// more, more-diverse pulse observations per unit time than any one joint
+// could supply on its own.
+//
+// This reactor OWNS the one authoritative PulseMotorModel. The update runs
+// in epochs -- collect / test / step / broadcast:
+//
+//   1. COLLECT epoch_min_samples pooled observations into epoch_stats_
+//      (with a whole-observation outlier trim -- see the folding reaction
+//      below), plus long-horizon per-joint copies for the T_start
+//      shrinkage/diagnostics.
+//   2. TEST each observed field's epoch mean against the current model
+//      value (one-sample z-test, SampleStats_MeanDiffersFrom): a field
+//      whose observations are statistically indistinguishable from the
+//      model is left alone -- the model is already right there.
+//   3. STEP each field that differs, damped: model += step_alpha * (mean -
+//      model). The observation mean directly estimates the true parameter
+//      (observations are raw, not model-relative residuals), so damping is
+//      purely a safety rail against a noisy epoch, not something the
+//      iteration needs to converge. Then clamp to physical bounds
+//      (PulseMotorModel_ClampToPhysicalBounds). V_real.variance is special:
+//      no significance test, just a damped step toward the epoch's
+//      pulse-to-pulse spread of the V_real point estimates every epoch --
+//      that spread IS the V_real variance worth having (the per-pulse
+//      observations carry variance 0, see PulseMotorModelEstimator.lf).
+//   4. BROADCAST the updated model to every consumer: motor_model_output
+//      (deltap_bank's planner + encoder_state_estimator's observers, see
+//      Main.lf) and the contained estimators' own motor_model_input (their
+//      observation gating). Per-channel, not identical: each joint's
+//      T_start gets a shrinkage blend toward that joint's own long-horizon
+//      observation mean (see the epoch-close block below) -- the startup
+//      delay is the one parameter known NOT to be consistent between
+//      motors. Then reset epoch_stats_ and start the next epoch. Because
+//      observations are raw (not residuals), a reset is drift hygiene, not
+//      a correctness requirement -- stale samples bias toward old truth,
+//      they don't break convergence.
+//
+// "Converged" is just an epoch where no mean field stepped -- tracked in
+// converged_epochs_ for the diagnostics printout; the loop keeps running
+// regardless, so thermal/wear drift keeps being tracked for free.
+reactor PulseMotorModelEstimatorMixture_Bank(
+  // Pooled observations required before an epoch closes. At ~25, the
+  // z-test in step 2 is within a few percent of an exact t-test, and one
+  // epoch is ~3-4 pulses per joint.
+  epoch_min_samples: int = 25,
+  // z threshold for SampleStats_MeanDiffersFrom -- ~2.0 is the usual ~95%
+  // confidence level.
+  significance_z: float = 2.0,
+  // Damping on each field's step toward its epoch mean, 0..1. 1.0 would
+  // jump straight to the epoch mean; ~0.4 reaches a moved parameter in a
+  // handful of epochs while a single weird epoch can only do bounded
+  // damage.
+  step_alpha: float = 0.4,
+  // Whole-observation outlier trim: an observation any of whose VALID
+  // fields sits more than this many sample-sigmas from the current epoch's
+  // mean is discarded outright (a corrupted pulse -- EMI burst, movement
+  // threshold firing on noise -- corrupts all its observations at once, so
+  // trimming the whole struct beats trimming per-field). Only active once
+  // the epoch has outlier_min_samples, per SampleStats_IsOutlier.
+  outlier_sigma: float = 3.0,
+  outlier_min_samples: int = 8,
+  // Minimum per-FIELD sample count for that field to be significance-
+  // tested/stepped at epoch close. Separate from (and smaller than)
+  // epoch_min_samples because observations now carry per-field validity
+  // (see PulseModelObservation in pulse_motor_model.h): an epoch can close
+  // with plenty of T_stop/position evidence while V_real -- gated by its
+  // quality window floor -- has collected fewer samples. A field short of
+  // this simply waits for a later epoch; it doesn't hold the others back.
+  field_min_samples: int = 15,
+  // Shrinkage prior weight for the per-joint T_start blend, in
+  // effective-sample-count units: joint j's broadcast T_start =
+  // (1-w)*pooled + w*joint_mean with w = n_j / (n_j + this). Joints with
+  // few observations lean on the pool; joints with lots of evidence earn
+  // their own value (empirical-Bayes shrinkage).
+  t_start_shrinkage_n0: float = 30.0
+) {
   input[7] position_input: float
   input[7] velocity_input: float
   input[7] commanded_velocity_input: float
@@ -51,17 +118,21 @@ reactor PulseMotorModelEstimatorMixture_Bank {
 
   output[7] motor_model_output: PulseMotorModel
 
-  // Running stats over every joint's residual_output, pooled together --
-  // per the reactor-level comment above, every joint's residual is raw
-  // material for one shared/fused belief rather than 7 independent ones.
-  state residual_stats_: PulseMotorModelSampleStats
+  // The authoritative shared model -- every broadcast consumer's belief
+  // derives from this (plus the per-joint T_start blend at broadcast
+  // time). Seeded from INITIAL_MOTOR_MODEL, same as every other consumer's
+  // own seed, so pre-first-broadcast beliefs already agree.
+  state model_: PulseMotorModel
 
-  // Per-joint copy of the same running stats, kept purely for the
-  // diagnostic printout below -- NOT used for anything the pooling/fusion
-  // logic itself does (that's still all residual_stats_ above, per the
-  // "same physical motor" assumption). Lets us watch for one joint being a
-  // persistent outlier relative to the pooled belief, which residual_stats_
-  // alone would hide.
+  // Pooled observation stats for the CURRENT epoch only -- reset at every
+  // epoch close (see the reactor-level comment's step 4).
+  state epoch_stats_: PulseMotorModelSampleStats
+
+  // Long-horizon per-joint observation stats -- NOT reset at epoch close.
+  // Feed the per-joint T_start shrinkage blend and the outlier diagnostics
+  // printout. TODO: no forgetting yet -- per-joint T_start differences are
+  // assumed quasi-static (a hardware property, not drift); if per-joint
+  // drift turns out to be real, these need a windowed/discounted variant.
   //
   // Individually-named states rather than a PulseMotorModelSampleStats[7]
   // array: unlike this codebase's existing float[7]/bool[7] state arrays
@@ -70,22 +141,37 @@ reactor PulseMotorModelEstimatorMixture_Bank {
   // corrupted on hardware -- SampleStats_Count on some joints read back
   // flash-address-range garbage (e.g. 0x08007fb5) instead of a real count.
   // Individual named states are the same pattern proven to work for single
-  // (non-array) struct states elsewhere (e.g. model_: PulseMotorModel in
-  // PulseMotorModelEstimator.lf) -- reaction(estimators.residual_output)
-  // below builds a local pointer array from these to index by joint.
-  state per_joint_residual_stats_0_: PulseMotorModelSampleStats
-  state per_joint_residual_stats_1_: PulseMotorModelSampleStats
-  state per_joint_residual_stats_2_: PulseMotorModelSampleStats
-  state per_joint_residual_stats_3_: PulseMotorModelSampleStats
-  state per_joint_residual_stats_4_: PulseMotorModelSampleStats
-  state per_joint_residual_stats_5_: PulseMotorModelSampleStats
-  state per_joint_residual_stats_6_: PulseMotorModelSampleStats
+  // (non-array) struct states elsewhere (e.g. model_ above) -- reactions
+  // below build a local pointer array from these to index by joint.
+  state per_joint_observation_stats_0_: PulseMotorModelSampleStats
+  state per_joint_observation_stats_1_: PulseMotorModelSampleStats
+  state per_joint_observation_stats_2_: PulseMotorModelSampleStats
+  state per_joint_observation_stats_3_: PulseMotorModelSampleStats
+  state per_joint_observation_stats_4_: PulseMotorModelSampleStats
+  state per_joint_observation_stats_5_: PulseMotorModelSampleStats
+  state per_joint_observation_stats_6_: PulseMotorModelSampleStats
 
-  // Counts every residual folded into residual_stats_ above (across all
-  // joints, not per-joint) -- purely so the diagnostic printf below can
-  // throttle itself to every 10th update instead of spamming a line per
-  // pulse.
-  state update_count_: int = 0
+  // Non-dud, non-outlier observations folded into the current epoch --
+  // the epoch-close trigger (individual fields can have smaller counts,
+  // per-field validity -- see field_min_samples above). Reset with
+  // epoch_stats_.
+  state epoch_observation_count_: int = 0
+
+  // Diagnostics counters -- epochs closed so far, consecutive epochs where
+  // no mean field stepped (the working "converged" signal), observations
+  // discarded by the outlier trim since startup, and dud pulses (commanded
+  // but never really moved -- see PulseModelObservation.dud) since startup,
+  // pooled and per joint. Duds are counted, logged (the per-pulse line
+  // comes from PulseMotorModelEstimator.lf itself), and otherwise excluded
+  // from every stat: their only field-shaped content is a copy of the
+  // model. A persistently dud-heavy joint in the heartbeat printout is the
+  // signal that its pulses are below the motor's real minimum effective
+  // width/dead time.
+  state epoch_count_: int = 0
+  state converged_epochs_: int = 0
+  state discarded_outliers_: int = 0
+  state dud_count_: int = 0
+  state per_joint_dud_count_: int[7] = {0, 0, 0, 0, 0, 0, 0}
 
   estimators = new[7] PulseMotorModelEstimator()
 
@@ -95,96 +181,246 @@ reactor PulseMotorModelEstimatorMixture_Bank {
   motor_state_input -> estimators.motor_state_input
   planned_pulse_input -> estimators.planned_pulse_input
 
-  // Diagnostic only -- see reaction(heartbeat) below. Independent of the
-  // every-10th-update printf in reaction(estimators.residual_output): this
-  // one fires on a wall-clock cadence regardless of how many (if any)
-  // residuals have actually landed, so it's useful for confirming the
-  // pipeline is alive even when samples are slow/not arriving at all.
+  // Diagnostic only -- fires on a wall-clock cadence regardless of how many
+  // (if any) observations have actually landed, so it's useful for
+  // confirming the pipeline is alive even when samples are slow/not
+  // arriving at all.
   timer heartbeat(0, 5 s)
 
   reaction(startup) {=
-    PulseMotorModelSampleStats_Init(&self->residual_stats_);
-    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_0_);
-    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_1_);
-    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_2_);
-    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_3_);
-    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_4_);
-    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_5_);
-    PulseMotorModelSampleStats_Init(&self->per_joint_residual_stats_6_);
+    self->model_ = INITIAL_MOTOR_MODEL;
+    PulseMotorModelSampleStats_Init(&self->epoch_stats_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_0_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_1_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_2_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_3_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_4_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_5_);
+    PulseMotorModelSampleStats_Init(&self->per_joint_observation_stats_6_);
   =}
 
   reaction(heartbeat) {=
+    // Milli-scaled ints rather than %f -- this platform's printf doesn't
+    // reliably support floats (same convention as
+    // small_deltap_pulse_controller.c's SmallDeltaPPulse_PrintDebugInfo).
     printf(
-        "PulseMotorModelEstimatorMixture heartbeat: residual_stats_ n=%lu\r\n",
-        (unsigned long) SampleStats_Count(&self->residual_stats_.V_real_mean));
+        "PMMixture heartbeat: epoch obs=%d/%d (tstart n=%lu tstop n=%lu vreal n=%lu), "
+        "epochs=%d (converged streak %d), outliers=%d, duds=%d "
+        "[%d %d %d %d %d %d %d], model V_real=%d T_start=%d T_stop=%d (milli-units)\r\n",
+        self->epoch_observation_count_,
+        self->epoch_min_samples,
+        (unsigned long) SampleStats_Count(&self->epoch_stats_.T_start),
+        (unsigned long) SampleStats_Count(&self->epoch_stats_.T_stop),
+        (unsigned long) SampleStats_Count(&self->epoch_stats_.V_real_mean),
+        self->epoch_count_,
+        self->converged_epochs_,
+        self->discarded_outliers_,
+        self->dud_count_,
+        self->per_joint_dud_count_[0], self->per_joint_dud_count_[1],
+        self->per_joint_dud_count_[2], self->per_joint_dud_count_[3],
+        self->per_joint_dud_count_[4], self->per_joint_dud_count_[5],
+        self->per_joint_dud_count_[6],
+        (int) (self->model_.V_real.mean * 1000.0f),
+        (int) (self->model_.T_start * 1000.0f),
+        (int) (self->model_.T_stop * 1000.0f));
   =}
 
-  // Folds every joint's freshly-arrived residual_output into
-  // residual_stats_ above -- presence on this multiport trigger *is* "a new
-  // residual just landed for this joint," same convention as the port
-  // itself (see its comment on PulseMotorModelEstimator.lf). Nothing yet
-  // reads residual_stats_ back out; the actual fusion/model-update logic is
-  // a later step (see the reactor-level comment above).
-  reaction(estimators.residual_output) {=
+  // Folds every joint's freshly-arrived observation into the pooled epoch
+  // stats (plus that joint's long-horizon copy), then closes the epoch --
+  // test/step/clamp/broadcast/reset, see the reactor-level comment -- once
+  // enough have pooled. Presence on this multiport trigger *is* "a new
+  // observation just landed for this joint," same convention as the port
+  // itself (see its comment on PulseMotorModelEstimator.lf).
+  reaction(estimators.observation_output) -> motor_model_output, estimators.motor_model_input {=
     // Local pointer array, built from the 7 individually-declared states
-    // above -- see per_joint_residual_stats_0_'s comment for why this isn't
-    // itself a PulseMotorModelSampleStats[7] state array.
+    // above -- see per_joint_observation_stats_0_'s comment for why this
+    // isn't itself a PulseMotorModelSampleStats[7] state array.
     PulseMotorModelSampleStats *per_joint[7] = {
-      &self->per_joint_residual_stats_0_,
-      &self->per_joint_residual_stats_1_,
-      &self->per_joint_residual_stats_2_,
-      &self->per_joint_residual_stats_3_,
-      &self->per_joint_residual_stats_4_,
-      &self->per_joint_residual_stats_5_,
-      &self->per_joint_residual_stats_6_,
+      &self->per_joint_observation_stats_0_,
+      &self->per_joint_observation_stats_1_,
+      &self->per_joint_observation_stats_2_,
+      &self->per_joint_observation_stats_3_,
+      &self->per_joint_observation_stats_4_,
+      &self->per_joint_observation_stats_5_,
+      &self->per_joint_observation_stats_6_,
     };
 
+    /*----------------------------------------------------------
+        Fold this tick's observations (dud exclusion + outlier trim,
+        then per-field folding gated on each field's validity flag --
+        see PulseModelObservation in pulse_motor_model.h)
+    ----------------------------------------------------------*/
+
     for (int i = 0; i < estimators_width; i++) {
-      if (estimators[i].residual_output->is_present) {
-        PulseMotorModelSampleStats_Add(&self->residual_stats_, estimators[i].residual_output->value);
-        PulseMotorModelSampleStats_Add(per_joint[i], estimators[i].residual_output->value);
-        self->update_count_++;
+      if (!estimators[i].observation_output->is_present) continue;
+      PulseModelObservation obs = estimators[i].observation_output->value;
 
-        // Diagnostic only, every 10th pooled update -- milli-scaled ints
-        // rather than %f, same convention as
-        // small_deltap_pulse_controller.c's SmallDeltaPPulse_PrintDebugInfo
-        // (this platform's printf doesn't reliably support floats). Prints
-        // the pooled stats, then every joint's own copy right underneath in
-        // the same block, so a joint that's a persistent outlier relative
-        // to the pooled belief (which might be masking a real per-joint
-        // issue) is visible at a glance instead of buried across separate
-        // log lines.
-        if (self->update_count_ % 10 == 0) {
-          // V_real.variance omitted -- always 0 for now (see that field's
-          // comment in pulse_motor_model.h), so it wouldn't say anything a
-          // reader couldn't already assume.
-          printf(
-              "PulseMotorModelEstimatorMixture residual_stats_ [n=%lu]: "
-              "V_real.mean=%d+-%d T_start=%d+-%d T_stop=%d+-%d (milli-units)\r\n",
-              (unsigned long) SampleStats_Count(&self->residual_stats_.V_real_mean),
-              (int) (SampleStats_Mean(&self->residual_stats_.V_real_mean) * 1000.0f),
-              (int) (SampleStats_StandardDeviation(&self->residual_stats_.V_real_mean) * 1000.0f),
-              (int) (SampleStats_Mean(&self->residual_stats_.T_start) * 1000.0f),
-              (int) (SampleStats_StandardDeviation(&self->residual_stats_.T_start) * 1000.0f),
-              (int) (SampleStats_Mean(&self->residual_stats_.T_stop) * 1000.0f),
-              (int) (SampleStats_StandardDeviation(&self->residual_stats_.T_stop) * 1000.0f));
-
-          for (int j = 0; j < 7; j++) {
-            PulseMotorModelSampleStats *joint_stats = per_joint[j];
-            printf(
-                "  joint[%d] residual_stats_ [n=%lu]: "
-                "V_real.mean=%d+-%d T_start=%d+-%d T_stop=%d+-%d (milli-units)\r\n",
-                j,
-                (unsigned long) SampleStats_Count(&joint_stats->V_real_mean),
-                (int) (SampleStats_Mean(&joint_stats->V_real_mean) * 1000.0f),
-                (int) (SampleStats_StandardDeviation(&joint_stats->V_real_mean) * 1000.0f),
-                (int) (SampleStats_Mean(&joint_stats->T_start) * 1000.0f),
-                (int) (SampleStats_StandardDeviation(&joint_stats->T_start) * 1000.0f),
-                (int) (SampleStats_Mean(&joint_stats->T_stop) * 1000.0f),
-                (int) (SampleStats_StandardDeviation(&joint_stats->T_stop) * 1000.0f));
-          }
-        }
+      // Duds carry no valid fields -- counted for the heartbeat's
+      // per-joint ledger (the per-pulse log line already came from the
+      // estimator itself) and excluded from every stat.
+      if (obs.dud) {
+        self->dud_count_++;
+        self->per_joint_dud_count_[i]++;
+        continue;
       }
+
+      // Whole-observation trim against the current epoch, checking only
+      // the fields this observation actually carries -- see
+      // outlier_sigma's comment. Inert (IsOutlier returns false) until the
+      // epoch has outlier_min_samples, so an epoch's first few samples are
+      // never rejected against an untrustworthy mean.
+      bool outlier =
+          (obs.t_start_valid &&
+           SampleStats_IsOutlier(&self->epoch_stats_.T_start, obs.values.T_start,
+                                 self->outlier_sigma, (uint32_t) self->outlier_min_samples)) ||
+          (obs.t_stop_valid &&
+           SampleStats_IsOutlier(&self->epoch_stats_.T_stop, obs.values.T_stop,
+                                 self->outlier_sigma, (uint32_t) self->outlier_min_samples)) ||
+          (obs.v_real_valid &&
+           SampleStats_IsOutlier(&self->epoch_stats_.V_real_mean, obs.values.V_real.mean,
+                                 self->outlier_sigma, (uint32_t) self->outlier_min_samples));
+      if (outlier) {
+        self->discarded_outliers_++;
+        printf("PMMixture: joint[%d] observation discarded as outlier "
+               "(V_real=%d%s T_start=%d%s T_stop=%d%s milli-units)\r\n",
+               i,
+               (int) (obs.values.V_real.mean * 1000.0f), obs.v_real_valid ? "" : "!",
+               (int) (obs.values.T_start * 1000.0f), obs.t_start_valid ? "" : "!",
+               (int) (obs.values.T_stop * 1000.0f), obs.t_stop_valid ? "" : "!");
+        continue;
+      }
+
+      // Per-field folding -- each field only where its flag says the
+      // observation actually measured it (PulseMotorModelSampleStats_Add
+      // would fold model-copy placeholders for the invalid fields).
+      if (obs.t_start_valid) {
+        SampleStats_Add(&self->epoch_stats_.T_start, obs.values.T_start);
+        SampleStats_Add(&per_joint[i]->T_start, obs.values.T_start);
+      }
+      if (obs.t_stop_valid) {
+        SampleStats_Add(&self->epoch_stats_.T_stop, obs.values.T_stop);
+        SampleStats_Add(&per_joint[i]->T_stop, obs.values.T_stop);
+      }
+      if (obs.v_real_valid) {
+        SampleStats_Add(&self->epoch_stats_.V_real_mean, obs.values.V_real.mean);
+        SampleStats_Add(&per_joint[i]->V_real_mean, obs.values.V_real.mean);
+      }
+      self->epoch_observation_count_++;
     }
+
+    /*----------------------------------------------------------
+        Epoch close: test / step / clamp / broadcast / reset
+    ----------------------------------------------------------*/
+
+    if (self->epoch_observation_count_ < self->epoch_min_samples) {
+      return;
+    }
+
+    PulseMotorModel updated = self->model_;
+
+    // TEST then STEP, per observed field. Only T_start/T_stop/V_real are
+    // ever touched -- V_min_cmd/minimumPulseWidth aren't observations at
+    // all (PulseMotorModel_PointEstimateFromObservations copies them from
+    // the estimator's current model), so folding or testing them would be
+    // circular; they ride along unchanged.
+    // Per-field min_count is field_min_samples, not epoch_min_samples:
+    // with per-field validity the fields legitimately collect different
+    // amounts of evidence per epoch -- see field_min_samples' comment. A
+    // field short of it fails MeanDiffersFrom and just waits.
+    bool stepped_t_start = SampleStats_MeanDiffersFrom(
+        &self->epoch_stats_.T_start, self->model_.T_start,
+        self->significance_z, (uint32_t) self->field_min_samples);
+    bool stepped_t_stop = SampleStats_MeanDiffersFrom(
+        &self->epoch_stats_.T_stop, self->model_.T_stop,
+        self->significance_z, (uint32_t) self->field_min_samples);
+    bool stepped_v_real = SampleStats_MeanDiffersFrom(
+        &self->epoch_stats_.V_real_mean, self->model_.V_real.mean,
+        self->significance_z, (uint32_t) self->field_min_samples);
+
+    if (stepped_t_start) {
+      updated.T_start += self->step_alpha * (SampleStats_Mean(&self->epoch_stats_.T_start) - self->model_.T_start);
+    }
+    if (stepped_t_stop) {
+      updated.T_stop += self->step_alpha * (SampleStats_Mean(&self->epoch_stats_.T_stop) - self->model_.T_stop);
+    }
+    if (stepped_v_real) {
+      updated.V_real.mean += self->step_alpha * (SampleStats_Mean(&self->epoch_stats_.V_real_mean) - self->model_.V_real.mean);
+    }
+
+    // V_real.variance: damped toward this epoch's pulse-to-pulse spread of
+    // the V_real point estimates, no significance test -- see the
+    // reactor-level comment's step 3. Slightly conservative (the spread
+    // includes per-pulse measurement noise on top of true motor
+    // variability), which errs the planner's overshoot bound in the safe
+    // direction. Gated on the same field_min_samples as the mean: a
+    // variance off a handful of samples is itself mostly noise.
+    if (SampleStats_Count(&self->epoch_stats_.V_real_mean) >= (uint32_t) self->field_min_samples) {
+      float epoch_v_real_spread = SampleStats_SampleVariance(&self->epoch_stats_.V_real_mean);
+      updated.V_real.variance += self->step_alpha * (epoch_v_real_spread - updated.V_real.variance);
+    }
+
+    // Safety backstop -- a bad epoch can never produce a model that plans
+    // absurd pulses (see the PULSE_MODEL_* bounds in pulse_motor_model.h).
+    PulseMotorModel_ClampToPhysicalBounds(&updated);
+
+    bool any_step = stepped_t_start || stepped_t_stop || stepped_v_real;
+    self->epoch_count_++;
+    self->converged_epochs_ = any_step ? 0 : self->converged_epochs_ + 1;
+
+    // Log every applied update -- old -> new per field plus the epoch
+    // evidence it stepped on; when a bad epoch slips through, this is the
+    // only way to reconstruct why. Milli-scaled ints, printf-float
+    // convention as above.
+    printf(
+        "PMMixture epoch %d [obs=%d]: V_real %d->%d (obs %d+-%d n=%lu,%s) "
+        "T_start %d->%d (obs %d+-%d n=%lu,%s) T_stop %d->%d (obs %d+-%d n=%lu,%s) "
+        "V_var->%d (milli-units)\r\n",
+        self->epoch_count_,
+        self->epoch_observation_count_,
+        (int) (self->model_.V_real.mean * 1000.0f), (int) (updated.V_real.mean * 1000.0f),
+        (int) (SampleStats_Mean(&self->epoch_stats_.V_real_mean) * 1000.0f),
+        (int) (SampleStats_StandardDeviation(&self->epoch_stats_.V_real_mean) * 1000.0f),
+        (unsigned long) SampleStats_Count(&self->epoch_stats_.V_real_mean),
+        stepped_v_real ? "stepped" : "ns",
+        (int) (self->model_.T_start * 1000.0f), (int) (updated.T_start * 1000.0f),
+        (int) (SampleStats_Mean(&self->epoch_stats_.T_start) * 1000.0f),
+        (int) (SampleStats_StandardDeviation(&self->epoch_stats_.T_start) * 1000.0f),
+        (unsigned long) SampleStats_Count(&self->epoch_stats_.T_start),
+        stepped_t_start ? "stepped" : "ns",
+        (int) (self->model_.T_stop * 1000.0f), (int) (updated.T_stop * 1000.0f),
+        (int) (SampleStats_Mean(&self->epoch_stats_.T_stop) * 1000.0f),
+        (int) (SampleStats_StandardDeviation(&self->epoch_stats_.T_stop) * 1000.0f),
+        (unsigned long) SampleStats_Count(&self->epoch_stats_.T_stop),
+        stepped_t_stop ? "stepped" : "ns",
+        (int) (updated.V_real.variance * 1000.0f));
+
+    self->model_ = updated;
+
+    // BROADCAST, per-channel: the pooled model with each joint's T_start
+    // shrunk toward that joint's own long-horizon observation mean -- see
+    // t_start_shrinkage_n0's comment. Broadcast every closed epoch, even a
+    // no-step one (V_real.variance still moved, and every consumer applies
+    // updates cheaply/safely: deltap_bank latches until MOTOR_STOPPED, the
+    // others apply immediately by design).
+    for (int j = 0; j < estimators_width; j++) {
+      PulseMotorModel joint_model = updated;
+
+      uint32_t n_j = SampleStats_Count(&per_joint[j]->T_start);
+      if (n_j >= 2) {
+        float w = (float) n_j / ((float) n_j + self->t_start_shrinkage_n0);
+        joint_model.T_start = (1.0f - w) * updated.T_start
+                              + w * SampleStats_Mean(&per_joint[j]->T_start);
+        PulseMotorModel_ClampToPhysicalBounds(&joint_model);
+      }
+
+      lf_set(motor_model_output[j], joint_model);
+      lf_set(estimators[j].motor_model_input, joint_model);
+    }
+
+    // Fresh epoch. Drift hygiene rather than correctness (observations are
+    // raw, not model-relative) -- but it also keeps the significance test
+    // honest: mixing pre- and post-step samples would test the new model
+    // against evidence partly gathered while steering toward it.
+    PulseMotorModelSampleStats_Init(&self->epoch_stats_);
   =}
 }
