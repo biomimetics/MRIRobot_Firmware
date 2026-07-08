@@ -74,6 +74,13 @@ preamble {=
 // "Converged" is just an epoch where no mean field stepped -- tracked in
 // converged_epochs_ for the diagnostics printout; the loop keeps running
 // regardless, so thermal/wear drift keeps being tracked for free.
+//
+// enable_model_updates (default true) is the kill switch for step 4's
+// apply/broadcast half: collection, folding, testing, and per-epoch
+// logging all still run identically with it false, but the computed
+// update is never written to model_ or sent anywhere -- see that
+// parameter's comment for why (bringing up/testing the rest of the
+// pipeline against a fixed known model before trusting the live estimate).
 reactor PulseMotorModelEstimatorMixture_Bank(
   // Pooled observations required before an epoch closes. At ~25, the
   // z-test in step 2 is within a few percent of an exact t-test, and one
@@ -108,7 +115,20 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   // (1-w)*pooled + w*joint_mean with w = n_j / (n_j + this). Joints with
   // few observations lean on the pool; joints with lots of evidence earn
   // their own value (empirical-Bayes shrinkage).
-  t_start_shrinkage_n0: float = 30.0
+  t_start_shrinkage_n0: float = 30.0,
+  // false = dry-run mode: every epoch still collects, tests, and logs
+  // exactly as usual (so the observation pipeline itself -- onset
+  // detection, dud rejection, epoch stats, the printed "would step"
+  // evidence -- stays fully exercisable/testable), but the computed
+  // `updated` model is never written into self->model_ and
+  // motor_model_output/estimators.motor_model_input are never lf_set. Every
+  // consumer -- deltap_bank's planner, encoder_state_estimator's observers,
+  // and each PulseMotorModelEstimator's own gating -- is left running on
+  // whatever it seeded at its own startup (INITIAL_MOTOR_MODEL) for as
+  // long as this stays false. For bringing up/validating the rest of the
+  // pipeline (controller, encoder observer, etc.) against a known-fixed
+  // model before letting the live estimate start perturbing it.
+  enable_model_updates: bool = false
 ) {
   input[7] position_input: float
   input[7] velocity_input: float
@@ -204,9 +224,10 @@ reactor PulseMotorModelEstimatorMixture_Bank(
     // reliably support floats (same convention as
     // small_deltap_pulse_controller.c's SmallDeltaPPulse_PrintDebugInfo).
     printf(
-        "PMMixture heartbeat: epoch obs=%d/%d (tstart n=%lu tstop n=%lu vreal n=%lu), "
+        "PMMixture heartbeat%s: epoch obs=%d/%d (tstart n=%lu tstop n=%lu vreal n=%lu), "
         "epochs=%d (converged streak %d), outliers=%d, duds=%d "
         "[%d %d %d %d %d %d %d], model V_real=%d T_start=%d T_stop=%d (milli-units)\r\n",
+        self->enable_model_updates ? "" : " [DRY RUN]",
         self->epoch_observation_count_,
         self->epoch_min_samples,
         (unsigned long) SampleStats_Count(&self->epoch_stats_.T_start),
@@ -367,16 +388,19 @@ reactor PulseMotorModelEstimatorMixture_Bank(
     self->epoch_count_++;
     self->converged_epochs_ = any_step ? 0 : self->converged_epochs_ + 1;
 
-    // Log every applied update -- old -> new per field plus the epoch
-    // evidence it stepped on; when a bad epoch slips through, this is the
-    // only way to reconstruct why. Milli-scaled ints, printf-float
-    // convention as above.
+    // Log every computed update -- old -> new per field plus the epoch
+    // evidence it stepped on -- whether or not enable_model_updates
+    // actually lets it take effect below; when a bad epoch slips through
+    // (or when validating that the estimator WOULD do something sane
+    // before flipping enable_model_updates on), this is the only way to
+    // see it. Milli-scaled ints, printf-float convention as above.
     printf(
-        "PMMixture epoch %d [obs=%d]: V_real %d->%d (obs %d+-%d n=%lu,%s) "
+        "PMMixture epoch %d [obs=%d]%s: V_real %d->%d (obs %d+-%d n=%lu,%s) "
         "T_start %d->%d (obs %d+-%d n=%lu,%s) T_stop %d->%d (obs %d+-%d n=%lu,%s) "
         "V_var->%d (milli-units)\r\n",
         self->epoch_count_,
         self->epoch_observation_count_,
+        self->enable_model_updates ? "" : " [DRY RUN, not applied]",
         (int) (self->model_.V_real.mean * 1000.0f), (int) (updated.V_real.mean * 1000.0f),
         (int) (SampleStats_Mean(&self->epoch_stats_.V_real_mean) * 1000.0f),
         (int) (SampleStats_StandardDeviation(&self->epoch_stats_.V_real_mean) * 1000.0f),
@@ -394,27 +418,34 @@ reactor PulseMotorModelEstimatorMixture_Bank(
         stepped_t_stop ? "stepped" : "ns",
         (int) (updated.V_real.variance * 1000.0f));
 
-    self->model_ = updated;
+    // enable_model_updates gates everything past this point -- see that
+    // parameter's comment. In dry-run mode, model_ is left untouched (so
+    // the NEXT epoch's significance test still compares against the same
+    // fixed baseline every consumer is seeded with) and nothing is
+    // lf_set -- every consumer just keeps whatever it already has.
+    if (self->enable_model_updates) {
+      self->model_ = updated;
 
-    // BROADCAST, per-channel: the pooled model with each joint's T_start
-    // shrunk toward that joint's own long-horizon observation mean -- see
-    // t_start_shrinkage_n0's comment. Broadcast every closed epoch, even a
-    // no-step one (V_real.variance still moved, and every consumer applies
-    // updates cheaply/safely: deltap_bank latches until MOTOR_STOPPED, the
-    // others apply immediately by design).
-    for (int j = 0; j < estimators_width; j++) {
-      PulseMotorModel joint_model = updated;
+      // BROADCAST, per-channel: the pooled model with each joint's T_start
+      // shrunk toward that joint's own long-horizon observation mean --
+      // see t_start_shrinkage_n0's comment. Broadcast every closed epoch,
+      // even a no-step one (V_real.variance still moved, and every
+      // consumer applies updates cheaply/safely: deltap_bank latches
+      // until MOTOR_STOPPED, the others apply immediately by design).
+      for (int j = 0; j < estimators_width; j++) {
+        PulseMotorModel joint_model = updated;
 
-      uint32_t n_j = SampleStats_Count(&per_joint[j]->T_start);
-      if (n_j >= 2) {
-        float w = (float) n_j / ((float) n_j + self->t_start_shrinkage_n0);
-        joint_model.T_start = (1.0f - w) * updated.T_start
-                              + w * SampleStats_Mean(&per_joint[j]->T_start);
-        PulseMotorModel_ClampToPhysicalBounds(&joint_model);
+        uint32_t n_j = SampleStats_Count(&per_joint[j]->T_start);
+        if (n_j >= 2) {
+          float w = (float) n_j / ((float) n_j + self->t_start_shrinkage_n0);
+          joint_model.T_start = (1.0f - w) * updated.T_start
+                                + w * SampleStats_Mean(&per_joint[j]->T_start);
+          PulseMotorModel_ClampToPhysicalBounds(&joint_model);
+        }
+
+        lf_set(motor_model_output[j], joint_model);
+        lf_set(estimators[j].motor_model_input, joint_model);
       }
-
-      lf_set(motor_model_output[j], joint_model);
-      lf_set(estimators[j].motor_model_input, joint_model);
     }
 
     // Fresh epoch. Drift hygiene rather than correctness (observations are
@@ -422,5 +453,6 @@ reactor PulseMotorModelEstimatorMixture_Bank(
     // honest: mixing pre- and post-step samples would test the new model
     // against evidence partly gathered while steering toward it.
     PulseMotorModelSampleStats_Init(&self->epoch_stats_);
+    self->epoch_observation_count_ = 0;
   =}
 }

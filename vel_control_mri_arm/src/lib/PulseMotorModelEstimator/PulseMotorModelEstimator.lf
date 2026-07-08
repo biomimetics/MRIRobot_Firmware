@@ -92,6 +92,10 @@ preamble {=
 // Small_DeltaP_Pulse_Controller_Bank.lf. bank_index is used purely to tag
 // log lines with the joint number.
 reactor PulseMotorModelEstimator(
+  // Declaring a parameter with this exact name makes LF auto-assign each
+  // bank member its own index (the default only applies outside a bank) --
+  // used purely to tag this joint's log lines below.
+  bank_index: int = 0,
   // rad -- shared by the position-onset detector and the rest detector, on
   // opposite sides: while a pulse is in flight, |position -
   // pulse_start_position_| has to clear this before we call the motor

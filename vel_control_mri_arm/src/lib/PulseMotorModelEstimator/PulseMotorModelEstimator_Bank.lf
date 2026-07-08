@@ -41,7 +41,7 @@ reactor PulseMotorModelEstimator_Bank {
   input[7] planned_pulse_input: PulseCommand
   input[7] motor_model_input: PulseMotorModel
 
-  output[7] observation_output: PulseMotorModel
+  output[7] observation_output: PulseModelObservation
 
   estimators = new[7] PulseMotorModelEstimator()
 
