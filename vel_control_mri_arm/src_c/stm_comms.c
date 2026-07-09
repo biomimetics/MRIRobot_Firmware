@@ -162,6 +162,7 @@ void construct_state_message(StateMessage* msg, int behavior_mode,
                             const float* positions, const float* velocities,
                             const float* sea_positions, const float* sea_velocities,
                             const float* commanded_motor_velocity,
+                            bool running_single_pulse_command,
                             int time_stamp, int message_index) {
     if (!msg) return;
 
@@ -172,6 +173,8 @@ void construct_state_message(StateMessage* msg, int behavior_mode,
     memcpy(msg->sea_positions, sea_positions, sizeof(float) * DOF_NUMBER);
     memcpy(msg->sea_velocities, sea_velocities, sizeof(float) * DOF_NUMBER);
     memcpy(msg->commanded_motor_velocity, commanded_motor_velocity, sizeof(float) * DOF_NUMBER);
+
+    msg->running_single_pulse_command = running_single_pulse_command;
 
     msg->time_stamp = time_stamp;
     msg->message_index = message_index;
@@ -242,6 +245,8 @@ void print_state_message(const StateMessage *msg) {
     for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->commanded_motor_velocity[i]);
     printf("\n");
 
+    printf("  Running Single Pulse Command: %d\n", msg->running_single_pulse_command);
+
     printf("  Timestamp: %d\n", msg->time_stamp);
     printf("  Index: %d\n", msg->message_index);
 }
@@ -270,6 +275,8 @@ void print_state_message_int(const StateMessage *msg) {
     for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->commanded_motor_velocity[i] * FLOAT_PRINT_SCALE));
     printf("\n");
 
+    printf("  Running Single Pulse Command: %d\n", msg->running_single_pulse_command);
+
     printf("  Timestamp: %d\n", msg->time_stamp);
     printf("  Index: %d\n", msg->message_index);
 }
@@ -294,6 +301,8 @@ void write_state_message_csv_header(char *buffer, size_t size) {
     for (int i = 0; i < DOF_NUMBER; ++i)
         written += snprintf(buffer + written, size - written, "commanded_motor_velocity_%d,", i);
 
+    written += snprintf(buffer + written, size - written, "running_single_pulse_command,");
+
     written += snprintf(buffer + written, size - written, "time_stamp,message_index");
 }
 
@@ -316,6 +325,8 @@ void serialize_state_message_csv(const StateMessage *msg, char *buffer, size_t s
 
     for (int i = 0; i < DOF_NUMBER; ++i)
         written += snprintf(buffer + written, size - written, "%.*f,", FLOAT_DECIMAL_SCALE, msg->commanded_motor_velocity[i]);
+
+    written += snprintf(buffer + written, size - written, "%d,", msg->running_single_pulse_command);
 
     written += snprintf(buffer + written, size - written, "%d,%d", msg->time_stamp, msg->message_index);
 }

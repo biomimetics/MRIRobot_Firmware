@@ -66,7 +66,7 @@ static void test_state_message_round_trip(void) {
     StateMessage msg;
     zero_state_message(&msg);
     construct_state_message(&msg, 1, positions, velocities, sea_positions, sea_velocities,
-                             commanded_motor_velocity, 999, 3);
+                             commanded_motor_velocity, true, 999, 3);
 
     uint8_t data_buf[STATE_MSG_SIZE];
     int data_len = encode_state_message_to_data_buffer(&msg, data_buf);
@@ -87,6 +87,7 @@ static void test_state_message_round_trip(void) {
             && floats_equal(decoded.sea_velocities[i], sea_velocities[i])
             && floats_equal(decoded.commanded_motor_velocity[i], commanded_motor_velocity[i]);
     }
+    fields_match = fields_match && decoded.running_single_pulse_command == true;
     CHECK(fields_match, "decoded StateMessage fields match the originals");
 }
 

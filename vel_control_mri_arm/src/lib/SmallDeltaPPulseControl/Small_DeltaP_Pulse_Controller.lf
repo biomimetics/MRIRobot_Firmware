@@ -59,6 +59,8 @@ reactor Small_DeltaP_Pulse_Controller(
   // V_variance/etc. out from under a pulse that's already mid-flight.
   input motor_model_update_input: PulseMotorModel
 
+  input do_single_pulse_command: bool
+
   output command_velocity_output: float
 
   // Which MotorState this instance is currently in (STOPPED/STARTING/
@@ -90,6 +92,13 @@ reactor Small_DeltaP_Pulse_Controller(
   // already reads false for the whole MOTOR_STARTING/RUNNING/STOPPING
   // duration of any pulse -- no extra state-machine check needed here.
   output is_passthrough_output: bool
+
+  // True from the tick a single-pulse command (do_single_pulse_command)
+  // actually starts a pulse through the tick it lands back in MOTOR_STOPPED
+  // -- see running_single_pulse_command_'s comment below. For an external
+  // reactor (the bank, then StateMachine, then the ROS host) that needs to
+  // know when this joint's requested single pulse has finished.
+  output running_single_pulse_command: bool
 
   // Diagnostics only -- only populated when PRINT_DPULSE or PRINT_DPULSE_DEBUG
   // is enabled (small_deltap_pulse_controller.h), same convention as
@@ -145,6 +154,9 @@ reactor Small_DeltaP_Pulse_Controller(
   // converged_ == false means it is actively planning/running pulses.
   state converged_: bool = false
 
+  state do_single_pulse_command_: bool = false
+  state running_single_pulse_command_: bool = false
+
   timer control_tick(0, control_period)
 
   reaction(startup) {=
@@ -179,6 +191,10 @@ reactor Small_DeltaP_Pulse_Controller(
     self->remaining_error_ = remaining_error_input->value;
   =}
 
+  reaction(do_single_pulse_command) {=
+    self->do_single_pulse_command_ = do_single_pulse_command->value;
+  =}
+
   // Thin cache-only reaction, same as the two above -- just latches the
   // update. Applying it is control_tick's job, gated on MOTOR_STOPPED --
   // see pending_model_update_'s comment.
@@ -196,7 +212,7 @@ reactor Small_DeltaP_Pulse_Controller(
   // pass-through vs. pulsing and plan/start a pulse -- see that function's
   // comment for why mode arbitration has to be re-decided at every
   // MOTOR_STOPPED rather than fixed once.
-  reaction(control_tick) -> command_velocity_output, motor_state_output, planned_pulse_output, is_passthrough_output, debug_info {=
+  reaction(control_tick) -> command_velocity_output, motor_state_output, planned_pulse_output, is_passthrough_output, running_single_pulse_command, debug_info {=
     // Physical, not logical, time: dt here integrates the pulse FSM's
     // real-world timers (T_start/T_stop/pulseTimer against actual hardware
     // elapsed time), so it should track wall-clock time actually elapsed
@@ -230,6 +246,15 @@ reactor Small_DeltaP_Pulse_Controller(
 
     PulseMotorModel_Advance(&self->pulse_state_, &self->model_, dt, stop_early);
 
+    // if we just stopped
+    if (self->pulse_state_.state == MOTOR_STOPPED && state_before_advance == MOTOR_STOPPING){
+      // if we were running the single pulse command request, release the flags that forces the pulse plan to trigger.
+      if (self->running_single_pulse_command_){
+        self->running_single_pulse_command_ = false;
+        self->do_single_pulse_command_ = false;
+      }
+    }
+
     // Gated on state_before_advance == MOTOR_STOPPED too, not just the
     // post-Advance state: without that, a STOPPING -> STOPPED transition
     // that Advance makes THIS tick could fall straight through into
@@ -248,8 +273,17 @@ reactor Small_DeltaP_Pulse_Controller(
         self->has_pending_model_update_ = false;
       }
 
-      // if the velocity is greater than the floor or the remaining_error is greater than the floor, just let it pass through
-      if ((fabsf(self->desired_velocity_) >= self->command_velocity_start_threshold_) || (fabsf(self->remaining_error_) >= self->remaining_error_start_threshold_)) {
+      // if we have a command request to do a pulse command outside of the normal criteria for when we start them
+      if (self->do_single_pulse_command_){
+        self->passThrough_ = false;
+        self->converged_ = false;
+
+        PulseCommand pulse = PulseMotorModel_PlanPulseWithOvershootBound(&self->model_, self->remaining_error_, self->max_overshoot_probability_);
+        PulseMotorModel_StartPulse(&self->pulse_state_, &self->model_, pulse);
+        self->running_single_pulse_command_ = true;
+      }
+      else if ((fabsf(self->desired_velocity_) >= self->command_velocity_start_threshold_) || (fabsf(self->remaining_error_) >= self->remaining_error_start_threshold_)) {
+        // if the velocity is greater than the floor or the remaining_error is greater than the floor, just let it pass through
         self->passThrough_ = true;
         self->converged_ = false;
         self->pulse_state_.commandVelocity = self->desired_velocity_;
@@ -260,7 +294,8 @@ reactor Small_DeltaP_Pulse_Controller(
         self->passThrough_ = false;
         self->converged_ = true;
         self->pulse_state_.commandVelocity = 0.0f;
-      } else { // if we're not in passthrough range and not converged, setup the next pulse and start it
+      }
+      else { // if we're not in passthrough range and not converged, setup the next pulse and start it
         self->passThrough_ = false;
         self->converged_ = false;
 
@@ -276,6 +311,7 @@ reactor Small_DeltaP_Pulse_Controller(
     lf_set(motor_state_output, self->pulse_state_.state);
     lf_set(planned_pulse_output, self->pulse_state_.plannedPulse);
     lf_set(is_passthrough_output, self->passThrough_);
+    lf_set(running_single_pulse_command, self->running_single_pulse_command_);
 
 #if PRINT_DPULSE || PRINT_DPULSE_DEBUG
     SmallDeltaPPulseControllerDebugInfo info;

@@ -28,7 +28,7 @@
 // silently misinterpreting bytes -- the two copies of this file
 // (vel_control_mri_arm/src_c and MRIRobot_ROS's mri_arm_hardware) have no
 // shared build system to otherwise catch drift between them.
-#define PROTOCOL_VERSION 2
+#define PROTOCOL_VERSION 3
 
 // =====================
 // TX/RX packet definitions
@@ -126,6 +126,9 @@ typedef struct {
     float sea_positions[DOF_NUMBER];            // rad, measured SEA deflection
     float sea_velocities[DOF_NUMBER];           // rad/s, measured SEA velocity
     float commanded_motor_velocity[DOF_NUMBER]; // rad/s, velocity actually commanded this cycle
+    bool running_single_pulse_command;          // true while any joint is still mid-flight on a
+                                                 // ROS-requested single pulse (see State_Machine.lf's
+                                                 // running_single_pulse_command input)
     int time_stamp;
     int message_index;
 } StateMessage;
@@ -139,6 +142,7 @@ void construct_state_message(
     const float* sea_positions,
     const float* sea_velocities,
     const float* commanded_motor_velocity,
+    bool running_single_pulse_command,
     int time_stamp,
     int message_index
 );

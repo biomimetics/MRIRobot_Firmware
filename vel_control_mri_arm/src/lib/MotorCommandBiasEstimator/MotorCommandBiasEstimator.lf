@@ -139,7 +139,11 @@ reactor MotorCommandBiasEstimator(
   // PRINT_MCB_DEBUG above is for that), same 5 s default as
   // PulseMotorModelEstimatorMixture_Bank.lf's own heartbeat.
   heartbeat_period: time = 5 s,
-  update_bias: bool = true
+  update_bias: bool = true,
+  target_percent_of_command: float = 0.9,
+  // if current smoothed bias is within +/-update_sigma * SD, 
+  // skip the update to avoid huge jumps or bad estimates when the variance is too large
+  update_sigma: float = 0.5 
 ) {
   // The command actually sent to the USM for this joint --
   // Small_DeltaP_Pulse_Controller.lf's command_velocity_output, which
@@ -214,6 +218,14 @@ reactor MotorCommandBiasEstimator(
     self->model_ = INITIAL_MOTOR_MODEL;
     SampleStats_Init(&self->bias_stats_);
 
+    if (self->target_percent_of_command < 0.0){
+      self->target_percent_of_command = 0.0;
+    }
+    else if (1.0 < self->target_percent_of_command){
+      self->target_percent_of_command = 1.0;
+    }
+
+
     // Warm start -- see bias_output's comment and command_bias's comment on
     // Motor_Config (motor_config.h). 0.0 for every joint until bench-
     // characterized, at which point setting it there gets that joint a
@@ -251,16 +263,10 @@ reactor MotorCommandBiasEstimator(
     }
     self->samples_gated_++;
 
-    // Magnitude-domain CORRECTION, not a raw offset: positive means the
-    // motor ran slower than commanded, so the command needs to go UP by
-    // this much (and vice versa) -- see bias_stats_'s comment. Getting this
-    // subtraction backwards (measured - commanded, the "offset" a naive
-    // reading of the reactor-level comment above might suggest) makes
-    // command_bias_input's correction point the WRONG way: a joint running
-    // fast would get commanded even faster, compounding the very error this
-    // reactor exists to cancel.
-    float raw_bias = fabsf(self->last_commanded_velocity_) - fabsf(velocity_input->value);
+    // raw sample for the bias correction accumulation. we want to estimate the bias that gives us a percentage of the actual command to avoid overshoot and oscilliation. 
+    float raw_bias = fabsf(self->last_commanded_velocity_) * self->target_percent_of_command - fabsf(velocity_input->value);
 
+    // check if the sample is very far from expected, if so we shouldn't add it to the running stats
     if (SampleStats_IsOutlier(&self->bias_stats_, raw_bias, self->outlier_sigma,
                               (uint32_t) self->outlier_min_samples)) {
       self->samples_outlier_++;
@@ -285,6 +291,12 @@ reactor MotorCommandBiasEstimator(
       return;
     }
 
+    // check if the current bias is far away enough to warrent an update towards the running mean (protects against bad updates if the variance is huge)
+    if (!SampleStats_IsOutlier(&self->bias_stats_, self->smoothed_bias_, self->update_sigma,
+                              (uint32_t) self->outlier_min_samples)){
+                                return;
+      }
+
     float target = SampleStats_Mean(&self->bias_stats_);
     float step = self->step_alpha * (target - self->smoothed_bias_);
     if (step > self->max_step_per_update) {
@@ -294,9 +306,7 @@ reactor MotorCommandBiasEstimator(
     }
 
     // actually handles the update
-    if (self->update_bias){
-      self->smoothed_bias_ += step;
-    }
+    self->smoothed_bias_ += step;
 
     if (self->smoothed_bias_ > self->max_bias_magnitude) {
       self->smoothed_bias_ = self->max_bias_magnitude;
@@ -304,10 +314,11 @@ reactor MotorCommandBiasEstimator(
       self->smoothed_bias_ = -self->max_bias_magnitude;
     }
 
-    self->updates_++;
-
-    
+    // if update_bias is false, we want to accumulate the bias stats but not have downstream updates
+    if (self->update_bias){
+      self->updates_++;
       lf_set(bias_output, self->smoothed_bias_);
+    }
 
   =}
 

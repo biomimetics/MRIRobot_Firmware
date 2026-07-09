@@ -46,6 +46,12 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   // (as yet unbuilt) external parameter-estimator reactor -- see that
   // input's comment on Small_DeltaP_Pulse_Controller.lf.
   input[7] motor_model_update_input: PulseMotorModel
+  // Single (non-banked) trigger, broadcast to every Small_DeltaP_Pulse_Controller
+  // instance at once -- bypasses each controller's normal remaining_error/
+  // command_velocity trigger conditions and forces it straight into pulse
+  // planning. Comes from StateMachine via a dedicated behavior mode -- see
+  // that reactor's do_single_pulse_command output.
+  input do_single_pulse_command_input: bool
 
   output[7] command_velocity_output: float
   // Per-joint MotorState (STOPPED/STARTING/RUNNING/STOPPING), routed
@@ -59,6 +65,15 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   // Per-joint pass-through flag, routed straight out from each controller
   // instance -- see that output's comment on Small_DeltaP_Pulse_Controller.lf.
   output[7] is_passthrough_output: bool
+
+  // OR-reduction of every controllers.running_single_pulse_command: true
+  // while ANY joint is still mid-flight on a single-pulse command, false
+  // only once all 7 have landed back in MOTOR_STOPPED -- see
+  // reaction(controllers.running_single_pulse_command) below and
+  // Small_DeltaP_Pulse_Controller.lf's output of the same name. Routed on to
+  // StateMachine so the ROS host can tell when the single-pulse command it
+  // requested has actually finished.
+  output running_single_pulse_command: bool
 
   state last_print_time_: time = 0
 
@@ -76,6 +91,7 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   command_velocity_input -> controllers.command_velocity_input
   remaining_error_input -> controllers.remaining_error_input
   motor_model_update_input -> controllers.motor_model_update_input
+  (do_single_pulse_command_input)+ -> controllers.do_single_pulse_command
 
   controllers.command_velocity_output -> command_velocity_output
   controllers.motor_state_output -> motor_state_output
@@ -89,6 +105,21 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   // debug_info path. Only fires at all when either PRINT_DPULSE or
   // PRINT_DPULSE_DEBUG is set, since debug_info is only ever lf_set under
   // that condition (see Small_DeltaP_Pulse_Controller.lf's control_tick).
+  // Fires whenever any controller's running_single_pulse_command changes --
+  // OR's all 7 together every time so a joint landing back in MOTOR_STOPPED
+  // while others are still mid-pulse doesn't flip the bank output early.
+  reaction(controllers.running_single_pulse_command) -> running_single_pulse_command {=
+    bool any_running = false;
+    for (int i = 0; i < controllers_width; i++) {
+      if (controllers[i].running_single_pulse_command->is_present &&
+          controllers[i].running_single_pulse_command->value) {
+        any_running = true;
+        break;
+      }
+    }
+    lf_set(running_single_pulse_command, any_running);
+  =}
+
   reaction(controllers.debug_info) {=
 #if PRINT_DPULSE_DEBUG
     instant_t now = lf_time_logical();

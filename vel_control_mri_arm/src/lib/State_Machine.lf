@@ -50,8 +50,21 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     output[7] enable_motor_command: bool // triggered when we're in the right state
     output[7] force_disable_motor_pins: bool // used to disable specific motors if they've hit convergence or for safety reasons.
 
+    // Bypasses the normal remaining_error/command_velocity trigger conditions
+    // on every Small_DeltaP_Pulse_Controller instance at once, forcing them
+    // straight into pulse planning -- driven by SET_SINGLE_PULSE below, so
+    // it's true for as long as (and only while) that behavior mode is active.
+    output do_single_pulse_command: bool
+
     // outputs to Small_DeltaP_MPC_Controller_Bank
     output[7] commanded_position_deltas: float
+
+    // from Small_DeltaP_Pulse_Controller_Bank -- true while any joint is
+    // still mid-flight on the single-pulse command requested via
+    // do_single_pulse_command above, false once all of them land back in
+    // MOTOR_STOPPED. Cached into running_single_pulse_command_ below and
+    // reported to the ROS host in StateMessage (see reaction(update_state_message_tick)).
+    input running_single_pulse_command: bool
 
     // outputs to EncoderStateEstimator -- static per-joint offset added to
     // motor_encoder_positions there (see EncoderStateEstimator.lf), for
@@ -88,6 +101,11 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     state staged_position_deltas_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
     state enable_motor_command_: bool = false
+    // Set true only while current_behavior_mode_ == SET_SINGLE_PULSE -- see
+    // do_single_pulse_command's comment above.
+    state do_single_pulse_command_: bool = false
+    // Cache of running_single_pulse_command input -- see that input's comment.
+    state running_single_pulse_command_: bool = false
 
     state not_receiving_error_: bool = false
     
@@ -156,7 +174,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     =}
 
     // this output reaction is placed here to
-    reaction(motor_command_tick) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities, commanded_position_deltas, position_offset {=
+    reaction(motor_command_tick) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities, commanded_position_deltas, position_offset, do_single_pulse_command {=
 
       // ignore the positions for now, use for bounds checking
 
@@ -183,6 +201,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       for (int i = 0; i<DOF_NUMBER; i++){
         lf_set(enable_motor_command[i], self->enable_motor_command_);
       }
+      lf_set(do_single_pulse_command, self->do_single_pulse_command_);
 
     =}
 
@@ -248,14 +267,25 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
           self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
           printf("Switching to Error state...\n");
         }
+        else if (self->cmd_msg_.behavior_mode == 3){ // SET_SINGLE_PULSE // like Run, but forces every joint's pulse controller to plan/run a single pulse regardless of its normal trigger conditions.
+          self->enable_motor_command_ = true;
+          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+          printf("Switching to Single Pulse state...\n");
+        }
         else{
           // bad value!
           self->enable_motor_command_ = false;
           self->current_behavior_mode_ = SET_IDLE;
-          printf("Unrecognized behavior mode! Got %d but expected (0: IDLE), (1: RUN), (2: ERROR). \n", self->cmd_msg_.behavior_mode);
+          printf("Unrecognized behavior mode! Got %d but expected (0: IDLE), (1: RUN), (2: ERROR), (3: SINGLE_PULSE). \n", self->cmd_msg_.behavior_mode);
           return;
         }
       }
+
+      // do_single_pulse_command_ tracks current_behavior_mode_ directly --
+      // true for as long as (and only while) SET_SINGLE_PULSE is active, so
+      // leaving that mode (e.g. back to RUN or IDLE) drops it again without
+      // any extra bookkeeping here.
+      self->do_single_pulse_command_ = (self->current_behavior_mode_ == 3);
 
       // velocities are most important!
       for (int i = 0; i<DOF_NUMBER; i++){
@@ -299,6 +329,10 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       }
     =}
 
+    reaction(running_single_pulse_command) {=
+      self->running_single_pulse_command_ = running_single_pulse_command->value;
+    =}
+
     //#####
     //# Output reactions
     //#####
@@ -310,6 +344,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
                               self->motor_encoder_positions_, self->motor_encoder_velocities_,
                               self->sea_encoder_positions_, self->sea_encoder_velocities_,
                               self->staged_commanded_motor_velocities_,
+                              self->running_single_pulse_command_,
                               time_stamp, self->send_message_index++);
 
       lf_set(state_message, self->state_msg_);

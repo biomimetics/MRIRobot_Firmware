@@ -162,6 +162,8 @@ main reactor {
   // usm
   state_machine.commanded_motor_velocities -> deltap_bank.command_velocity_input
   state_machine.commanded_position_deltas -> deltap_bank.remaining_error_input
+  state_machine.do_single_pulse_command -> deltap_bank.do_single_pulse_command_input
+  deltap_bank.running_single_pulse_command -> state_machine.running_single_pulse_command
   // deltap_bank's raw command now goes through command_safety_filter (bias
   // correction) before it reaches the motor -- see CommandSafetyFilter.lf
   // and MotorCommandBiasEstimator.lf.
