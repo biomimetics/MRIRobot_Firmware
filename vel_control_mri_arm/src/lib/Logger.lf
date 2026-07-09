@@ -1,0 +1,163 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "stm32",
+    board: "F446RE"
+  },
+  files: [
+    "../../src_c/pulse_motor_model.h", "../../src_c/pulse_motor_model.c",
+    "../../src_c/logger.h", "../../src_c/logger.c"
+  ],
+  cmake-include: [
+    "../../src_c/pulse_motor_model_cmake.cmake",
+    "../../src_c/logger_cmake.cmake"
+  ]
+}
+
+preamble {=
+  #include "pulse_motor_model.h"
+  #include "logger.h"
+  #include <stdio.h>
+=}
+
+// Polls a fixed set of reactors for a snapshot of their running state, on a
+// timer, so what's actually happening inside them (MotorCommandBiasEstimator_
+// Bank.lf, PulseMotorModelEstimatorMixture_Bank.lf, EncoderStateEstimator.lf)
+// is inspectable from off-board instead of only via on-hardware printf. The
+// request/response pattern below is the reusable part -- adding a new
+// logged reactor means adding one more (request output, log input, cached
+// state, receive reaction) triple following the same shape, and bumping
+// expected_log_count.
+//
+// Round-trip shape, once per log_period:
+//   1. reaction(log_request_tick) resets received_log_count_ and lf_sets
+//      every request_* output true -- one tick, broadcast to everyone
+//      logged.
+//   2. Each polled reactor reacts to its own request_* input (added to that
+//      reactor directly -- see MotorCommandBiasEstimator_Bank.lf/
+//      PulseMotorModelEstimatorMixture_Bank.lf/EncoderStateEstimator.lf),
+//      builds its snapshot struct from whatever state it already tracks,
+//      and lf_sets it on its log_snapshot_output. This happens one
+//      microstep after the request, same logical tag.
+//   3. Each log_*_input arriving here increments received_log_count_ and
+//      latches the snapshot into this reactor's own state. Once
+//      received_log_count_ reaches expected_log_count, whichever reaction
+//      hits that threshold schedules the log_ready logical action.
+//   4. reaction(log_ready) fires with every latched snapshot from this
+//      round available together, and prints the round as a sequence of
+//      logfmt-style lines (see logger.h) -- the hook point for actually
+//      shipping them out over UART instead of just to the console (not
+//      designed yet, see that reaction's comment).
+//
+// A round that never fully completes (a polled reactor removed, or slow to
+// reply) just quietly never reaches log_ready -- log_request_tick resets
+// received_log_count_ back to 0 on the next round rather than accumulating
+// partial state forever.
+reactor Logger(log_period: time = 1 s, expected_log_count: int = 3) {
+  // One request output per polled reactor -- see the reactor-level comment.
+  output request_motor_bias_log: bool
+  output request_pulse_model_log: bool
+  output request_encoder_state_log: bool
+
+  // One log input per polled reactor, matching request_motor_bias_log/
+  // request_pulse_model_log/request_encoder_state_log above 1:1.
+  input motor_bias_log_input: MotorCommandBiasLogSnapshot
+  input pulse_model_log_input: PulseMotorModelLogSnapshot
+  input encoder_state_log_input: EncoderStateLogSnapshot
+
+  // Latched snapshots from the most recently COMPLETED round -- overwritten
+  // in place as each log_*_input arrives, so log_ready always sees this
+  // round's values from every source that replied in time.
+  state motor_bias_log_: MotorCommandBiasLogSnapshot
+  state pulse_model_log_: PulseMotorModelLogSnapshot
+  state encoder_state_log_: EncoderStateLogSnapshot
+
+  // How many of this round's log_*_input replies have arrived so far --
+  // compared against expected_log_count to detect "everyone answered."
+  // Reset to 0 at the start of every round (reaction(log_request_tick)).
+  state received_log_count_: int = 0
+
+  logical action log_ready
+
+  timer log_request_tick(0, log_period)
+
+  reaction(startup) {=
+    printf("[STARTUP] Logger: entering startup\r\n");
+    printf("[STARTUP] Logger: exiting startup\r\n");
+  =}
+
+  reaction(log_request_tick) -> request_motor_bias_log, request_pulse_model_log, request_encoder_state_log {=
+    self->received_log_count_ = 0;
+
+    lf_set(request_motor_bias_log, true);
+    lf_set(request_pulse_model_log, true);
+    lf_set(request_encoder_state_log, true);
+  =}
+
+  reaction(motor_bias_log_input) -> log_ready {=
+    self->motor_bias_log_ = motor_bias_log_input->value;
+    self->received_log_count_++;
+    if (self->received_log_count_ >= self->expected_log_count) {
+      lf_schedule(log_ready, 0);
+    }
+  =}
+
+  reaction(pulse_model_log_input) -> log_ready {=
+    self->pulse_model_log_ = pulse_model_log_input->value;
+    self->received_log_count_++;
+    if (self->received_log_count_ >= self->expected_log_count) {
+      lf_schedule(log_ready, 0);
+    }
+  =}
+
+  reaction(encoder_state_log_input) -> log_ready {=
+    self->encoder_state_log_ = encoder_state_log_input->value;
+    self->received_log_count_++;
+    if (self->received_log_count_ >= self->expected_log_count) {
+      lf_schedule(log_ready, 0);
+    }
+  =}
+
+  // Fires once every polled reactor's reply has landed for this round --
+  // prints the whole round as a sequence of logfmt-style lines (see
+  // logger.h's "Log line formatting" section), one Logger_Format*Line call
+  // + one printf per line, bracketed by START/END markers so a host-side
+  // reader knows when a round's lines are all in. One buffer, reused line
+  // by line, rather than one buffer sized for the whole round -- see
+  // logger.h for why.
+  //
+  // TODO: this only prints to the console -- actually shipping these lines
+  // to the host over UART (as text, or packed into a new packet type
+  // alongside CommandMessage/StateMessage in stm_comms.h) is still
+  // undesigned.
+  reaction(log_ready) {=
+    char buffer[LOGGER_LINE_BUFFER_SIZE];
+
+    printf("[LOGGER START] index=%d ts=%d\r\n",
+        self->motor_bias_log_.sequence, (int) (lf_time_physical() / 1000000));
+
+    Logger_FormatMotorCommandBiasLine(&self->motor_bias_log_, buffer, sizeof(buffer));
+    printf("%s\r\n", buffer);
+
+    Logger_FormatPulseMotorModelLine(&self->pulse_model_log_, buffer, sizeof(buffer));
+    printf("%s\r\n", buffer);
+
+    Logger_FormatPulseMotorModelPooledStatsLine(&self->pulse_model_log_, buffer, sizeof(buffer));
+    printf("%s\r\n", buffer);
+
+    for (int j = 0; j < 7; j++) {
+      Logger_FormatPulseMotorModelJointStatsLine(&self->pulse_model_log_, j, buffer, sizeof(buffer));
+      printf("%s\r\n", buffer);
+    }
+
+    Logger_FormatEncoderStateLine(&self->encoder_state_log_, buffer, sizeof(buffer));
+    printf("%s\r\n", buffer);
+
+    printf("[LOGGER END]\r\n");
+
+    // Reset so a stray/duplicate reply after this round doesn't immediately
+    // re-trigger log_ready on the next increment before log_request_tick
+    // starts the next round properly.
+    self->received_log_count_ = 0;
+  =}
+}

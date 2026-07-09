@@ -164,7 +164,7 @@ void EncoderStateObserver_SetModel(EncoderStateObserver *o, const PulseMotorMode
 // One full predict + correct step. Call exactly once per dt (the QDEC
 // sample period) with that tick's values:
 //   commanded_velocity -- rad/s, the command actually sent to the USM
-//                         this tick (Small_DeltaP_Pulse_Controller's
+//                         this tick (PulseController's
 //                         command_velocity_output -- correct in both
 //                         pass-through and pulsing modes). Ignored (may
 //                         be 0) when use_commanded_velocity is false.

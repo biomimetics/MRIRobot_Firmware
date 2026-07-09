@@ -77,7 +77,7 @@ typedef enum {
 // (compiled exactly once, in pulse_motor_model.c) rather than in a .lf
 // preamble, since preamble code can get transcluded into the generated
 // build more than once and duplicate-define it -- same reasoning as
-// SmallDeltaPPulse_PrintDebugInfo living in small_deltap_pulse_controller.c.
+// PulseController_PrintDebugInfo living in pulse_controller.c.
 const char *MotorState_Name(MotorState s);
 
 // A single planned pulse: direction and how long to spend in MOTOR_RUNNING

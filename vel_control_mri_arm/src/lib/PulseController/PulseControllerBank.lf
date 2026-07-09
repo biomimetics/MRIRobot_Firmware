@@ -8,45 +8,45 @@ target C {
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
     "../../../src_c/stats.h", "../../../src_c/stats.c",
-    "../../../src_c/small_deltap_pulse_controller.h", "../../../src_c/small_deltap_pulse_controller.c"
+    "../../../src_c/pulse_controller.h", "../../../src_c/pulse_controller.c"
   ],
   cmake-include: [
     "../../../src_c/pulse_motor_model_cmake.cmake",
     "../../../src_c/gaussian_motion_cmake.cmake",
     "../../../src_c/stats_cmake.cmake",
-    "../../../src_c/small_deltap_pulse_controller_cmake.cmake"
+    "../../../src_c/pulse_controller_cmake.cmake"
   ]
 }
 
-import Small_DeltaP_Pulse_Controller from "Small_DeltaP_Pulse_Controller.lf"
+import PulseController from "PulseController.lf"
 
-// Top-level preamble so PulseMotorModel/MotorState/SmallDeltaPPulseControllerDebugInfo
+// Top-level preamble so PulseMotorModel/MotorState/PulseControllerDebugInfo
 // are visible where the port declarations and reaction below reference them
 // -- same reasoning as Small_DeltaP_MPC_Controller_Bank.lf's own top-level
-// preamble. SmallDeltaPPulse_PrintDebugInfo (called from the reaction below)
-// is declared in small_deltap_pulse_controller.h and defined in
-// small_deltap_pulse_controller.c -- NOT inline here, since preamble code
+// preamble. PulseController_PrintDebugInfo (called from the reaction below)
+// is declared in pulse_controller.h and defined in
+// pulse_controller.c -- NOT inline here, since preamble code
 // can get transcluded into the generated build more than once and duplicate-
 // define a function defined directly in it.
 preamble {=
   #include "pulse_motor_model.h"
-  #include "small_deltap_pulse_controller.h"
+  #include "pulse_controller.h"
   #include <stdio.h>
 =}
 
 // 7-dof wrapper that sits between StateMachine.lf and USM.lf, routing
 // velocity and remaining-error signals to a bank of single-channel
-// Small_DeltaP_Pulse_Controller instances. Motor enable/disable does NOT
+// PulseController instances. Motor enable/disable does NOT
 // route through here -- same as Small_Velocity_Controller_Bank.lf, Main.lf
 // wires State_Machine's enable_motor_command directly to USM instead.
-reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
+reactor PulseControllerBank(print_period: time = 250 ms) {
   input[7] command_velocity_input: float
   input[7] remaining_error_input: float
-  // Routed through to each Small_DeltaP_Pulse_Controller instance for an
+  // Routed through to each PulseController instance for an
   // (as yet unbuilt) external parameter-estimator reactor -- see that
-  // input's comment on Small_DeltaP_Pulse_Controller.lf.
+  // input's comment on PulseController.lf.
   input[7] motor_model_update_input: PulseMotorModel
-  // Single (non-banked) trigger, broadcast to every Small_DeltaP_Pulse_Controller
+  // Single (non-banked) trigger, broadcast to every PulseController
   // instance at once -- bypasses each controller's normal remaining_error/
   // command_velocity trigger conditions and forces it straight into pulse
   // planning. Comes from StateMachine via a dedicated behavior mode -- see
@@ -56,21 +56,21 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   output[7] command_velocity_output: float
   // Per-joint MotorState (STOPPED/STARTING/RUNNING/STOPPING), routed
   // straight out from each controller instance -- see that output's
-  // comment on Small_DeltaP_Pulse_Controller.lf.
+  // comment on PulseController.lf.
   output[7] motor_state_output: MotorState
   // Per-joint currently-committed PulseCommand, routed straight out from
   // each controller instance -- see that output's comment on
-  // Small_DeltaP_Pulse_Controller.lf.
+  // PulseController.lf.
   output[7] planned_pulse_output: PulseCommand
   // Per-joint pass-through flag, routed straight out from each controller
-  // instance -- see that output's comment on Small_DeltaP_Pulse_Controller.lf.
+  // instance -- see that output's comment on PulseController.lf.
   output[7] is_passthrough_output: bool
 
   // OR-reduction of every controllers.running_single_pulse_command: true
   // while ANY joint is still mid-flight on a single-pulse command, false
   // only once all 7 have landed back in MOTOR_STOPPED -- see
   // reaction(controllers.running_single_pulse_command) below and
-  // Small_DeltaP_Pulse_Controller.lf's output of the same name. Routed on to
+  // PulseController.lf's output of the same name. Routed on to
   // StateMachine so the ROS host can tell when the single-pulse command it
   // requested has actually finished.
   output running_single_pulse_command: bool
@@ -82,11 +82,11 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   // just below is all static), so entering/exiting startup collapse to the
   // same instant.
   reaction(startup) {=
-    printf("[STARTUP] Small_DeltaP_Pulse_Controller_Bank: entering startup\r\n");
-    printf("[STARTUP] Small_DeltaP_Pulse_Controller_Bank: exiting startup\r\n");
+    printf("[STARTUP] PulseControllerBank: entering startup\r\n");
+    printf("[STARTUP] PulseControllerBank: exiting startup\r\n");
   =}
 
-  controllers = new[7] Small_DeltaP_Pulse_Controller()
+  controllers = new[7] PulseController()
 
   command_velocity_input -> controllers.command_velocity_input
   remaining_error_input -> controllers.remaining_error_input
@@ -98,13 +98,13 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   controllers.planned_pulse_output -> planned_pulse_output
   controllers.is_passthrough_output -> is_passthrough_output
 
-  // Prints the status of all 7 Small_DeltaP_Pulse_Controller instances
+  // Prints the status of all 7 PulseController instances
   // together, at print_period cadence, when PRINT_DPULSE_DEBUG is enabled
-  // (small_deltap_pulse_controller.h) -- for live on-hardware debugging over
+  // (pulse_controller.h) -- for live on-hardware debugging over
   // the STM32's print/UART link, independent of PRINT_DPULSE's CSV-logging
   // debug_info path. Only fires at all when either PRINT_DPULSE or
   // PRINT_DPULSE_DEBUG is set, since debug_info is only ever lf_set under
-  // that condition (see Small_DeltaP_Pulse_Controller.lf's control_tick).
+  // that condition (see PulseController.lf's control_tick).
   // Fires whenever any controller's running_single_pulse_command changes --
   // OR's all 7 together every time so a joint landing back in MOTOR_STOPPED
   // while others are still mid-pulse doesn't flip the bank output early.
@@ -130,7 +130,7 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
 
     printf("\r\n--- DPULSE status ---\r\n");
     for (int i = 0; i < controllers_width; i++) {
-      SmallDeltaPPulse_PrintDebugInfo(i, controllers[i].debug_info->value);
+      PulseController_PrintDebugInfo(i, controllers[i].debug_info->value);
     }
 #endif
   =}

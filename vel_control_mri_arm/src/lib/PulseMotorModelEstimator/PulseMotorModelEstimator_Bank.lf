@@ -20,14 +20,14 @@ import PulseMotorModelEstimator from "PulseMotorModelEstimator.lf"
 
 // Top-level preamble so PulseMotorModel/MotorState are visible where the
 // port declarations below reference them -- same reasoning as
-// Small_DeltaP_Pulse_Controller_Bank.lf's own top-level preamble.
+// PulseControllerBank.lf's own top-level preamble.
 preamble {=
   #include "pulse_motor_model.h"
 =}
 
 // 7-dof wrapper routing each joint's position/velocity/commanded-velocity/
 // motor-state signals to a bank of single-channel PulseMotorModelEstimator
-// instances -- same split as Small_DeltaP_Pulse_Controller_Bank.lf. NOTE:
+// instances -- same split as PulseControllerBank.lf. NOTE:
 // this is the plain per-joint-passthrough wrapper (raw observations in/out,
 // no pooling) -- Main.lf uses PulseMotorModelEstimatorMixture_Bank.lf
 // instead, which owns the shared model and the epoch update logic; this one

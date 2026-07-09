@@ -1,26 +1,26 @@
-#ifndef SMALL_DELTAP_PULSE_CONTROLLER_H
-#define SMALL_DELTAP_PULSE_CONTROLLER_H
+#ifndef PULSE_CONTROLLER_H
+#define PULSE_CONTROLLER_H
 
 #include "pulse_motor_model.h"
 #include <stdbool.h>
 
-// Diagnostics-only snapshot of a Small_DeltaP_Pulse_Controller instance's
+// Diagnostics-only snapshot of a PulseController instance's
 // status -- this design's analogue of DposPulseMPCDebugInfo
 // (dpos_pulse_mpc.h)/SVCDebugInfo (pulse_mpc.h). Kept in its own tiny
 // header (rather than folded into pulse_motor_model.h, which is
 // deliberately controller-agnostic) so a test harness/CSV logger can
 // reference this type without pulling in controller-specific planning
 // logic -- the planning logic itself still lives inline in
-// Small_DeltaP_Pulse_Controller.lf's own reactions (a reactor, not a
+// PulseController.lf's own reactions (a reactor, not a
 // separate .c/.h implementation); the one exception is
-// SmallDeltaPPulse_PrintDebugInfo below, which has to live in
-// small_deltap_pulse_controller.c (compiled exactly once) rather than in a
+// PulseController_PrintDebugInfo below, which has to live in
+// pulse_controller.c (compiled exactly once) rather than in a
 // .lf preamble, since preamble code can get transcluded into the generated
 // build more than once and duplicate-define it -- same reasoning as
 // DposPulseMPC_PrintDebugInfo living in dpos_pulse_mpc.c instead of
 // Small_DeltaP_MPC_Controller_Bank.lf's preamble.
 
-// Set to 1 to populate debug_info in Small_DeltaP_Pulse_Controller.lf's
+// Set to 1 to populate debug_info in PulseController.lf's
 // control_tick reaction -- 0 by default to avoid the overhead of copying
 // this struct out every control_period tick during normal operation, same
 // role as PRINT_DPOS/PRINT_SVC for the older controllers. On its own this
@@ -29,8 +29,8 @@
 // below for live serial printing on real hardware.
 #define PRINT_DPULSE 0
 
-// Set to 1 for live on-hardware debugging via Small_DeltaP_Pulse_Controller_
-// Bank.lf's throttled printf of every joint's state/passthrough/remaining
+// Set to 1 for live on-hardware debugging via PulseControllerBank.lf's
+// throttled printf of every joint's state/passthrough/remaining
 // error/planning status -- unlike PRINT_DPULSE above, this actually prints
 // (see that Bank reactor's controllers.debug_info reaction). Independent of
 // PRINT_DPULSE so you don't have to pull in the CSV-logging path just to
@@ -42,7 +42,7 @@ typedef struct {
   bool passThrough;
   // true once |remainingError| has dropped at/below convergenceLimit_ and
   // this instance has given up on planning any further pulse for it (see
-  // Small_DeltaP_Pulse_Controller.lf's converged_ state) -- together with
+  // PulseController.lf's converged_ state) -- together with
   // passThrough, tells you whether this instance is still actively trying
   // to close remainingError via pulsing (passThrough == false && converged
   // == false) or has stopped for some other reason.
@@ -50,11 +50,11 @@ typedef struct {
   float remainingError;
   PulseCommand plannedPulse;
   float commandVelocity;
-} SmallDeltaPPulseControllerDebugInfo;
+} PulseControllerDebugInfo;
 
 // Prints one instance's debug_info to stdout -- see PRINT_DPULSE_DEBUG above
-// and Small_DeltaP_Pulse_Controller_Bank.lf's controllers.debug_info
+// and PulseControllerBank.lf's controllers.debug_info
 // reaction, its only caller.
-void SmallDeltaPPulse_PrintDebugInfo(int index, SmallDeltaPPulseControllerDebugInfo info);
+void PulseController_PrintDebugInfo(int index, PulseControllerDebugInfo info);
 
-#endif // SMALL_DELTAP_PULSE_CONTROLLER_H
+#endif // PULSE_CONTROLLER_H

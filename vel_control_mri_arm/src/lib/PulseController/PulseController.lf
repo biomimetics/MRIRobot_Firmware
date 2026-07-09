@@ -8,25 +8,25 @@ target C {
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
     "../../../src_c/stats.h", "../../../src_c/stats.c",
-    "../../../src_c/small_deltap_pulse_controller.h", "../../../src_c/small_deltap_pulse_controller.c"
+    "../../../src_c/pulse_controller.h", "../../../src_c/pulse_controller.c"
   ],
   cmake-include: [
     "../../../src_c/pulse_motor_model_cmake.cmake",
     "../../../src_c/gaussian_motion_cmake.cmake",
     "../../../src_c/stats_cmake.cmake",
-    "../../../src_c/small_deltap_pulse_controller_cmake.cmake"
+    "../../../src_c/pulse_controller_cmake.cmake"
   ]
 }
 
 // Single-channel delta-position pulse controller. Sits inside
-// Small_DeltaP_Pulse_Controller_Bank.lf, one instance per joint. Like
+// PulseControllerBank.lf, one instance per joint. Like
 // Small_DeltaP_MPC_Controller.lf, replaces Small_Velocity_Controller.lf's
 // motion-debt design (see
 
 preamble {=
   #include "pulse_motor_model.h"
   #include "gaussian_motion.h"
-  #include "small_deltap_pulse_controller.h"
+  #include "pulse_controller.h"
   #include <math.h>
   #include <stdio.h>
 
@@ -41,7 +41,7 @@ preamble {=
 // future reactor starting from exactly the same initial belief about the
 // motor. Remaining constructor parameters below are this controller's own
 // planning tuning, not part of PulseMotorModel.
-reactor Small_DeltaP_Pulse_Controller(
+reactor PulseController(
   control_period: time = 5 ms,
   max_overshoot_probability: float = 0.02, // unitless 0..1, P(T <= pulse duration) bound the planner must respect -- TODO: characterize
   convergenceLimit_initial: float = 0.034906584, // rad (~2 deg), 
@@ -101,11 +101,11 @@ reactor Small_DeltaP_Pulse_Controller(
   output running_single_pulse_command: bool
 
   // Diagnostics only -- only populated when PRINT_DPULSE or PRINT_DPULSE_DEBUG
-  // is enabled (small_deltap_pulse_controller.h), same convention as
+  // is enabled (pulse_controller.h), same convention as
   // DposPulseMPCDebugInfo/PRINT_DPOS. For test harnesses/CSV logging (see
   // Main_Test_DeltaP_Pulse_Dwell.lf) and, via PRINT_DPULSE_DEBUG, for live
-  // on-hardware printf debugging (see Small_DeltaP_Pulse_Controller_Bank.lf).
-  output debug_info: SmallDeltaPPulseControllerDebugInfo
+  // on-hardware printf debugging (see PulseControllerBank.lf).
+  output debug_info: PulseControllerDebugInfo
 
   state model_: PulseMotorModel
   state pulse_state_: PulseMotorState
@@ -160,7 +160,7 @@ reactor Small_DeltaP_Pulse_Controller(
   timer control_tick(0, control_period)
 
   reaction(startup) {=
-    printf("[STARTUP] Small_DeltaP_Pulse_Controller: entering startup\r\n");
+    printf("[STARTUP] PulseController: entering startup\r\n");
     self->model_ = INITIAL_MOTOR_MODEL;
 
     self->pulse_state_.state = MOTOR_STOPPED;
@@ -178,7 +178,7 @@ reactor Small_DeltaP_Pulse_Controller(
 
     self->remaining_error_start_threshold_ = self->remaining_error_start_threshold;
     self->command_velocity_start_threshold_ = self->command_velocity_start_threshold;
-    printf("[STARTUP] Small_DeltaP_Pulse_Controller: exiting startup\r\n");
+    printf("[STARTUP] PulseController: exiting startup\r\n");
   =}
 
   // Thin cache-only reactions: just copy incoming values into state. No FSM
@@ -314,7 +314,7 @@ reactor Small_DeltaP_Pulse_Controller(
     lf_set(running_single_pulse_command, self->running_single_pulse_command_);
 
 #if PRINT_DPULSE || PRINT_DPULSE_DEBUG
-    SmallDeltaPPulseControllerDebugInfo info;
+    PulseControllerDebugInfo info;
     info.state = self->pulse_state_.state;
     info.passThrough = self->passThrough_;
     info.converged = self->converged_;

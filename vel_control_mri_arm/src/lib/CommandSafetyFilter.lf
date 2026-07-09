@@ -29,7 +29,7 @@ preamble {=
   #define DIR_FAULT_BLOCKED 3   // resend didn't fix it -- command forced to 0 until it goes to 0 itself
 =}
 
-// Sits between Small_DeltaP_Pulse_Controller_Bank.lf and USM.lf: the last
+// Sits between PulseControllerBank.lf and USM.lf: the last
 // stop for a joint's command velocity before it reaches the motor. Applies
 // command_bias_input
 // (MotorCommandBiasEstimator_Bank.lf's bias_output, warm-started from
@@ -85,7 +85,7 @@ preamble {=
 // while the checks above are still working out a response/direction issue.
 //
 // Deliberately a single flat 7-wide reactor, not a bank/single split like
-// Small_DeltaP_Pulse_Controller_Bank.lf or
+// PulseControllerBank.lf or
 // PulseMotorModelEstimatorMixture_Bank.lf -- the per-joint state machine
 // the direction-fault check needs is small enough (one int + one instant_t)
 // that a bank/single split would just be more files for the same
@@ -132,7 +132,7 @@ reactor CommandSafetyFilter(
   motor_active_hold: time = 300 ms
 ) {
   // The pulse controller's actual command for this joint --
-  // Small_DeltaP_Pulse_Controller_Bank.lf's command_velocity_output. rad/s,
+  // PulseControllerBank.lf's command_velocity_output. rad/s,
   // signed.
   input[7] command_velocity_input: float
   // This joint's total command bias -- MotorCommandBiasEstimator_Bank.lf's
@@ -147,7 +147,7 @@ reactor CommandSafetyFilter(
   input[7] velocity_input: float
 
   // Bias-corrected command velocity -- wire straight into USM.lf's speed
-  // input in place of Small_DeltaP_Pulse_Controller_Bank.lf's direct output.
+  // input in place of PulseControllerBank.lf's direct output.
   output[7] command_velocity_output: float
 
   // True whenever this joint is being sent a nonzero command velocity --

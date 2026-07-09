@@ -1,12 +1,12 @@
 target C
 
 preamble {=
-  #include "small_deltap_pulse_controller.h"
+  #include "pulse_controller.h"
   #include <stdio.h>
   #include <sys/stat.h>
 =}
 
-// CSV logger for Small_DeltaP_Pulse_Controller test harnesses -- the
+// CSV logger for PulseController test harnesses -- the
 // pulse-controller analogue of DeltaPCsvLogger.lf. Kept as its own sibling
 // reactor rather than generalizing DeltaPCsvLogger.lf: keeps the two
 // controllers' test harnesses fully decoupled (DeltaPCsvLogger.lf/
@@ -15,18 +15,18 @@ preamble {=
 // CsvLogger.lf.
 //
 // Appends one CSV row per sample_period tick, combining a
-// Small_DeltaP_Pulse_Controller's debug_info (only populated when
-// PRINT_DPULSE is set to 1 in src_c/small_deltap_pulse_controller.h) with a
+// PulseController's debug_info (only populated when
+// PRINT_DPULSE is set to 1 in src_c/pulse_controller.h) with a
 // FakeMotorPlant's simulated real_velocity/position, so a run can be
 // plotted afterward (see scripts/plot_deltap_pulse_dwell.py).
 //
 // target_position is optional -- leave it unconnected and the column just
 // reads 0 throughout (same convention as DeltaPCsvLogger.lf).
 //
-// Relies on this program also importing Small_DeltaP_Pulse_Controller.lf
+// Relies on this program also importing PulseController.lf
 // (whose target `files` property pulls in
-// small_deltap_pulse_controller.h/pulse_motor_model.h) so that
-// SmallDeltaPPulseControllerDebugInfo is visible here -- this reactor does
+// pulse_controller.h/pulse_motor_model.h) so that
+// PulseControllerDebugInfo is visible here -- this reactor does
 // not declare its own `files`/`cmake-include`.
 //
 // Each row is opened/appended/closed individually (fopen "a", not one
@@ -37,12 +37,12 @@ reactor DeltaPPulseCsvLogger(
   sample_period: time = 1 ms,
   csv_path: string = "csv_data/deltap_pulse_test_log.csv"
 ) {
-  input debug_info: SmallDeltaPPulseControllerDebugInfo
+  input debug_info: PulseControllerDebugInfo
   input real_velocity: float
   input position: float
   input target_position: float
 
-  state latest_debug_info_: SmallDeltaPPulseControllerDebugInfo
+  state latest_debug_info_: PulseControllerDebugInfo
   state latest_real_velocity_: float = 0.0
   state latest_position_: float = 0.0
   state latest_target_position_: float = 0.0
@@ -78,7 +78,7 @@ reactor DeltaPPulseCsvLogger(
 
   reaction(sample_tick) {=
     double now_s = (double) lf_time_logical() * 1e-9;
-    SmallDeltaPPulseControllerDebugInfo *d = &self->latest_debug_info_;
+    PulseControllerDebugInfo *d = &self->latest_debug_info_;
 
     FILE *fpt = fopen(self->csv_path, "a");
     fprintf(fpt, "%f,%f,%f,%d,%d,%f,%f,%f,%f,%f\n",

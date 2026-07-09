@@ -8,7 +8,8 @@ target C {
     "../../src_c/pulse_motor_model.h", "../../src_c/pulse_motor_model.c",
     "../../src_c/gaussian_motion.h", "../../src_c/gaussian_motion.c",
     "../../src_c/stats.h", "../../src_c/stats.c",
-    "../../src_c/encoder_state_observer.h", "../../src_c/encoder_state_observer.c"
+    "../../src_c/encoder_state_observer.h", "../../src_c/encoder_state_observer.c",
+    "../../src_c/logger.h"
   ],
   cmake-include: [
     "../../src_c/pulse_motor_model_cmake.cmake",
@@ -20,11 +21,12 @@ target C {
 
 // Top-level preamble so MotorState/PulseMotorModel/EncoderStateObserver are
 // visible where the port/state declarations below reference them -- same
-// reasoning as Small_DeltaP_Pulse_Controller_Bank.lf's own top-level
+// reasoning as PulseControllerBank.lf's own top-level
 // preamble.
 preamble {=
   #include "pulse_motor_model.h"
   #include "encoder_state_observer.h"
+  #include "logger.h"
 =}
 
 // Per-joint state estimation between Encoder.lf's QDEC and
@@ -35,7 +37,7 @@ preamble {=
 // filtered position/velocity downstream in place of the raw QDEC values.
 //
 // commanded_velocity_input should be the command actually sent to the USM
-// (Small_DeltaP_Pulse_Controller's command_velocity_output -- correct in
+// (PulseController's command_velocity_output -- correct in
 // both its pass-through and pulsing modes), NOT State_Machine's desired
 // velocity, which sits near zero while a joint is pulsing. motor_state_input
 // tells the observer when a pulse is in flight (pulse-height rescaling,
@@ -69,7 +71,7 @@ reactor EncoderStateEstimator(
   input[7] velocity_input: float
   input[7] commanded_velocity_input: float
 
-  // Which MotorState each joint's Small_DeltaP_Pulse_Controller is in --
+  // Which MotorState each joint's PulseController is in --
   // see Update's motor_state parameter in encoder_state_observer.h for
   // exactly what the observer uses it for (little: pulse-height rescaling
   // and a rest-gating veto; pass-through prediction runs off the command
@@ -81,7 +83,7 @@ reactor EncoderStateEstimator(
   // broadcast once per closed epoch (with per-joint T_start blending --
   // see that reactor). Applied to the observers immediately on arrival:
   // unlike
-  // Small_DeltaP_Pulse_Controller.lf's mid-pulse concern, only prediction
+  // PulseController.lf's mid-pulse concern, only prediction
   // terms change here, never the estimated states, so there's no unsafe
   // moment to apply it in.
   input[7] motor_model_input: PulseMotorModel
@@ -97,6 +99,18 @@ reactor EncoderStateEstimator(
 
   output[7] position_output: float
   output[7] velocity_output: float
+
+  // From Logger.lf -- on arrival, build and emit an EncoderStateLogSnapshot
+  // on log_snapshot_output below, straight from each joint's observer_i_
+  // state (position/velocity/disturbance/last_innovation), no extra
+  // caching needed -- same reasoning as
+  // PulseMotorModelEstimatorMixture_Bank.lf's own request_log reaction. See
+  // Logger.lf's reactor-level comment for the request/response pattern this
+  // is one half of.
+  input request_log: bool
+  output log_snapshot_output: EncoderStateLogSnapshot
+
+  state log_sequence_: int = 0
 
   // One observer per joint. Individually-named states rather than an
   // EncoderStateObserver[7] array: large nested-struct state arrays came
@@ -177,7 +191,7 @@ reactor EncoderStateEstimator(
 
   // Applied immediately, not latched -- see motor_model_input's comment
   // above for why that's safe here when it isn't in
-  // Small_DeltaP_Pulse_Controller.lf.
+  // PulseController.lf.
   reaction(motor_model_input) {=
     EncoderStateObserver *obs[7] = {
       &self->observer_0_, &self->observer_1_, &self->observer_2_,
@@ -189,6 +203,24 @@ reactor EncoderStateEstimator(
         EncoderStateObserver_SetModel(obs[i], &motor_model_input[i]->value);
       }
     }
+  =}
+
+  reaction(request_log) -> log_snapshot_output {=
+    EncoderStateObserver *obs[7] = {
+      &self->observer_0_, &self->observer_1_, &self->observer_2_,
+      &self->observer_3_, &self->observer_4_, &self->observer_5_,
+      &self->observer_6_,
+    };
+
+    EncoderStateLogSnapshot snapshot;
+    for (int i = 0; i < 7; i++) {
+      snapshot.position[i] = obs[i]->position;
+      snapshot.velocity[i] = obs[i]->velocity;
+      snapshot.disturbance[i] = obs[i]->disturbance;
+      snapshot.last_innovation[i] = obs[i]->last_innovation;
+    }
+    snapshot.sequence = self->log_sequence_++;
+    lf_set(log_snapshot_output, snapshot);
   =}
 
   // The actual estimation step, once per QDEC sample: run each joint's

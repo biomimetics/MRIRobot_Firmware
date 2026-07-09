@@ -23,13 +23,13 @@ preamble {=
   #include <stdio.h>
 
   // Nanoseconds -> seconds, same conversion/reasoning as
-  // Small_DeltaP_Pulse_Controller.lf's own NS_TO_S -- this reactor times
+  // PulseController.lf's own NS_TO_S -- this reactor times
   // T_start/T_stop observations against physical time the same way that
   // reactor's control_tick does.
   #define NS_TO_S 1e-9f
 
   // Verbose live edge/detection tracing -- same role/convention as
-  // small_deltap_pulse_controller.h's PRINT_DPULSE_DEBUG. Off by default;
+  // pulse_controller.h's PRINT_DPULSE_DEBUG. Off by default;
   // the per-pulse outcome lines below (PRINT_PME_OBS) are the normal
   // on-hardware observability.
   #define PRINT_PME_DEBUG 0
@@ -37,16 +37,19 @@ preamble {=
   // Compact one-line-per-completed-pulse outcome logging (which
   // observations landed, which detector caught onset, dud or not) plus a
   // cumulative counter summary every PME_COUNTER_PRINT_INTERVAL pulses --
-  // ON by default: this is how "we're losing pulses" gets attributed to a
-  // specific drain (no onset / no rest / short window / dud / watchdog)
-  // instead of vanishing silently. Milli-scaled ints, printf-float
-  // convention as everywhere else on this platform.
-  #define PRINT_PME_OBS 1
+  // this is how "we're losing pulses" gets attributed to a specific drain
+  // (no onset / no rest / short window / dud / watchdog) instead of
+  // vanishing silently. Milli-scaled ints, printf-float convention as
+  // everywhere else on this platform. Off by default now that Logger.lf's
+  // source=pulse_model_stats lines report the pooled/per-joint model
+  // stats this feeds structurally (see logger.h/logger.c) -- flip back to
+  // 1 for ad-hoc on-hardware printf debugging without Logger.lf.
+  #define PRINT_PME_OBS 0
   #define PME_COUNTER_PRINT_INTERVAL 20
 =}
 
 // Single-channel per-pulse observation gatherer: watches this joint's
-// Small_DeltaP_Pulse_Controller (via motor_state_input/planned_pulse_input)
+// PulseController (via motor_state_input/planned_pulse_input)
 // alongside EncoderStateEstimator's position/velocity output, and emits one
 // PulseModelObservation per completed pulse (observation_output below) --
 // raw point observations with PER-FIELD validity, see that struct's comment
@@ -88,8 +91,8 @@ preamble {=
 //
 // Sits inside PulseMotorModelEstimator_Bank.lf /
 // PulseMotorModelEstimatorMixture_Bank.lf, one instance per joint -- same
-// split as Small_DeltaP_Pulse_Controller.lf /
-// Small_DeltaP_Pulse_Controller_Bank.lf. bank_index is used purely to tag
+// split as PulseController.lf /
+// PulseControllerBank.lf. bank_index is used purely to tag
 // log lines with the joint number.
 reactor PulseMotorModelEstimator(
   // Declaring a parameter with this exact name makes LF auto-assign each
@@ -108,7 +111,7 @@ reactor PulseMotorModelEstimator(
   // -- pulse_motor_model.h's ceiling on a planned pulse's run_duration --
   // giving how long after a pulse begins (the STARTING edge) this reactor
   // will wait before concluding the pulse is lost (e.g. a stuck/misbehaving
-  // Small_DeltaP_Pulse_Controller, or a dropped motor_state_input/
+  // PulseController, or a dropped motor_state_input/
   // planned_pulse_input connection) and giving up on its observations
   // rather than waiting on them forever -- see the watchdog check in
   // reaction(position_input) below. Deliberately generous: false-negatives
@@ -151,7 +154,7 @@ reactor PulseMotorModelEstimator(
   input position_input: float
   input velocity_input: float
   input commanded_velocity_input: float
-  // Which MotorState this joint's Small_DeltaP_Pulse_Controller is
+  // Which MotorState this joint's PulseController is
   // currently in (STOPPED/STARTING/RUNNING/STOPPING) -- see that reactor's
   // motor_state_output. Lets this estimator tell "this motion happened
   // during a specific commanded pulse" apart from "this motion happened
@@ -159,7 +162,7 @@ reactor PulseMotorModelEstimator(
   // position/velocity back to a particular PulseCommand, and drives all
   // the per-pulse edge detection below.
   input motor_state_input: MotorState
-  // The pulse this joint's Small_DeltaP_Pulse_Controller currently has
+  // The pulse this joint's PulseController currently has
   // committed to (dir/run_duration/pulse_height) -- see that reactor's
   // planned_pulse_output. Carried into each observation (dud analysis
   // needs the planned duration of the pulse that failed to move).
@@ -274,7 +277,7 @@ reactor PulseMotorModelEstimator(
     // observations rather than waiting on them forever. Runs off
     // position_input rather than a timer of its own since position_input
     // keeps arriving at the encoder's own cadence regardless of whatever
-    // might be wrong with motor_state_input/Small_DeltaP_Pulse_Controller.
+    // might be wrong with motor_state_input/PulseController.
     if (self->last_motor_state_ != MOTOR_STOPPED && !self->watchdog_fired_) {
       float expected_max_pulse_s = self->model_.T_start + MAX_PULSE_DURATION_S + self->model_.T_stop;
       float timeout_s = expected_max_pulse_s * self->pulse_timeout_safety_factor;
@@ -388,7 +391,7 @@ reactor PulseMotorModelEstimator(
 #endif
 
     // A pulse just ended -- either normally (STOPPING -> STOPPED) or
-    // because Small_DeltaP_Pulse_Controller re-armed a new one before ever
+    // because PulseController re-armed a new one before ever
     // putting a visible MOTOR_STOPPED on the wire (STOPPING -> STARTING, or
     // even RUNNING -> STARTING, directly). That reactor's control_tick now
     // guards against collapsing STOPPED -> STARTING into the same tick it
@@ -573,7 +576,7 @@ reactor PulseMotorModelEstimator(
     self->last_planned_pulse_ = planned_pulse_input->value;
   =}
 
-  // Applied immediately, unlike Small_DeltaP_Pulse_Controller.lf's
+  // Applied immediately, unlike PulseController.lf's
   // MOTOR_STOPPED-latched pending_model_update_: model_ here is only read
   // for gating (watchdog timeout scale, onset thresholds/fallbacks) and
   // the observation's unobservable fields -- neither makes a mid-pulse

@@ -7,7 +7,8 @@ target C {
   files: [
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
-    "../../../src_c/stats.h", "../../../src_c/stats.c"
+    "../../../src_c/stats.h", "../../../src_c/stats.c",
+    "../../../src_c/logger.h"
   ],
   cmake-include: [
     "../../../src_c/pulse_motor_model_cmake.cmake",
@@ -23,7 +24,10 @@ import MotorCommandBiasEstimator from "MotorCommandBiasEstimator.lf"
 // PulseMotorModelEstimatorMixture_Bank.lf's own top-level preamble.
 preamble {=
   #include "pulse_motor_model.h"
+  #include "logger.h"
+  #include "stats.h"
   #include <stdio.h>
+  #include <string.h>
 =}
 
 // 7-dof wrapper that routes each joint's commanded/actual velocity,
@@ -47,12 +51,50 @@ reactor MotorCommandBiasEstimator_Bank {
   // MotorCommandBiasEstimator.lf.
   output[7] bias_output: float
 
+  // From Logger.lf -- on arrival, build and emit a MotorCommandBiasLogSnapshot
+  // on log_snapshot_output below. See Logger.lf's reactor-level comment for
+  // the request/response pattern this is one half of.
+  input request_log: bool
+  output log_snapshot_output: MotorCommandBiasLogSnapshot
+
+  // Latest bias_output per joint -- bias_output is only ever set by the
+  // reaction below reacting to estimators.bias_output, so this is always
+  // this reactor's current best knowledge of each joint's bias, available
+  // for reaction(request_log) to read without waiting on a fresh
+  // estimators.bias_output tick of its own.
+  state cached_bias_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+
+  // Latest bias_stats_output per joint -- same caching role as cached_bias_
+  // above, for reaction(request_log) to read SampleStats_Mean/
+  // SampleStats_SampleVariance from without waiting on a fresh
+  // estimators.bias_stats_output tick of its own. Individually-named states
+  // rather than a SampleStats[7] array -- same defensive convention as
+  // EncoderStateEstimator.lf/PulseMotorModelEstimatorMixture_Bank.lf's own
+  // per-joint struct states (see their comments for the hardware corruption
+  // that motivated it).
+  state cached_bias_stats_0_: SampleStats
+  state cached_bias_stats_1_: SampleStats
+  state cached_bias_stats_2_: SampleStats
+  state cached_bias_stats_3_: SampleStats
+  state cached_bias_stats_4_: SampleStats
+  state cached_bias_stats_5_: SampleStats
+  state cached_bias_stats_6_: SampleStats
+
+  state log_sequence_: int = 0
+
   // Diagnostic-only, same reasoning as
-  // Small_DeltaP_Pulse_Controller_Bank.lf's own startup print -- this
+  // PulseControllerBank.lf's own startup print -- this
   // reactor has no init work of its own beyond the static `new[7]` wiring
   // below.
   reaction(startup) {=
     printf("[STARTUP] MotorCommandBiasEstimator_Bank: entering startup\r\n");
+    SampleStats_Init(&self->cached_bias_stats_0_);
+    SampleStats_Init(&self->cached_bias_stats_1_);
+    SampleStats_Init(&self->cached_bias_stats_2_);
+    SampleStats_Init(&self->cached_bias_stats_3_);
+    SampleStats_Init(&self->cached_bias_stats_4_);
+    SampleStats_Init(&self->cached_bias_stats_5_);
+    SampleStats_Init(&self->cached_bias_stats_6_);
     printf("[STARTUP] MotorCommandBiasEstimator_Bank: exiting startup\r\n");
   =}
 
@@ -64,4 +106,44 @@ reactor MotorCommandBiasEstimator_Bank {
   motor_model_input -> estimators.motor_model_input
 
   estimators.bias_output -> bias_output
+
+  reaction(estimators.bias_output) {=
+    for (int i = 0; i < estimators_width; i++) {
+      if (estimators[i].bias_output->is_present) {
+        self->cached_bias_[i] = estimators[i].bias_output->value;
+      }
+    }
+  =}
+
+  reaction(estimators.bias_stats_output) {=
+    SampleStats *cached[7] = {
+      &self->cached_bias_stats_0_, &self->cached_bias_stats_1_,
+      &self->cached_bias_stats_2_, &self->cached_bias_stats_3_,
+      &self->cached_bias_stats_4_, &self->cached_bias_stats_5_,
+      &self->cached_bias_stats_6_,
+    };
+    for (int i = 0; i < estimators_width; i++) {
+      if (estimators[i].bias_stats_output->is_present) {
+        *cached[i] = estimators[i].bias_stats_output->value;
+      }
+    }
+  =}
+
+  reaction(request_log) -> log_snapshot_output {=
+    SampleStats *cached[7] = {
+      &self->cached_bias_stats_0_, &self->cached_bias_stats_1_,
+      &self->cached_bias_stats_2_, &self->cached_bias_stats_3_,
+      &self->cached_bias_stats_4_, &self->cached_bias_stats_5_,
+      &self->cached_bias_stats_6_,
+    };
+
+    MotorCommandBiasLogSnapshot snapshot;
+    memcpy(snapshot.bias, self->cached_bias_, sizeof(snapshot.bias));
+    for (int i = 0; i < 7; i++) {
+      snapshot.bias_mean[i] = SampleStats_Mean(cached[i]);
+      snapshot.bias_variance[i] = SampleStats_SampleVariance(cached[i]);
+    }
+    snapshot.sequence = self->log_sequence_++;
+    lf_set(log_snapshot_output, snapshot);
+  =}
 }

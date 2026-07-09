@@ -51,7 +51,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     output[7] force_disable_motor_pins: bool // used to disable specific motors if they've hit convergence or for safety reasons.
 
     // Bypasses the normal remaining_error/command_velocity trigger conditions
-    // on every Small_DeltaP_Pulse_Controller instance at once, forcing them
+    // on every PulseController instance at once, forcing them
     // straight into pulse planning -- driven by SET_SINGLE_PULSE below, so
     // it's true for as long as (and only while) that behavior mode is active.
     output do_single_pulse_command: bool
@@ -59,7 +59,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     // outputs to Small_DeltaP_MPC_Controller_Bank
     output[7] commanded_position_deltas: float
 
-    // from Small_DeltaP_Pulse_Controller_Bank -- true while any joint is
+    // from PulseControllerBank -- true while any joint is
     // still mid-flight on the single-pulse command requested via
     // do_single_pulse_command above, false once all of them land back in
     // MOTOR_STOPPED. Cached into running_single_pulse_command_ below and

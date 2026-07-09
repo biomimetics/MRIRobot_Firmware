@@ -17,11 +17,12 @@ import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import StateMachine from "lib/State_Machine.lf"
 import UART_Handler from "lib/Drivers/UART.lf"
-import Small_DeltaP_Pulse_Controller_Bank from "lib/SmallDeltaPPulseControl/Small_DeltaP_Pulse_Controller_Bank.lf"
+import PulseControllerBank from "lib/PulseController/PulseControllerBank.lf"
 import EncoderStateEstimator from "lib/EncoderStateEstimator.lf"
 import PulseMotorModelEstimatorMixture_Bank from "lib/PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf"
 import MotorCommandBiasEstimator_Bank from "lib/MotorCommandBiasEstimator/MotorCommandBiasEstimator_Bank.lf"
 import CommandSafetyFilter from "lib/CommandSafetyFilter.lf"
+import Logger from "lib/Logger.lf"
 
 // MotorCalibration.lf is a diagnostic reactor for finding the USM/SEA
 // channel <-> physical joint mapping (see that file for usage notes and
@@ -112,7 +113,7 @@ main reactor {
   usm = new USM()                            // Ultrasonic motor controllers
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
   state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
-  deltap_bank = new Small_DeltaP_Pulse_Controller_Bank()  // Per-joint delta-position pulse control, routed between state_machine and usm
+  deltap_bank = new PulseControllerBank()  // Per-joint delta-position pulse control, routed between state_machine and usm
   // Sits inline between qdec and state_machine for USM position/velocity --
   // see EncoderStateEstimator.lf. Runs one fixed-gain observer per joint
   // (encoder_state_observer.h), fusing QDEC position/velocity with the USM
@@ -129,6 +130,9 @@ main reactor {
   // Last stop before usm: adds motor_command_bias_estimator's per-joint
   // correction onto deltap_bank's command -- see CommandSafetyFilter.lf.
   command_safety_filter = new CommandSafetyFilter(safety_checks_enabled = false)
+  // Periodically polls motor_command_bias_estimator/pulse_motor_model_estimator
+  // for a snapshot of their running state -- see Logger.lf.
+  logger = new Logger(log_period = 1 s)
   // Diagnostic only -- see MotorCalibration.lf for usage notes. Uncomment
   // along with the import above and the wiring below to use it again.
   // motor_calib = new MotorCalibration()
@@ -234,7 +238,7 @@ main reactor {
   // attribute encoder motion to a specific commanded pulse and what motion
   // to expect from it, and pulse_motor_model_estimator's per-epoch refined
   // PulseMotorModel feeds back into deltap_bank for more accurate
-  // pulse-duration planning -- see Small_DeltaP_Pulse_Controller.lf's
+  // pulse-duration planning -- see PulseController.lf's
   // motor_model_update_input/motor_state_output/planned_pulse_output and
   // PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
   deltap_bank.motor_state_output -> pulse_motor_model_estimator.motor_state_input
@@ -244,7 +248,7 @@ main reactor {
   pulse_motor_model_estimator.motor_model_output -> deltap_bank.motor_model_update_input after 0
 
   // enable_motor_command goes directly from state_machine to usm, bypassing
-  // deltap_bank -- coupling it to Small_DeltaP_Pulse_Controller's own
+  // deltap_bank -- coupling it to PulseController's own
   // bang-bang start/stop cycling caused direction-reversal failures
   // downstream (see Small_Velocity_Controller.lf, whose motor this shares --
   // same hazard applies to any bang-bang small-velocity controller on this
@@ -252,6 +256,19 @@ main reactor {
   state_machine.enable_motor_command -> usm.enable_motor_command
 
   state_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
+
+  // logger -- see Logger.lf's reactor-level comment for the request/response
+  // pattern these connections implement. `after 0` on the reply edges: same
+  // reasoning as pulse_motor_model_estimator's feeds above -- without it,
+  // request_*_log -> request_log -> log_snapshot_output -> log_*_input would
+  // be a zero-delay cycle back into this same logger instance within one
+  // tag.
+  logger.request_motor_bias_log -> motor_command_bias_estimator.request_log
+  motor_command_bias_estimator.log_snapshot_output -> logger.motor_bias_log_input after 0
+  logger.request_pulse_model_log -> pulse_motor_model_estimator.request_log
+  pulse_motor_model_estimator.log_snapshot_output -> logger.pulse_model_log_input after 0
+  logger.request_encoder_state_log -> encoder_state_estimator.request_log
+  encoder_state_estimator.log_snapshot_output -> logger.encoder_state_log_input after 0
 
   // MotorCalibration.lf wiring (diagnostic only, see that file) -- swap the
   // three lines above for these, plus uncomment the import and instantiation

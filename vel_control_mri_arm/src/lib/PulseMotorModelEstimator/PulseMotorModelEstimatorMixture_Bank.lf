@@ -7,7 +7,8 @@ target C {
   files: [
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
-    "../../../src_c/stats.h", "../../../src_c/stats.c"
+    "../../../src_c/stats.h", "../../../src_c/stats.c",
+    "../../../src_c/logger.h"
   ],
   cmake-include: [
     "../../../src_c/pulse_motor_model_cmake.cmake",
@@ -20,17 +21,18 @@ import PulseMotorModelEstimator from "PulseMotorModelEstimator.lf"
 
 // Top-level preamble so PulseMotorModel/MotorState are visible where the
 // port declarations below reference them -- same reasoning as
-// Small_DeltaP_Pulse_Controller_Bank.lf's own top-level preamble.
+// PulseControllerBank.lf's own top-level preamble.
 preamble {=
   #include "pulse_motor_model.h"
+  #include "logger.h"
   #include <stdio.h>
 =}
 
 // 7-dof wrapper that sits between EncoderStateEstimator/State_Machine and
-// Small_DeltaP_Pulse_Controller_Bank, routing each joint's position/
+// PulseControllerBank, routing each joint's position/
 // velocity/commanded-velocity/motor-state signals to a bank of
 // single-channel PulseMotorModelEstimator instances -- same instantiation
-// split as Small_DeltaP_Pulse_Controller_Bank.lf, but NOT the same
+// split as PulseControllerBank.lf, but NOT the same
 // per-joint-passthrough wiring: the big assumption behind this reactor is
 // that all 7 joints are fundamentally the same physical motor/gearbox, so
 // each joint's raw per-pulse observations (see observation_output's comment
@@ -135,10 +137,11 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   // it's the equivalent of what an earlier per-pulse-residual version of
   // this reactor printed (which was very useful for spotting a persistent
   // per-joint outlier, e.g. the ~5 milli-rad/s V_real cluster on a handful
-  // of joints that turned out to be a real bug). true by default since it's
-  // cheap and this is exactly the kind of thing you want on hand while
-  // characterizing hardware.
-  print_detailed_stats: bool = true
+  // of joints that turned out to be a real bug). false by default now that
+  // Logger.lf's source=pulse_model_stats lines report this same pooled/
+  // per-joint breakdown structurally (see logger.h/logger.c) -- flip back
+  // to true for ad-hoc on-hardware printf debugging without Logger.lf.
+  print_detailed_stats: bool = false
 ) {
   input[7] position_input: float
   input[7] velocity_input: float
@@ -147,6 +150,17 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   input[7] planned_pulse_input: PulseCommand
 
   output[7] motor_model_output: PulseMotorModel
+
+  // From Logger.lf -- on arrival, build and emit a PulseMotorModelLogSnapshot
+  // on log_snapshot_output below, straight from this reactor's own model_/
+  // epoch_count_/converged_epochs_ state (all already tracked below, no
+  // extra caching needed the way MotorCommandBiasEstimator_Bank.lf's
+  // per-joint bias needs one). See Logger.lf's reactor-level comment for the
+  // request/response pattern this is one half of.
+  input request_log: bool
+  output log_snapshot_output: PulseMotorModelLogSnapshot
+
+  state log_sequence_: int = 0
 
   // The authoritative shared model -- every broadcast consumer's belief
   // derives from this (plus the per-joint T_start blend at broadcast
@@ -242,7 +256,7 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   reaction(heartbeat) {=
     // Milli-scaled ints rather than %f -- this platform's printf doesn't
     // reliably support floats (same convention as
-    // small_deltap_pulse_controller.c's SmallDeltaPPulse_PrintDebugInfo).
+    // pulse_controller.c's PulseController_PrintDebugInfo).
     printf(
         "PMMixture heartbeat%s: epoch obs=%d/%d (tstart n=%lu tstop n=%lu vreal n=%lu), "
         "epochs=%d (converged streak %d), outliers=%d, duds=%d "
@@ -304,6 +318,29 @@ reactor PulseMotorModelEstimatorMixture_Bank(
             (int) (SampleStats_StandardDeviation(&js->T_stop) * 1000.0f));
       }
     }
+  =}
+
+  reaction(request_log) -> log_snapshot_output {=
+    PulseMotorModelSampleStats *per_joint[7] = {
+      &self->per_joint_observation_stats_0_,
+      &self->per_joint_observation_stats_1_,
+      &self->per_joint_observation_stats_2_,
+      &self->per_joint_observation_stats_3_,
+      &self->per_joint_observation_stats_4_,
+      &self->per_joint_observation_stats_5_,
+      &self->per_joint_observation_stats_6_,
+    };
+
+    PulseMotorModelLogSnapshot snapshot;
+    snapshot.model = self->model_;
+    snapshot.pooled_stats = self->pooled_observation_stats_;
+    for (int i = 0; i < 7; i++) {
+      snapshot.per_joint_stats[i] = *per_joint[i];
+    }
+    snapshot.epoch_count = self->epoch_count_;
+    snapshot.converged_epochs = self->converged_epochs_;
+    snapshot.sequence = self->log_sequence_++;
+    lf_set(log_snapshot_output, snapshot);
   =}
 
   // Folds every joint's freshly-arrived observation into the pooled epoch

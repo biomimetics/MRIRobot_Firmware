@@ -1,5 +1,5 @@
 // Repeated-zero-dwell variant of Main_Test_DeltaP_Dwell.lf, for
-// Small_DeltaP_Pulse_Controller.lf instead of Small_DeltaP_MPC_Controller.lf:
+// PulseController.lf instead of Small_DeltaP_MPC_Controller.lf:
 // drives the controller with DeltaPSignalGenerator.lf's triangle-with-dwell
 // position target, repeatedly exercising the small-velocity/remaining-
 // error-convergence region this controller's single-pulse-duration planning
@@ -14,7 +14,7 @@
 //   ./bin/Main_Test_DeltaP_Pulse_Dwell
 //   python3 scripts/plot_deltap_pulse_dwell.py     # plots csv_data/deltap_pulse_dwell_log.csv
 //
-// Note: PRINT_DPULSE must be set to 1 in src_c/small_deltap_pulse_controller.h
+// Note: PRINT_DPULSE must be set to 1 in src_c/pulse_controller.h
 // for this file's own ConvergenceLogger (defined inline below) and for the
 // CSV log (via DeltaPPulseCsvLogger.lf) to see anything real -- debug_info
 // is only ever populated under that flag.
@@ -23,13 +23,13 @@ target C {
   timeout: 30 s
 }
 
-import Small_DeltaP_Pulse_Controller from "lib/SmallDeltaPPulseControl/Small_DeltaP_Pulse_Controller.lf"
+import PulseController from "lib/PulseController/PulseController.lf"
 import DeltaPSignalGenerator from "lib/Helpers/DeltaPSignalGenerator.lf"
 import FakeMotorPlant from "lib/Helpers/FakeMotorPlant.lf"
 import DeltaPPulseCsvLogger from "lib/Helpers/DeltaPPulseCsvLogger.lf"
 
 preamble {=
-  #include "small_deltap_pulse_controller.h"
+  #include "pulse_controller.h"
   #include <math.h>
 =}
 
@@ -39,7 +39,7 @@ preamble {=
 // Also derives a simple proportional command_velocity (kp * remaining_error,
 // clamped to max_velocity) -- this harness's stand-in for the real velocity
 // command a higher-level controller would send alongside position_delta, so
-// Small_DeltaP_Pulse_Controller's pass-through mode has something real to
+// PulseController's pass-through mode has something real to
 // relay when remaining_error is too large for pulsing mode to engage. Same
 // reactor as Main_Test_DeltaP_Dwell.lf's, duplicated locally rather than
 // shared -- matches how Main_Test_SVC.lf/Main_Test_SVC_Csv.lf each keep
@@ -75,7 +75,7 @@ reactor RemainingErrorComputer(
 // Main_Test_SVC.lf/Main_Test_SVC_Csv.lf each keep their own small
 // test-only reactors.
 reactor ConvergenceLogger(report_period: time = 1 s) {
-  input debug_info: SmallDeltaPPulseControllerDebugInfo
+  input debug_info: PulseControllerDebugInfo
 
   state sample_count: int = 0
   state sum_abs_error: float = 0.0
@@ -115,7 +115,7 @@ reactor ConvergenceLogger(report_period: time = 1 s) {
 main reactor {
   gen = new DeltaPSignalGenerator()
   computer = new RemainingErrorComputer()
-  controller = new Small_DeltaP_Pulse_Controller()
+  controller = new PulseController()
   plant = new FakeMotorPlant()
   logger = new ConvergenceLogger()
   csv_logger = new DeltaPPulseCsvLogger(csv_path = "csv_data/deltap_pulse_dwell_log.csv")
