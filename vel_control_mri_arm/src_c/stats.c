@@ -299,6 +299,76 @@ GaussianRV LogNormal_ToGaussian(const LogNormalRV *ln)
 
 
 /*==========================================================
+ * LogNormalRV -- basic statistics and algebra
+ *==========================================================*/
+
+float LogNormalRV_Mean(LogNormalRV ln) {
+  return expf(ln.mu + 0.5f * ln.sigma2);
+}
+
+float LogNormalRV_Variance(LogNormalRV ln) {
+  return (expf(ln.sigma2) - 1.0f) * expf(2.0f * ln.mu + ln.sigma2);
+}
+
+float LogNormalRV_StdDev(LogNormalRV ln) {
+  return sqrtf(LogNormalRV_Variance(ln));
+}
+
+LogNormalRV LogNormalRV_FromMeanStdDev(float mean, float stddev) {
+  LogNormalRV ln;
+  float variance = stddev * stddev;
+  ln.sigma2 = logf(1.0f + variance / (mean * mean));
+  ln.mu = logf(mean) - 0.5f * ln.sigma2;
+  return ln;
+}
+
+float LogNormalRV_Pdf(float x, LogNormalRV ln) {
+  if (x <= 0.0f) {
+    return 0.0f;
+  }
+  float sigma = sqrtf(ln.sigma2);
+  float z = (logf(x) - ln.mu) / sigma;
+  return expf(-0.5f * z * z) / (x * sigma * sqrtf(2.0f * (float) M_PI));
+}
+
+float LogNormalRV_Cdf(float x, LogNormalRV ln) {
+  if (x <= 0.0f) {
+    return 0.0f;
+  }
+  return StandardNormalCdf((logf(x) - ln.mu) / sqrtf(ln.sigma2));
+}
+
+float LogNormalRV_Cdf_Tail(float x, LogNormalRV ln) {
+  if (x <= 0.0f) {
+    return 1.0f;
+  }
+  return StandardNormalCdf(-(logf(x) - ln.mu) / sqrtf(ln.sigma2));
+}
+
+float LogNormalRV_InvCdf(float p, LogNormalRV ln) {
+  return expf(ln.mu + sqrtf(ln.sigma2) * StandardNormalInvCdf(p));
+}
+
+float LogNormalRV_InvCdf_Tail(float p, LogNormalRV ln) {
+  return expf(ln.mu + sqrtf(ln.sigma2) * StandardNormalInvCdf(1.0f - p));
+}
+
+LogNormalRV LogNormalRV_Multiply(LogNormalRV a, LogNormalRV b) {
+  LogNormalRV out;
+  out.mu = a.mu + b.mu;
+  out.sigma2 = a.sigma2 + b.sigma2;
+  return out;
+}
+
+LogNormalRV LogNormalRV_Divide(LogNormalRV a, LogNormalRV b) {
+  LogNormalRV out;
+  out.mu = a.mu - b.mu;
+  out.sigma2 = a.sigma2 + b.sigma2;
+  return out;
+}
+
+
+/*==========================================================
  * Convenience helper
  *
  * Updates log-space statistics directly.
@@ -315,3 +385,5 @@ int SampleStats_AddLogObservation(SampleStats *s, float x)
 
     return 1;
 }
+
+

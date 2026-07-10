@@ -1,4 +1,5 @@
 #include "pulse_motor_model.h"
+#include "lognormal_motion.h"
 #include <math.h>
 
 float sign_f(float x) {
@@ -116,6 +117,32 @@ PulseCommand PulseMotorModel_PlanPulseWithOvershootBound(const PulseMotorModel *
   //if (run_duration < model->minimumPulseWidth) {
   //  run_duration = model->minimumPulseWidth;
   //}
+
+  if (run_duration > MAX_PULSE_DURATION_S) {
+    run_duration = MAX_PULSE_DURATION_S;
+  }
+  pulse.run_duration = run_duration;
+  return pulse;
+}
+
+LogNormalRV PulseMotorModel_PredictVelocityLogNormal(const PulseMotorModel *model) {
+  return LogNormalRV_FromMeanStdDev(model->V_real.mean, GaussianRV_StdDev(model->V_real));
+}
+
+PulseCommand PulseMotorModel_PlanPulseWithOvershootBound_LogNormal(const PulseMotorModel *model, float remainingPositionDelta, float distance_stddev, float max_overshoot_probability) {
+  PulseCommand pulse;
+  pulse.pulse_height = model->V_min_cmd;
+  pulse.dir = sign_f(remainingPositionDelta);
+
+  float run_duration;
+  if (model->V_real.mean <= 0.0f) {
+    run_duration = MAX_PULSE_DURATION_S;
+  } else {
+    float distance = fabsf(remainingPositionDelta);
+    LogNormalRV distance_dist = LogNormalRV_FromMeanStdDev(distance, distance_stddev);
+    LogNormalRV velocity_dist = PulseMotorModel_PredictVelocityLogNormal(model);
+    run_duration = LogNormalMotion_ArrivalTimeInvCdf(max_overshoot_probability, distance_dist, velocity_dist);
+  }
 
   if (run_duration > MAX_PULSE_DURATION_S) {
     run_duration = MAX_PULSE_DURATION_S;

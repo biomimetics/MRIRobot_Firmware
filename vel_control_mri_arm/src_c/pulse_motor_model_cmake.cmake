@@ -18,3 +18,10 @@ target_sources(${LF_MAIN_TARGET} PRIVATE pulse_motor_model.c pulse_motor_model.h
 # duplicated one level further here too.
 target_sources(${LF_MAIN_TARGET} PRIVATE gaussian_motion.c gaussian_motion.h)
 target_sources(${LF_MAIN_TARGET} PRIVATE stats.c stats.h)
+
+# pulse_motor_model.c also calls into LogNormalMotion_ArrivalTimeInvCdf
+# (PulseMotorModel_PlanPulseWithOvershootBound_LogNormal, an experimental
+# sibling of PlanPulseWithOvershootBound -- see lognormal_motion.h), so
+# lognormal_motion.c has to be linked in too, same duplication reasoning as
+# gaussian_motion.c above.
+target_sources(${LF_MAIN_TARGET} PRIVATE lognormal_motion.c lognormal_motion.h)

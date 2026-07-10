@@ -73,6 +73,56 @@ typedef struct
     float sigma2;
 } LogNormalRV;
 
+// ---- Basic statistics ----
+
+// Linear-space mean/variance of ln, via moment matching (same formulas as
+// LogNormal_ToGaussian, exposed as plain accessors rather than requiring
+// callers to build a throwaway GaussianRV).
+float LogNormalRV_Mean(LogNormalRV ln);
+float LogNormalRV_Variance(LogNormalRV ln);
+float LogNormalRV_StdDev(LogNormalRV ln);
+
+// Builds a LogNormalRV whose linear-space mean/stddev match the given
+// values -- the inverse direction of LogNormalRV_Mean/StdDev. Lets a caller
+// specify a lognormal prior in intuitive linear-space terms (e.g. "distance
+// = 5cm, +-1mm") instead of computing mu/sigma2 by hand. mean must be > 0;
+// stddev must be >= 0.
+LogNormalRV LogNormalRV_FromMeanStdDev(float mean, float stddev);
+
+// Lognormal density of ln, evaluated at x. 0 for x <= 0 (lognormal has no
+// support there).
+float LogNormalRV_Pdf(float x, LogNormalRV ln);
+
+// P(X <= x) for X ~ ln. 0 for x <= 0.
+float LogNormalRV_Cdf(float x, LogNormalRV ln);
+
+// P(X >= x) for X ~ ln (== 1 - Cdf(x, ln), computed directly via the
+// opposite-sign erfc tail for the same tail-precision reason as
+// GaussianRV_Cdf_Tail). 1 for x <= 0.
+float LogNormalRV_Cdf_Tail(float x, LogNormalRV ln);
+
+// Quantile function: returns x such that P(X <= x) = p for X ~ ln. Domain
+// 0 < p < 1 (p == 0 -> 0, p == 1 -> +INFINITY, outside [0,1] -> NAN), same
+// convention as GaussianRV_InvCdf.
+float LogNormalRV_InvCdf(float p, LogNormalRV ln);
+
+// Same as InvCdf, but for the upper tail: returns x such that P(X >= x) = p.
+float LogNormalRV_InvCdf_Tail(float p, LogNormalRV ln);
+
+// ---- Generic lognormal propagation (assumes independence throughout) ----
+//
+// If X ~ LogNormal(mu_x, sigma_x^2) and Y ~ LogNormal(mu_y, sigma_y^2) are
+// independent, then X*Y and X/Y are themselves exactly lognormal (their
+// logs are the sum/difference of two independent normals) -- unlike
+// GaussianRV_Product, these are exact distributional results, not just
+// moment-matched approximations.
+
+// Z = X*Y
+LogNormalRV LogNormalRV_Multiply(LogNormalRV a, LogNormalRV b);
+
+// Z = X/Y
+LogNormalRV LogNormalRV_Divide(LogNormalRV a, LogNormalRV b);
+
 
 /*==========================================================
  * Running sample statistics

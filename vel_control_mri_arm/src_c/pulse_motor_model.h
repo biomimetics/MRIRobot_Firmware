@@ -228,6 +228,34 @@ void PulseMotorModelSampleStats_Add(PulseMotorModelSampleStats *s, PulseMotorMod
 // comment).
 PulseCommand PulseMotorModel_PlanPulseWithOvershootBound(const PulseMotorModel *model, float remainingPositionDelta, float max_overshoot_probability);
 
+// EXPERIMENTAL alternative to PulseMotorModel_PredictDeltaDistribution's
+// GaussianRV velocity, for use with lognormal_motion.h's arrival-time
+// model. Moment-matches model->V_real (mean, stddev) into a LogNormalRV
+// with the same linear-space mean/stddev, via LogNormalRV_FromMeanStdDev --
+// the inverse direction of LogNormal_ToGaussian's moment matching. Only
+// meaningful when V_real.mean > 0 (lognormal has no near-zero-mean
+// representation -- see lognormal_motion.h); callers must check that
+// themselves, same as PlanPulseWithOvershootBound_LogNormal below does.
+LogNormalRV PulseMotorModel_PredictVelocityLogNormal(const PulseMotorModel *model);
+
+// EXPERIMENTAL sibling of PlanPulseWithOvershootBound, NOT a replacement --
+// see lognormal_motion.h. Plans the same shape of pulse (direction from
+// remainingPositionDelta's sign, pulse_height fixed at model->V_min_cmd,
+// duration bounded by max_overshoot_probability), but assumes the
+// remaining distance is itself uncertain and lognormally distributed
+// (LogNormalRV_FromMeanStdDev(fabsf(remainingPositionDelta),
+// distance_stddev) -- pass 0 for a distance treated as exactly known) and
+// reuses model->V_real's mean/stddev as a LogNormalRV velocity via
+// PulseMotorModel_PredictVelocityLogNormal, rather than GaussianRV
+// velocity with a fixed-float distance. Duration comes from
+// LogNormalMotion_ArrivalTimeInvCdf against that distance/velocity pair.
+//
+// Falls back to a MAX_PULSE_DURATION_S pulse (same backstop
+// PlanPulseWithOvershootBound clamps to) whenever model->V_real.mean <= 0,
+// since a lognormal velocity can't represent that -- this happens instead
+// of computing garbage from log(<=0).
+PulseCommand PulseMotorModel_PlanPulseWithOvershootBound_LogNormal(const PulseMotorModel *model, float remainingPositionDelta, float distance_stddev, float max_overshoot_probability);
+
 // Generic pulse execution state: which FSM state we're in, the
 // currently-latched direction, elapsed-time timers, the pulse currently
 // committed to, and the resulting command velocity. Deliberately decoupled
