@@ -111,12 +111,24 @@ PulseCommand PulseMotorModel_PlanPulseWithOvershootBound(const PulseMotorModel *
   pulse.dir = sign_f(remainingPositionDelta);
   float distance = fabsf(remainingPositionDelta);
   float run_duration = GaussianMotion_ArrivalTimeInvCdf(max_overshoot_probability, distance, model->V_real);
-  
-  // I removed this check because I think it's more interesting if we don't prevent plans that are too small.
-  // We may want to use that info elsewhere to trigger a convergence state, but we don't want to block them like this.
-  //if (run_duration < model->minimumPulseWidth) {
-  //  run_duration = model->minimumPulseWidth;
-  //}
+
+  // Duration floor, reinstated (2026-07) after removing it produced
+  // guaranteed-dud pulses near convergence: run_duration counts from command
+  // onset, but the motor doesn't move until T_start after onset (see
+  // PulseMotorModel_Advance's MOTOR_STARTING guard, which zeroes the command
+  // if run_duration expires first). Any plan at or below T_start therefore
+  // commands the motor without ever moving it -- the estimator logs a dud,
+  // remaining error doesn't change, and the caller replans the same no-op
+  // pulse forever. Floor = T_start plus minimumPulseWidth of actual on-time,
+  // so every emitted pulse can physically produce motion. Note this floor
+  // overrides the overshoot bound for very small distances: a floored pulse
+  // may move the joint further than remainingPositionDelta, so callers must
+  // not plan pulses for errors they'd rather not overshoot (see
+  // Small_DeltaP_Pulse_Controller.lf's convergenceLimit gating).
+  float min_duration = model->T_start + model->minimumPulseWidth;
+  if (run_duration < min_duration) {
+    run_duration = min_duration;
+  }
 
   if (run_duration > MAX_PULSE_DURATION_S) {
     run_duration = MAX_PULSE_DURATION_S;
@@ -142,6 +154,14 @@ PulseCommand PulseMotorModel_PlanPulseWithOvershootBound_LogNormal(const PulseMo
     LogNormalRV distance_dist = LogNormalRV_FromMeanStdDev(distance, distance_stddev);
     LogNormalRV velocity_dist = PulseMotorModel_PredictVelocityLogNormal(model);
     run_duration = LogNormalMotion_ArrivalTimeInvCdf(max_overshoot_probability, distance_dist, velocity_dist);
+  }
+
+  // Same duration floor as PlanPulseWithOvershootBound -- see the comment
+  // there; a sub-T_start plan is a guaranteed no-op regardless of which
+  // arrival-time model produced it.
+  float min_duration = model->T_start + model->minimumPulseWidth;
+  if (run_duration < min_duration) {
+    run_duration = min_duration;
   }
 
   if (run_duration > MAX_PULSE_DURATION_S) {

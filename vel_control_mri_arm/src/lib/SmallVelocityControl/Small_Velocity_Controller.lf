@@ -6,7 +6,8 @@ target C {
   },
   files: [
     "../../../src_c/pulse_mpc.h", "../../../src_c/pulse_mpc.c",
-    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c"
+    "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
+    "../../../src_c/lognormal_motion.h", "../../../src_c/lognormal_motion.c"
   ],
   cmake-include: [
     "../../../src_c/pulse_mpc_cmake.cmake",

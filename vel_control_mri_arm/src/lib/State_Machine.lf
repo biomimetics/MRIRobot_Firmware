@@ -52,8 +52,13 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
 
     // Bypasses the normal remaining_error/command_velocity trigger conditions
     // on every Small_DeltaP_Pulse_Controller instance at once, forcing them
-    // straight into pulse planning -- driven by SET_SINGLE_PULSE below, so
-    // it's true for as long as (and only while) that behavior mode is active.
+    // straight into pulse planning. One-shot, not a level: true for exactly
+    // one motor_command_tick per ENTRY into SET_SINGLE_PULSE (see
+    // pending_single_pulse_ below), false otherwise. Broadcasting it as a
+    // level for the whole time mode 3 was active kept re-arming the pulse
+    // controllers after every pulse landed, turning "single pulse" into an
+    // endless pulse train that ignored zeroed velocities -- to fire another
+    // pulse, the host has to leave mode 3 and re-enter it.
     output do_single_pulse_command: bool
 
     // outputs to Small_DeltaP_MPC_Controller_Bank
@@ -101,9 +106,12 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     state staged_position_deltas_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
     state enable_motor_command_: bool = false
-    // Set true only while current_behavior_mode_ == SET_SINGLE_PULSE -- see
-    // do_single_pulse_command's comment above.
-    state do_single_pulse_command_: bool = false
+    // One-shot pulse request: set true on a transition INTO behavior mode 3
+    // (reaction(command_message) below), emitted on the next
+    // motor_command_tick and cleared there -- see do_single_pulse_command's
+    // comment above. Cancelled if the mode changes away from 3 before it
+    // gets emitted.
+    state pending_single_pulse_: bool = false
     // Cache of running_single_pulse_command input -- see that input's comment.
     state running_single_pulse_command_: bool = false
 
@@ -201,7 +209,10 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       for (int i = 0; i<DOF_NUMBER; i++){
         lf_set(enable_motor_command[i], self->enable_motor_command_);
       }
-      lf_set(do_single_pulse_command, self->do_single_pulse_command_);
+      // One-shot: emit the pending pulse request exactly once, then clear it
+      // -- see do_single_pulse_command's port-level comment.
+      lf_set(do_single_pulse_command, self->pending_single_pulse_);
+      self->pending_single_pulse_ = false;
 
     =}
 
@@ -267,9 +278,13 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
           self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
           printf("Switching to Error state...\n");
         }
-        else if (self->cmd_msg_.behavior_mode == 3){ // SET_SINGLE_PULSE // like Run, but forces every joint's pulse controller to plan/run a single pulse regardless of its normal trigger conditions.
+        else if (self->cmd_msg_.behavior_mode == 3){ // SET_SINGLE_PULSE // like Run, but forces every joint's pulse controller to plan/run ONE pulse regardless of its normal trigger conditions.
           self->enable_motor_command_ = true;
           self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+          // Only armed here, on the TRANSITION into mode 3 -- staying in
+          // mode 3 across further command messages does not re-arm it, so
+          // each entry into the mode fires exactly one pulse per joint.
+          self->pending_single_pulse_ = true;
           printf("Switching to Single Pulse state...\n");
         }
         else{
@@ -281,11 +296,12 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         }
       }
 
-      // do_single_pulse_command_ tracks current_behavior_mode_ directly --
-      // true for as long as (and only while) SET_SINGLE_PULSE is active, so
-      // leaving that mode (e.g. back to RUN or IDLE) drops it again without
-      // any extra bookkeeping here.
-      self->do_single_pulse_command_ = (self->current_behavior_mode_ == 3);
+      // Leaving mode 3 (back to RUN/IDLE/ERROR) before the pending request
+      // was emitted cancels it -- an aborted single-pulse entry shouldn't
+      // fire a pulse later.
+      if (self->current_behavior_mode_ != 3){
+        self->pending_single_pulse_ = false;
+      }
 
       // velocities are most important!
       for (int i = 0; i<DOF_NUMBER; i++){

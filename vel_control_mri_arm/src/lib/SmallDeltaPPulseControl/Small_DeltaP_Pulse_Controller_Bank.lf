@@ -7,6 +7,7 @@ target C {
   files: [
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/lognormal_motion.h", "../../../src_c/lognormal_motion.c",
     "../../../src_c/stats.h", "../../../src_c/stats.c",
     "../../../src_c/small_deltap_pulse_controller.h", "../../../src_c/small_deltap_pulse_controller.c"
   ],
@@ -39,6 +40,25 @@ preamble {=
 // Small_DeltaP_Pulse_Controller instances. Motor enable/disable does NOT
 // route through here -- same as Small_Velocity_Controller_Bank.lf, Main.lf
 // wires State_Machine's enable_motor_command directly to USM instead.
+//
+// HOST CONTRACT for single-pulse commands (changed 2026-07): SET_SINGLE_PULSE
+// (behavior mode 3) fires exactly ONE pulse per joint per ENTRY into the
+// mode, not one per command message and not continuously while the mode is
+// held -- StateMachine emits do_single_pulse_command as a one-tick one-shot
+// on the mode transition (see State_Machine.lf). To request the next pulse,
+// the ROS host must:
+//   1. send a command message entering mode 3 (from RUN/IDLE) with the
+//      position_deltas to close;
+//   2. wait for running_single_pulse_command in the state message to go
+//      true and then false again (all joints landed back in MOTOR_STOPPED);
+//   3. leave mode 3 (e.g. back to mode 1) and re-enter it for the next pulse.
+// Streaming mode-3 messages without leaving the mode fires one pulse total.
+// A joint whose |remaining_error| is already at/below its convergenceLimit
+// consumes the request without pulsing (and without ever raising
+// running_single_pulse_command for that joint) -- a stale/zero position
+// delta never moves a converged joint. The previous level-triggered behavior
+// re-armed a pulse every time one landed, which is what caused the
+// "constant velocity out of zeroed commands" failure near convergence.
 reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   input[7] command_velocity_input: float
   input[7] remaining_error_input: float
@@ -49,8 +69,9 @@ reactor Small_DeltaP_Pulse_Controller_Bank(print_period: time = 250 ms) {
   // Single (non-banked) trigger, broadcast to every Small_DeltaP_Pulse_Controller
   // instance at once -- bypasses each controller's normal remaining_error/
   // command_velocity trigger conditions and forces it straight into pulse
-  // planning. Comes from StateMachine via a dedicated behavior mode -- see
-  // that reactor's do_single_pulse_command output.
+  // planning. One-shot: true for a single tick per entry into the
+  // SET_SINGLE_PULSE behavior mode (each controller OR-latches it until its
+  // pulse fires) -- see StateMachine's do_single_pulse_command output.
   input do_single_pulse_command_input: bool
 
   output[7] command_velocity_output: float

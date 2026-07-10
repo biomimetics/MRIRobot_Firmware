@@ -7,6 +7,7 @@ target C {
   files: [
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/lognormal_motion.h", "../../../src_c/lognormal_motion.c",
     "../../../src_c/stats.h", "../../../src_c/stats.c"
   ],
   cmake-include: [
@@ -24,6 +25,16 @@ import PulseMotorModelEstimator from "PulseMotorModelEstimator.lf"
 preamble {=
   #include "pulse_motor_model.h"
   #include <stdio.h>
+
+  // Gates the heartbeat block, the per-observation outlier lines, and the
+  // per-epoch update lines below (previously unconditional). Disabled
+  // (2026-07): printf on this platform BLOCKS the single-threaded LF
+  // runtime, and the multi-line heartbeat alone is ~1 kB per burst -- long
+  // enough to queue several 10 ms state_msg tags that then transmit
+  // back-to-back and starve/corrupt the UART4 state packet stream (ROS-side
+  // "No valid state packet"). Same reasoning as PulseMotorModelEstimator.lf's
+  // PRINT_PME_OBS. Re-enable only for bench sessions, not MRI runs.
+  #define PRINT_PMM_OBS 0
 =}
 
 // 7-dof wrapper that sits between EncoderStateEstimator/State_Machine and
@@ -240,6 +251,7 @@ reactor PulseMotorModelEstimatorMixture_Bank(
   =}
 
   reaction(heartbeat) {=
+#if PRINT_PMM_OBS
     // Milli-scaled ints rather than %f -- this platform's printf doesn't
     // reliably support floats (same convention as
     // small_deltap_pulse_controller.c's SmallDeltaPPulse_PrintDebugInfo).
@@ -304,6 +316,7 @@ reactor PulseMotorModelEstimatorMixture_Bank(
             (int) (SampleStats_StandardDeviation(&js->T_stop) * 1000.0f));
       }
     }
+#endif
   =}
 
   // Folds every joint's freshly-arrived observation into the pooled epoch
@@ -362,12 +375,14 @@ reactor PulseMotorModelEstimatorMixture_Bank(
                                  self->outlier_sigma, (uint32_t) self->outlier_min_samples));
       if (outlier) {
         self->discarded_outliers_++;
+#if PRINT_PMM_OBS
         printf("PMMixture: joint[%d] observation discarded as outlier "
                "(V_real=%d%s T_start=%d%s T_stop=%d%s milli-units)\r\n",
                i,
                (int) (obs.values.V_real.mean * 1000.0f), obs.v_real_valid ? "" : "!",
                (int) (obs.values.T_start * 1000.0f), obs.t_start_valid ? "" : "!",
                (int) (obs.values.T_stop * 1000.0f), obs.t_stop_valid ? "" : "!");
+#endif
         continue;
       }
 
@@ -457,6 +472,7 @@ reactor PulseMotorModelEstimatorMixture_Bank(
     // (or when validating that the estimator WOULD do something sane
     // before flipping enable_model_updates on), this is the only way to
     // see it. Milli-scaled ints, printf-float convention as above.
+#if PRINT_PMM_OBS
     printf(
         "PMMixture epoch %d [obs=%d]%s: V_real %d->%d (obs %d+-%d n=%lu,%s) "
         "T_start %d->%d (obs %d+-%d n=%lu,%s) T_stop %d->%d (obs %d+-%d n=%lu,%s) "
@@ -480,6 +496,7 @@ reactor PulseMotorModelEstimatorMixture_Bank(
         (unsigned long) SampleStats_Count(&self->epoch_stats_.T_stop),
         stepped_t_stop ? "stepped" : "ns",
         (int) (updated.V_real.variance * 1000.0f));
+#endif
 
     // enable_model_updates gates everything past this point -- see that
     // parameter's comment. In dry-run mode, model_ is left untouched (so

@@ -7,6 +7,7 @@ target C {
   files: [
     "../../src_c/pulse_motor_model.h", "../../src_c/pulse_motor_model.c",
     "../../src_c/gaussian_motion.h", "../../src_c/gaussian_motion.c",
+    "../../src_c/lognormal_motion.h", "../../src_c/lognormal_motion.c",
     "../../src_c/stats.h", "../../src_c/stats.c",
     "../../src_c/encoder_state_observer.h", "../../src_c/encoder_state_observer.c"
   ],

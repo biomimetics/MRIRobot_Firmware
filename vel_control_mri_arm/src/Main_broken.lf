@@ -1,0 +1,278 @@
+target C {
+  single-threaded: true,
+  platform: {
+    name: "STM32",
+    board: "F446RE"
+  },
+  files: ["src_c/motor_config.h", 
+          "src_c/sm_config.h",
+          "src_c/common.h",
+          //"src_c/stm_linux_comms.h", "src_c/stm_linux_comms.c"],
+          "src_c/stm_comms.h", "src_c/stm_comms.c"],
+  cmake-include: [
+      "../src_c/stm_comms_cmake.cmake"]
+}
+
+import QDEC from "lib/Drivers/Encoder.lf"
+import USM from "lib/Drivers/USM.lf"
+import StateMachine from "lib/State_Machine.lf"
+import UART_Handler from "lib/Drivers/UART.lf"
+import Small_DeltaP_Pulse_Controller_Bank from "lib/SmallDeltaPPulseControl/Small_DeltaP_Pulse_Controller_Bank.lf"
+import EncoderStateEstimator from "lib/EncoderStateEstimator.lf"
+import PulseMotorModelEstimatorMixture_Bank from "lib/PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf"
+import MotorCommandBiasEstimator_Bank from "lib/MotorCommandBiasEstimator/MotorCommandBiasEstimator_Bank.lf"
+import CommandSafetyFilter from "lib/CommandSafetyFilter.lf"
+
+// MotorCalibration.lf is a diagnostic reactor for finding the USM/SEA
+// channel <-> physical joint mapping (see that file for usage notes and
+// fpga_comms_potential_issues.md for what it found). Not part of normal
+// operation -- uncomment this import plus the instantiation/wiring below
+// to use it again.
+// import MotorCalibration from "lib/Helpers/MotorCalibration.lf"
+
+preamble {=
+  #include <stdio.h>
+  #include "stm32f4xx_hal.h"
+  //#include "stm32_startup.h"
+  #include "main.h"
+  
+  #include "stm_comms.h"
+
+  extern UART_HandleTypeDef huart2;
+
+  =}
+
+// Import and/or declare reactor classes.
+main reactor {
+  preamble {=
+  
+    extern UART_HandleTypeDef huart1; // make sure these need to be defined here or not
+    extern UART_HandleTypeDef huart3;
+    extern UART_HandleTypeDef huart4;
+    extern UART_HandleTypeDef huart5;
+
+    extern TIM_HandleTypeDef htim6; // used for timing loops
+
+    //UART_HandleTypeDef huart6; // def in ROS_Interface.lf
+    
+    int stm32_init(void){
+      HAL_Init();
+
+      SystemClock_Config();
+
+      MX_GPIO_Init();
+      MX_DMA_Init();
+      MX_UART4_Init();
+      MX_USART1_UART_Init();
+      MX_USART3_UART_Init();
+      MX_USART6_UART_Init();
+      MX_TIM3_Init();
+      MX_TIM4_Init();
+      MX_TIM6_Init();
+      HAL_TIM_Base_Start(&htim6); // added!
+      MX_RTC_Init();
+      MX_USART2_UART_Init();
+
+      printf("\r\n");
+      printf("~~~ STM32 START ~~~ \r\n");
+      printf("\r\n");
+
+      //HAL_START_DMA(); // not sure if needed
+      //main();
+      return 0;
+    }
+
+    // empty callbacks
+    void HAL_UART_RxCallback1(){};
+    void HAL_UART_TxCallback1(){};
+
+    // Define global callbacks
+    void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+      if (huart->Instance == USART3) {
+        HAL_UART_RxCallback3(); // 
+      } else if (huart->Instance == USART1) {
+        //HAL_UART_RxCallback_DMA();
+        HAL_UART_RxCallback1();
+      } else if (huart->Instance == UART4) { // UART4 // DMA_UART
+        HAL_UART_RxCallback_DMA();
+      }
+    }
+
+    
+    void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+      if (huart == &huart1) {
+        HAL_UART_TxCallback1();
+      }
+    }
+
+    int hal_timer = 0;
+  =}
+
+  qdec = new QDEC(sample_period = 10 ms)     // FPGA-based QDEC Encoders
+  usm = new USM()                            // Ultrasonic motor controllers
+  uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms) //new ROSInterface(update_period = 20 ms)        // ROS UART Interface
+  state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)            // Used to trigger other reactors behavior
+  deltap_bank = new Small_DeltaP_Pulse_Controller_Bank()  // Per-joint delta-position pulse control, routed between state_machine and usm
+  // Sits inline between qdec and state_machine for USM position/velocity --
+  // see EncoderStateEstimator.lf. Runs one fixed-gain observer per joint
+  // (encoder_state_observer.h), fusing QDEC position/velocity with the USM
+  // command via a T_start/T_stop delay line -- hence
+  // use_commanded_velocity = true for this (USM) instance.
+  encoder_state_estimator = new EncoderStateEstimator(use_commanded_velocity = false, enable_observer = false)
+  // Owns the shared PulseMotorModel: pools per-pulse observations across
+  // all 7 joints and runs the epoch test/step/broadcast update -- see
+  // PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
+  pulse_motor_model_estimator = new PulseMotorModelEstimatorMixture_Bank(enable_model_updates = true)
+  // Learns each joint's own commanded-vs-actual velocity offset during
+  // ordinary pass-through control -- see MotorCommandBiasEstimator.lf.
+  motor_command_bias_estimator = new MotorCommandBiasEstimator_Bank(update_bias = true)
+  // Last stop before usm: adds motor_command_bias_estimator's per-joint
+  // correction onto deltap_bank's command -- see CommandSafetyFilter.lf.
+  command_safety_filter = new CommandSafetyFilter(safety_checks_enabled = false)
+  // Diagnostic only -- see MotorCalibration.lf for usage notes. Uncomment
+  // along with the import above and the wiring below to use it again.
+  // motor_calib = new MotorCalibration()
+
+  // route all the inputs/outputs here
+
+  // uart
+  uart.cmd_msg -> state_machine.command_message
+  uart.not_receiving_error -> state_machine.not_receiving_error
+
+  state_machine.state_message -> uart.state_msg after 0;
+
+  // encoders -- USM position/velocity now route through
+  // encoder_state_estimator rather than straight to state_machine (see
+  // EncoderStateEstimator.lf); SEA continues straight through unchanged.
+  qdec.qdec_out -> encoder_state_estimator.position_input
+  qdec.qdec_vel_out -> encoder_state_estimator.velocity_input
+  encoder_state_estimator.position_output -> state_machine.motor_encoder_positions
+  encoder_state_estimator.velocity_output -> state_machine.motor_encoder_velocities
+  qdec.sea_out -> state_machine.sea_encoder_positions
+  qdec.sea_vel_out -> state_machine.sea_encoder_velocities
+
+  // Static per-joint position offset, applied inside encoder_state_estimator
+  // -- see EncoderStateEstimator.lf/State_Machine.lf's position_offset
+  // comments.
+  state_machine.position_offset -> encoder_state_estimator.position_offset_input
+
+  state_machine.enable_qdec -> qdec.enable_qdec
+  state_machine.reset_qdec -> qdec.reset_qdec
+
+  // usm
+  state_machine.commanded_motor_velocities -> deltap_bank.command_velocity_input
+  state_machine.commanded_position_deltas -> deltap_bank.remaining_error_input
+  state_machine.do_single_pulse_command -> deltap_bank.do_single_pulse_command_input
+  deltap_bank.running_single_pulse_command -> state_machine.running_single_pulse_command
+  // deltap_bank's raw command now goes through command_safety_filter (bias
+  // correction) before it reaches the motor -- see CommandSafetyFilter.lf
+  // and MotorCommandBiasEstimator.lf.
+  deltap_bank.command_velocity_output -> command_safety_filter.command_velocity_input
+  command_safety_filter.command_velocity_output -> usm.speed
+  // command_safety_filter's sending_motor_commands/motor_active/
+  // motor_is_responding/motor_direction_fault outputs aren't consumed
+  // anywhere yet -- see CommandSafetyFilter.lf for what they report. Left
+  // unwired until something downstream (logging, UART telemetry,
+  // state_machine) needs them.
+
+  // motor_command_bias_estimator only learns from genuine pass-through
+  // samples (is_passthrough_output) at/above the model's V_min_cmd -- see
+  // MotorCommandBiasEstimator.lf's reactor-level comment -- and needs the
+  // pre-correction command itself (fed straight from deltap_bank, not
+  // command_safety_filter's output) since comparing the ORIGINAL desired
+  // velocity against measured velocity is what yields the total bias still
+  // owed, independent of whatever correction is already being applied.
+  deltap_bank.command_velocity_output -> motor_command_bias_estimator.commanded_velocity_input
+  deltap_bank.is_passthrough_output -> motor_command_bias_estimator.is_passthrough_input
+  encoder_state_estimator.velocity_output -> motor_command_bias_estimator.velocity_input
+  // after 0: same reasoning as the motor_model_output feeds below -- this
+  // reactor's motor_model_input is produced by pulse_motor_model_estimator's
+  // epoch reaction, which this connection would otherwise loop back into
+  // within the same zero-delay instant.
+  pulse_motor_model_estimator.motor_model_output -> motor_command_bias_estimator.motor_model_input after 0
+  motor_command_bias_estimator.bias_output -> command_safety_filter.command_bias_input
+  encoder_state_estimator.velocity_output -> command_safety_filter.velocity_input
+
+  // encoder_state_estimator watches the command actually sent to the USM
+  // (command_safety_filter's bias-corrected output -- correct in both
+  // pass-through and pulsing modes, and now also bias-corrected), NOT
+  // state_machine.commanded_motor_velocities, which sits near zero while a
+  // joint is pulsing -- see EncoderStateEstimator.lf.
+  //
+  // `after 0` here breaks a real cycle introduced by command_safety_filter:
+  // encoder_state_estimator's own velocity_output feeds
+  // motor_command_bias_estimator (above), whose bias_output feeds
+  // command_safety_filter, whose command_velocity_output would otherwise
+  // feed straight back into this same reactor's commanded_velocity_input --
+  // and QDEC's 10 ms tag routinely coincides with deltap_bank's 5 ms
+  // control_tick, so this isn't just a theoretical same-tag collision. One
+  // microstep of staleness on the commanded-velocity cache is
+  // inconsequential here, same reasoning as every other `after 0` below.
+  //
+  // The motor_model_output feed just below carries the same `after 0` (one
+  // microstep, zero physical delay -- same as state_machine.state_message
+  // above): now that the mixture bank's epoch reaction actually produces
+  // motor_model_output, this edge closes a zero-delay causality loop
+  // (control_tick -> motor_state -> estimators -> epoch reaction ->
+  // motor_model -> back into the consumers' cache reactions, whose implicit
+  // intra-reactor ordering feeds the producing reactions declared after
+  // them). A one-epoch-old model landing one microstep later is
+  // semantically irrelevant here.
+  command_safety_filter.command_velocity_output -> encoder_state_estimator.commanded_velocity_input after 0
+  deltap_bank.motor_state_output -> encoder_state_estimator.motor_state_input
+  pulse_motor_model_estimator.motor_model_output -> encoder_state_estimator.motor_model_input after 0
+
+  // Commanded velocity also fans out to the parameter estimator -- see
+  // PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
+  state_machine.commanded_motor_velocities -> pulse_motor_model_estimator.commanded_velocity_input
+  encoder_state_estimator.position_output -> pulse_motor_model_estimator.position_input
+  encoder_state_estimator.velocity_output -> pulse_motor_model_estimator.velocity_input
+
+  // Closes the loop between the pulse controller bank and its parameter
+  // estimator: deltap_bank's per-joint MotorState and currently-committed
+  // PulseCommand tell pulse_motor_model_estimator when it's safe to
+  // attribute encoder motion to a specific commanded pulse and what motion
+  // to expect from it, and pulse_motor_model_estimator's per-epoch refined
+  // PulseMotorModel feeds back into deltap_bank for more accurate
+  // pulse-duration planning -- see Small_DeltaP_Pulse_Controller.lf's
+  // motor_model_update_input/motor_state_output/planned_pulse_output and
+  // PulseMotorModelEstimator/PulseMotorModelEstimatorMixture_Bank.lf.
+  deltap_bank.motor_state_output -> pulse_motor_model_estimator.motor_state_input
+  deltap_bank.planned_pulse_output -> pulse_motor_model_estimator.planned_pulse_input
+  // after 0: breaks the same zero-delay loop as the encoder_state_estimator
+  // feed above -- see that connection's comment.
+  pulse_motor_model_estimator.motor_model_output -> deltap_bank.motor_model_update_input after 0
+
+  // enable_motor_command goes directly from state_machine to usm, bypassing
+  // deltap_bank -- coupling it to Small_DeltaP_Pulse_Controller's own
+  // bang-bang start/stop cycling caused direction-reversal failures
+  // downstream (see Small_Velocity_Controller.lf, whose motor this shares --
+  // same hazard applies to any bang-bang small-velocity controller on this
+  // hardware).
+  state_machine.enable_motor_command -> usm.enable_motor_command
+
+  state_machine.force_disable_motor_pins -> usm.force_disable_motor_pins
+
+  // MotorCalibration.lf wiring (diagnostic only, see that file) -- swap the
+  // three lines above for these, plus uncomment the import and instantiation
+  // above, to drive motors from the calibration reactor instead:
+  // motor_calib.speed -> usm.speed
+  // motor_calib.enable_motor_command -> usm.enable_motor_command
+  // motor_calib.force_disable_motor_pins -> usm.force_disable_motor_pins
+  // qdec.qdec_out -> motor_calib.qdec_in
+  // qdec.sea_out -> motor_calib.sea_in
+
+
+  reaction(startup) {=
+    // Prep all GPIO values
+    //MX_GPIO_Init();
+
+    // Initialize the STM32 peripherals
+    stm32_init();
+
+    hal_timer = HAL_GetTick(); 
+
+  =}
+
+
+}

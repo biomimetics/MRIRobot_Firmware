@@ -7,6 +7,7 @@ target C {
   files: [
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/lognormal_motion.h", "../../../src_c/lognormal_motion.c",
     "../../../src_c/stats.h", "../../../src_c/stats.c",
     "../../../src_c/small_deltap_pulse_controller.h", "../../../src_c/small_deltap_pulse_controller.c"
   ],
@@ -41,9 +42,32 @@ preamble {=
 // future reactor starting from exactly the same initial belief about the
 // motor. Remaining constructor parameters below are this controller's own
 // planning tuning, not part of PulseMotorModel.
+//
+// PULSE DURATION FLOOR (reinstated 2026-07): every pulse this controller
+// plans (PulseMotorModel_PlanPulseWithOvershootBound, both the normal
+// pulsing branch and the single-pulse branch in control_tick) is floored at
+// model_.T_start + model_.minimumPulseWidth by the planner itself -- see the
+// comment in pulse_motor_model.c. A pulse whose run_duration is at or below
+// T_start ends before the motor's own start delay elapses, so it commands
+// the motor without ever moving it: the on-hardware signature was
+// PulseMotorModelEstimatorMixture heartbeats where every observation on the
+// near-converged joints was a dud (obs=0, model stuck at
+// INITIAL_MOTOR_MODEL) while remaining error never closed. Two consequences
+// for this controller:
+//   - For remaining errors just above convergenceLimit_, the floored pulse
+//     can move the joint FURTHER than the remaining error -- the floor
+//     deliberately wins over the planner's overshoot-probability bound,
+//     since a bounded no-op converges never and a small overshoot converges
+//     next pulse (possibly ringing once across the target). If overshoot
+//     near the limit turns out to matter on hardware, raise
+//     convergenceLimit_initial rather than lowering the floor.
+//   - Pulses are only worth planning at all when they can beat the floor's
+//     minimum displacement (~V_real.mean * minimumPulseWidth plus coasting
+//     through T_stop); the convergenceLimit_ gates in control_tick are what
+//     keep this controller from pulsing at errors below that.
 reactor Small_DeltaP_Pulse_Controller(
   control_period: time = 5 ms,
-  max_overshoot_probability: float = 0.02, // unitless 0..1, P(T <= pulse duration) bound the planner must respect -- TODO: characterize
+  max_overshoot_probability: float = 0.05, // unitless 0..1, P(T <= pulse duration) bound the planner must respect -- TODO: characterize
   convergenceLimit_initial: float = 0.034906584, // rad (~2 deg), 
   remaining_error_start_threshold: float = 0.5, // rad, first part of AND statement to trigger pulses
   command_velocity_start_threshold: float = 0.4 // rad/s, second part of AND statement to trigger pulses
@@ -154,6 +178,13 @@ reactor Small_DeltaP_Pulse_Controller(
   // converged_ == false means it is actively planning/running pulses.
   state converged_: bool = false
 
+  // Sticky one-shot request: OR-latched true by reaction(do_single_pulse_command)
+  // below (StateMachine only emits true for a single motor_command_tick per
+  // entry into SET_SINGLE_PULSE -- see State_Machine.lf), consumed by
+  // control_tick either by starting a pulse or by finding remaining_error_
+  // already converged. NOT level-tracked off the input: the falses that
+  // follow the one-tick true must not erase a request this joint hasn't had
+  // a MOTOR_STOPPED tick to act on yet.
   state do_single_pulse_command_: bool = false
   state running_single_pulse_command_: bool = false
 
@@ -191,8 +222,11 @@ reactor Small_DeltaP_Pulse_Controller(
     self->remaining_error_ = remaining_error_input->value;
   =}
 
+  // OR-latch, not assignment -- see do_single_pulse_command_'s comment.
   reaction(do_single_pulse_command) {=
-    self->do_single_pulse_command_ = do_single_pulse_command->value;
+    if (do_single_pulse_command->value) {
+      self->do_single_pulse_command_ = true;
+    }
   =}
 
   // Thin cache-only reaction, same as the two above -- just latches the
@@ -275,12 +309,22 @@ reactor Small_DeltaP_Pulse_Controller(
 
       // if we have a command request to do a pulse command outside of the normal criteria for when we start them
       if (self->do_single_pulse_command_){
-        self->passThrough_ = false;
-        self->converged_ = false;
+        if (fabsf(self->remaining_error_) <= self->convergenceLimit_) {
+          // Nothing left to close for this joint -- consume the request
+          // WITHOUT pulsing (a stale/zero position delta must not move a
+          // converged joint), same outcome as the converged branch below.
+          self->do_single_pulse_command_ = false;
+          self->passThrough_ = false;
+          self->converged_ = true;
+          self->pulse_state_.commandVelocity = 0.0f;
+        } else {
+          self->passThrough_ = false;
+          self->converged_ = false;
 
-        PulseCommand pulse = PulseMotorModel_PlanPulseWithOvershootBound(&self->model_, self->remaining_error_, self->max_overshoot_probability_);
-        PulseMotorModel_StartPulse(&self->pulse_state_, &self->model_, pulse);
-        self->running_single_pulse_command_ = true;
+          PulseCommand pulse = PulseMotorModel_PlanPulseWithOvershootBound(&self->model_, self->remaining_error_, self->max_overshoot_probability_);
+          PulseMotorModel_StartPulse(&self->pulse_state_, &self->model_, pulse);
+          self->running_single_pulse_command_ = true;
+        }
       }
       else if ((fabsf(self->desired_velocity_) >= self->command_velocity_start_threshold_) || (fabsf(self->remaining_error_) >= self->remaining_error_start_threshold_)) {
         // if the velocity is greater than the floor or the remaining_error is greater than the floor, just let it pass through

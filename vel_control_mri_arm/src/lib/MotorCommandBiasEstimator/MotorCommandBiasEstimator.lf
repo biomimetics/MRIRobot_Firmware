@@ -7,6 +7,7 @@ target C {
   files: [
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/lognormal_motion.h", "../../../src_c/lognormal_motion.c",
     "../../../src_c/stats.h", "../../../src_c/stats.c"
   ],
   cmake-include: [
@@ -40,7 +41,10 @@ preamble {=
   // gating/sampling is alive (seen/gated/outlier counts moving) even before
   // this joint has produced its first real update -- same role as
   // PulseMotorModelEstimatorMixture_Bank.lf's reaction(heartbeat).
-  #define PRINT_MCB_OBS 1
+  // Disabled (2026-07): 7 joints x multi-field heartbeat every 5 s is ~600
+  // blocking-printf chars per burst -- same runtime-stall/state-packet-
+  // starvation reasoning as PulseMotorModelEstimator.lf's PRINT_PME_OBS.
+  #define PRINT_MCB_OBS 0
 =}
 
 // Single-channel per-joint online estimator of a commanded-speed-dependent
@@ -141,9 +145,21 @@ reactor MotorCommandBiasEstimator(
   heartbeat_period: time = 5 s,
   update_bias: bool = true,
   target_percent_of_command: float = 0.9,
-  // if current smoothed bias is within +/-update_sigma * SD, 
+  // if current smoothed bias is within +/-update_sigma * SD,
   // skip the update to avoid huge jumps or bad estimates when the variance is too large
-  update_sigma: float = 0.5 
+  update_sigma: float = 1.0,
+  // For builds WITHOUT a pulse controller (minimal Main.lf): ignore
+  // is_passthrough_input and derive the pass-through gate locally instead.
+  // The command path is direct pass-through by construction in those
+  // builds, so a sample counts whenever both the commanded and measured
+  // velocities are above derived_passthrough_min_velocity -- either one
+  // near zero means the joint is stopped or stalled, which is not a clean
+  // commanded-vs-actual comparison (stalled samples are what polluted
+  // bias_stats_ with ~0.9*|cmd| garbage in the 2026-07 MRI runs).
+  derive_passthrough: bool = false,
+  // rad/s -- floor for the derived gate above. Same order as
+  // CommandSafetyFilter's velocity_zero_threshold (encoder noise floor).
+  derived_passthrough_min_velocity: float = 0.02
 ) {
   // The command actually sent to the USM for this joint --
   // Small_DeltaP_Pulse_Controller.lf's command_velocity_output, which
@@ -258,7 +274,19 @@ reactor MotorCommandBiasEstimator(
     self->samples_seen_++;
 
     bool above_v_min_cmd = fabsf(self->last_commanded_velocity_) >= self->model_.V_min_cmd;
-    if (!self->last_is_passthrough_ || !above_v_min_cmd) {
+
+    // Pass-through gate: normally the pulse controller's cached
+    // is_passthrough flag; with derive_passthrough set (no pulse controller
+    // in the build, is_passthrough_input unconnected) derive it locally --
+    // see the parameter's comment.
+    bool is_passthrough = self->last_is_passthrough_;
+    if (self->derive_passthrough) {
+      is_passthrough =
+          (fabsf(self->last_commanded_velocity_) > self->derived_passthrough_min_velocity) &&
+          (fabsf(velocity_input->value) > self->derived_passthrough_min_velocity);
+    }
+
+    if (!is_passthrough || !above_v_min_cmd) {
       return;
     }
     self->samples_gated_++;

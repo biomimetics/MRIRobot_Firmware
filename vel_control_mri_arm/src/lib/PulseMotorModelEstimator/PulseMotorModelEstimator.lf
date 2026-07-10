@@ -7,6 +7,7 @@ target C {
   files: [
     "../../../src_c/pulse_motor_model.h", "../../../src_c/pulse_motor_model.c",
     "../../../src_c/gaussian_motion.h", "../../../src_c/gaussian_motion.c",
+    "../../../src_c/lognormal_motion.h", "../../../src_c/lognormal_motion.c",
     "../../../src_c/stats.h", "../../../src_c/stats.c"
   ],
   cmake-include: [
@@ -37,11 +38,18 @@ preamble {=
   // Compact one-line-per-completed-pulse outcome logging (which
   // observations landed, which detector caught onset, dud or not) plus a
   // cumulative counter summary every PME_COUNTER_PRINT_INTERVAL pulses --
-  // ON by default: this is how "we're losing pulses" gets attributed to a
+  // this is how "we're losing pulses" gets attributed to a
   // specific drain (no onset / no rest / short window / dud / watchdog)
   // instead of vanishing silently. Milli-scaled ints, printf-float
   // convention as everywhere else on this platform.
-  #define PRINT_PME_OBS 1
+  //
+  // Disabled (2026-07): these lines fire at pulse cadence across all 7
+  // joints, and printf on this platform BLOCKS the single-threaded LF
+  // runtime -- under a convergence pulse storm the print volume stalls the
+  // runtime long enough to starve/corrupt the UART4 state packet stream
+  // (ROS-side "No valid state packet" while the robot keeps moving).
+  // Re-enable only for bench sessions, not MRI runs.
+  #define PRINT_PME_OBS 0
   #define PME_COUNTER_PRINT_INTERVAL 20
 =}
 
