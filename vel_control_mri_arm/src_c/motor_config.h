@@ -40,7 +40,7 @@ static Motor_Config motor1_config = {
     2.79528,    // sea_radius       - lever-arm radius, inches
     0.3,        // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
-    0.010,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
+    0.000,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
 };
 
 
@@ -52,7 +52,7 @@ static Motor_Config motor2_config = {
     2.79528,    // sea_radius       - lever-arm radius, inches
     -0.15,      // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX_BASE,            // pwm_rad_per_sec_max
-    -0.075,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
+    0.00,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
 };
 // --------------------------------------- Base joint ---------------------------------------
 
@@ -68,7 +68,7 @@ static Motor_Config motor3_config = {
     1.775591,   // sea_radius       - lever-arm radius, inches
     2,       // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
-    0.020,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
+    0.0,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
 };
 
 
@@ -80,7 +80,7 @@ static Motor_Config motor4_config = {
     1.775591,   // sea_radius       - lever-arm radius, inches
     0,         // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
-    0.200,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
+    0.00,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
 };
 // --------------------------------------- Elbow joint ---------------------------------------
 
@@ -96,7 +96,7 @@ static Motor_Config motor5_config = {
     1.775591,   // sea_radius       - lever-arm radius, inches
     0.3,        // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
-    0.46,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
+    0.0,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
 };
 
 
@@ -108,7 +108,7 @@ static Motor_Config motor6_config = {
     1.775591,   // sea_radius       - lever-arm radius, inches
     -0.2,       // sea_offset       - sea reset offset
     PWM_RAD_PER_SEC_MAX,            // pwm_rad_per_sec_max
-    0.46,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
+    0.0,        // command_bias      - rad/s, warm-start for MotorCommandBiasEstimator.lf
 };
 // --------------------------------------- Wrist joint ---------------------------------------
 

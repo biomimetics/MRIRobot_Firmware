@@ -119,7 +119,7 @@ main reactor {
   // Learns each joint's commanded-vs-actual velocity offset; derives its
   // own pass-through gate in this build (see the reactor-level comment
   // above).
-  motor_command_bias_estimator = new MotorCommandBiasEstimator_Bank(update_bias = true, derive_passthrough = true)
+  //motor_command_bias_estimator = new MotorCommandBiasEstimator_Bank(update_bias = true, derive_passthrough = true)
   // Same parameters as Main_broken.lf: applies motor_command_bias_estimator's
   // per-joint correction (warm-started from motor_config) onto the command,
   // plus the zero-command hard gate.
@@ -158,9 +158,9 @@ main reactor {
   // correction to command_safety_filter. is_passthrough_input and
   // motor_model_input are deliberately unconnected -- derive_passthrough
   // covers the former, INITIAL_MOTOR_MODEL the latter.
-  state_machine.commanded_motor_velocities -> motor_command_bias_estimator.commanded_velocity_input
-  encoder_state_estimator.velocity_output -> motor_command_bias_estimator.velocity_input
-  motor_command_bias_estimator.bias_output -> command_safety_filter.command_bias_input
+  //state_machine.commanded_motor_velocities -> motor_command_bias_estimator.commanded_velocity_input
+  //encoder_state_estimator.velocity_output -> motor_command_bias_estimator.velocity_input
+  //motor_command_bias_estimator.bias_output -> command_safety_filter.command_bias_input
 
   // `after 0` retained from Main_broken.lf: encoder_state_estimator's
   // velocity_output feeds command_safety_filter (above), whose
