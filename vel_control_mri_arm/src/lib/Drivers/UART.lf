@@ -35,7 +35,16 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
     state not_receiving_count: int = 0
     state not_receiving_count_max: int = 10
 
+    // Scheduled from the DMA RX-complete ISR (see HAL_UART_RxCallback_DMA in
+    // the preamble) the instant a command packet finishes arriving, so it is
+    // decoded immediately instead of waiting up to receive_period for the
+    // polling receive_timer below.
+    physical action cmd_rx_action
+
     //timer transmit_timer(0 ms, transmit_period)
+    // Watchdog only now (packet decode moved to reaction(cmd_rx_action)):
+    // ticks up not_receiving_count so a stalled host link still trips
+    // not_receiving_error even though nothing polls for packets anymore.
     timer receive_timer(0 ms, receive_period)
 
     preamble{=
@@ -53,7 +62,15 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
         // this assumes every CommandMessage on the wire is the same size.
         #define COMMAND_PACKET_SIZE (COMMAND_MSG_SIZE + PACKET_OVERHEAD)
 
-        bool received_new_message = false;
+        // Reference to the cmd_rx_action physical action, stashed by the
+        // startup reaction so the DMA RX-complete ISR can inject a "command
+        // packet ready" event directly into the LF event queue (via
+        // lf_schedule) instead of the reactor polling a flag every
+        // receive_period. NULL until startup runs, so scheduling is guarded.
+        // The ISR only schedules -- the packet is still decoded in
+        // reaction(cmd_rx_action), i.e. in normal LF context, so no reactor
+        // state is touched from interrupt context.
+        static void* cmd_rx_action_ptr = NULL;
 
         uint8_t uart_rx_dma_buffer[UART_BUFFER_SIZE];
         uint8_t uart_rx_dma_buffer_copy[UART_BUFFER_SIZE];
@@ -70,8 +87,12 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
 
             memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, COMMAND_PACKET_SIZE); // moves the data over to a buffer that's handled in the receive update
 
-            received_new_message = true;
+            // Re-arm reception first so the next packet can start landing while
+            // this one is processed, then wake LF to decode it now.
             HAL_UART_Receive_DMA(&DMA_UART, uart_rx_dma_buffer, COMMAND_PACKET_SIZE);
+            if (cmd_rx_action_ptr != NULL) {
+                lf_schedule(cmd_rx_action_ptr, 0);
+            }
         }
 
         // HAL_UARTEx_ReceiveToIdle_DMA funnels ALL idle-DMA UARTs through this
@@ -90,8 +111,10 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
 
             uart_receive_size = (size_t)Size;
             memcpy(uart_rx_dma_buffer_copy, uart_rx_dma_buffer, uart_receive_size); // moves the data over to a buffer that's handled in the receive update
-            received_new_message = true;
             HAL_UARTEx_ReceiveToIdle_DMA(&DMA_UART, uart_rx_dma_buffer, UART_BUFFER_SIZE);
+            if (cmd_rx_action_ptr != NULL) {
+                lf_schedule(cmd_rx_action_ptr, 0);
+            }
         }
         
     =}
@@ -107,8 +130,11 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
         }
     =}
 
-    reaction (startup){=
+    reaction (startup) -> cmd_rx_action {=
         printf("[STARTUP] UART_Handler: entering startup\r\n");
+        // Stash the action reference for the DMA RX-complete ISR BEFORE arming
+        // reception, so the very first completed packet can be scheduled.
+        cmd_rx_action_ptr = cmd_rx_action;
         receiveToIdle_DMA_Init();
         printf("UART has finished startup!\n");
         printf("[STARTUP] UART_Handler: exiting startup\r\n");
@@ -134,41 +160,35 @@ reactor UART_Handler(transmit_period: time = 10 ms, receive_period: time = 10 ms
 
     =}
 
-    reaction (receive_timer) -> cmd_msg, not_receiving_error{=
-        //printf("In uart's receive_timer reaction...\n");
-        // bool decode_data_buffer_to_command_message(CommandMessage *msg, uint8_t *data_buffer, size_t data_buffer_len)
-        if (received_new_message){
-            //printf("At received_new_message == true's case.\n");
-            //printf("Got %d bytes in new message!\n", uart_receive_size);
-            //CommandMessage new_cmd_msg;
-            int res = handle_command_message_packet(&self->cmd_msg_, uart_rx_dma_buffer_copy, uart_receive_size);
-            //print_command_message_int(&self->cmd_msg_);
-            if (res){
-                lf_set(cmd_msg, self->cmd_msg_);
+    // Decodes a command packet the instant the DMA ISR schedules this action.
+    // Reads the ISR-filled uart_rx_dma_buffer_copy/uart_receive_size (the
+    // decode itself runs in normal LF context, not the ISR). A good packet
+    // resets the not-receiving watchdog; the receive_timer below trips the
+    // error if this stops firing.
+    reaction (cmd_rx_action) -> cmd_msg, not_receiving_error{=
+        int res = handle_command_message_packet(&self->cmd_msg_, uart_rx_dma_buffer_copy, uart_receive_size);
+        //print_command_message_int(&self->cmd_msg_);
+        if (res){
+            lf_set(cmd_msg, self->cmd_msg_);
 
-                self->not_receiving_count = 0;
-                lf_set(not_receiving_error, false);
-            }
-            else{
-                self->not_receiving_count++;
-            }
-            received_new_message = false;
+            self->not_receiving_count = 0;
+            lf_set(not_receiving_error, false);
         }
         else{
-            //printf("At received_new_message == false's case.\n");
             self->not_receiving_count++;
         }
+    =}
+
+    // Not-receiving watchdog. Ticks every receive_period; a successful decode
+    // in reaction(cmd_rx_action) resets not_receiving_count, so this only
+    // reaches the limit when packets have genuinely stopped arriving.
+    reaction (receive_timer) -> not_receiving_error{=
+        self->not_receiving_count++;
 
         if (self->not_receiving_count_max < self->not_receiving_count){
             if (PRINT_UART) printf("UART Handler not receiving new data!\n");
             self->not_receiving_count = 0;
             lf_set(not_receiving_error, true);
         }
-        else{
-            //lf_set(not_receiving_error, false);
-            //self->not_receiving_count = 0;
-        }
-        //printf("At end of uart's receive_timer reaction...\n");
-
     =}
 }
