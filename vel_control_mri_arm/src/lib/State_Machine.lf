@@ -50,70 +50,19 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     output[7] enable_motor_command: bool // triggered when we're in the right state
     output[7] force_disable_motor_pins: bool // used to disable specific motors if they've hit convergence or for safety reasons.
 
-    // Bypasses the normal remaining_error/command_velocity trigger conditions
-    // on every Small_DeltaP_Pulse_Controller instance at once, forcing them
-    // straight into pulse planning. One-shot, not a level: true for exactly
-    // one motor_command_tick per ENTRY into SET_SINGLE_PULSE (see
-    // pending_single_pulse_ below), false otherwise. Broadcasting it as a
-    // level for the whole time mode 3 was active kept re-arming the pulse
-    // controllers after every pulse landed, turning "single pulse" into an
-    // endless pulse train that ignored zeroed velocities -- to fire another
-    // pulse, the host has to leave mode 3 and re-enter it.
-    output do_single_pulse_command: bool
-
-    // outputs to Small_DeltaP_MPC_Controller_Bank
-    output[7] commanded_position_deltas: float
-
-    // from Small_DeltaP_Pulse_Controller_Bank -- true while any joint is
-    // still mid-flight on the single-pulse command requested via
-    // do_single_pulse_command above, false once all of them land back in
-    // MOTOR_STOPPED. Cached into running_single_pulse_command_ below and
-    // reported to the ROS host in StateMessage (see reaction(update_state_message_tick)).
-    input running_single_pulse_command: bool
-
-    // outputs to EncoderStateEstimator -- static per-joint offset added to
-    // motor_encoder_positions there (see EncoderStateEstimator.lf), for
-    // restoring the STM32's estimated position to a pre-known value after
-    // an STM32/FPGA restart. Defaults to zero (no-op offset) below. Set from
-    // CommandMessage's position_offset/position_offset_sequence fields (see
-    // stm_comms.h) -- only re-emitted when position_offset_sequence changes
-    // (reaction(command_message) below), not every motor_command_tick, since
-    // this is expected to change at most once every several minutes.
-    output[7] position_offset: float
-
     // internal copies of inputs
     state motor_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state motor_encoder_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state sea_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state sea_encoder_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
-    // Static per-joint offset for EncoderStateEstimator's position_input --
-    // see position_offset's comment above. Zero (no offset) until a
-    // CommandMessage arrives with a new position_offset_sequence.
-    state position_offset_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-    // Last-seen CommandMessage.position_offset_sequence -- lets
-    // reaction(command_message) below tell "a new offset was actually
-    // pushed" apart from "the same CommandMessage.position_offset_sequence
-    // arrived again," since position_offset itself doesn't change nearly
-    // every message the way velocities/position_deltas do.
-    state last_position_offset_sequence_: int = 0
-
     // internal copies of staged outputs
     state state_msg_: StateMessage
     state cmd_msg_: CommandMessage
     state staged_commanded_motor_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state last_staged_commanded_motor_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-    state staged_position_deltas_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
     state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
     state enable_motor_command_: bool = false
-    // One-shot pulse request: set true on a transition INTO behavior mode 3
-    // (reaction(command_message) below), emitted on the next
-    // motor_command_tick and cleared there -- see do_single_pulse_command's
-    // comment above. Cancelled if the mode changes away from 3 before it
-    // gets emitted.
-    state pending_single_pulse_: bool = false
-    // Cache of running_single_pulse_command input -- see that input's comment.
-    state running_single_pulse_command_: bool = false
 
     state not_receiving_error_: bool = false
     
@@ -181,58 +130,90 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       //toggleStatusLED();
     =}
 
-    // this output reaction is placed here to
-    reaction(motor_command_tick) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities, commanded_position_deltas, position_offset, do_single_pulse_command {=
+    // Single command-application reaction, triggered by BOTH a fresh
+    // command_message AND the periodic motor_command_tick. A reaction fires
+    // at most once per tag, so the safety filter still runs exactly once per
+    // cycle (no double-filtering) -- but when a command arrives it is applied
+    // on the SAME tag it arrives, instead of being staged and waiting for the
+    // next tick. That removes the ~one-tick (up to motor_command_period) of
+    // artificial latency the old stage-then-tick split cost. The timer
+    // trigger keeps this running when no command arrives, so the not-receiving
+    // ramp-to-zero (see reaction(not_receiving_error)) and periodic re-assert
+    // of the enable/velocity outputs still happen every motor_command_period.
+    reaction(command_message, motor_command_tick) -> enable_motor_command, force_disable_motor_pins, commanded_motor_velocities {=
 
-      // ignore the positions for now, use for bounds checking
+      // If a fresh command arrived this tag, restage from it (and handle any
+      // behavior-mode change) BEFORE the safety filter runs below.
+      if (command_message->is_present){
+        self->cmd_msg_ = command_message->value;
 
-     commanded_velocity_safety_checks();
+        //printf("State_Machine received command_message of:\n");
+        //print_command_message_int(&self->cmd_msg_);
 
+        bool mode_recognized = true;
 
-      // check to see if we've missed a message somewhere. we should always expect this number to increase by 1 every loop.
-      if (self->last_received_message_index != (self->cmd_msg_.message_index - 1)){
-        self->missed_message_counter++;
+        // get the behavior mode and see if we need to handle a behavior change
+        if (self->current_behavior_mode_ != self->cmd_msg_.behavior_mode){
+          if (self->cmd_msg_.behavior_mode == 0){ // SET_IDLE
+            self->enable_motor_command_ = false;
+            self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+            printf("Switching to Idle state...\n");
+          }
+          else if (self->cmd_msg_.behavior_mode == 1){ // SET_RUN
+            self->enable_motor_command_ = true;
+            self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+            printf("Switching to Run state...\n");
+          }
+          else if (self->cmd_msg_.behavior_mode == 2){ //SET_ERROR // externally triggered error state. means something went wrong on ROS side and we need to shut down for safety reasons.
+            self->enable_motor_command_ = false;
+            self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
+            printf("Switching to Error state...\n");
+          }
+          else{
+            // bad value! hold last staged velocities (with motors disabled)
+            // rather than acting on a garbage command.
+            self->enable_motor_command_ = false;
+            self->current_behavior_mode_ = SET_IDLE;
+            mode_recognized = false;
+            printf("Unrecognized behavior mode! Got %d but expected (0: IDLE), (1: RUN), (2: ERROR). \n", self->cmd_msg_.behavior_mode);
+          }
+        }
+
+        if (mode_recognized){
+          // velocities are most important!
+          for (int i = 0; i<DOF_NUMBER; i++){
+            self->staged_commanded_motor_velocities_[i] = self->cmd_msg_.velocities[i];
+          }
+
+          // check to see if we've missed a message somewhere -- we expect this
+          // index to increase by 1 for every command received.
+          if (self->last_received_message_index != (self->cmd_msg_.message_index - 1)){
+            self->missed_message_counter++;
+          }
+          self->last_received_message_index = self->cmd_msg_.message_index % MESSAGE_INDEX_MOD;
+        }
       }
-      self->last_received_message_index = self->cmd_msg_.message_index % MESSAGE_INDEX_MOD;
 
+      // Safety filter (clamp + smooth) runs exactly once per tag, whether we
+      // were triggered by a command, the timer, or both.
+      commanded_velocity_safety_checks();
 
       // set all outputs at the end of reaction
       if (PRINT_STATEMACHINE) printf("Motor command tick reaction: vels: \n");
       for (int i = 0; i<DOF_NUMBER; i++){
         if (PRINT_STATEMACHINE) printf("%d, ", ((int) (self->staged_commanded_motor_velocities_[i] * 1000)));
         lf_set(commanded_motor_velocities[i], self->staged_commanded_motor_velocities_[i]);
-        lf_set(commanded_position_deltas[i], self->staged_position_deltas_[i]);
         lf_set(force_disable_motor_pins[i], self->force_disable_motor_pins_[i]);
-        lf_set(position_offset[i], self->position_offset_[i]);
       }
       if (PRINT_STATEMACHINE) printf("\n");
       for (int i = 0; i<DOF_NUMBER; i++){
         lf_set(enable_motor_command[i], self->enable_motor_command_);
       }
-      // One-shot: emit the pending pulse request exactly once, then clear it
-      // -- see do_single_pulse_command's port-level comment.
-      lf_set(do_single_pulse_command, self->pending_single_pulse_);
-      self->pending_single_pulse_ = false;
 
     =}
 
-    // Disabled -- was event-driven off CommandMessage.position_offset_sequence
-    // advancing, but that didn't seem to be firing reliably. position_offset_
-    // is now updated in reaction(command_message) below and re-sent every
-    // motor_command_tick instead (see position_offset assignment there).
-    // reaction(command_message) -> position_offset {=
-    //   const CommandMessage *msg = &command_message->value;
-    //   if (msg->position_offset_sequence != self->last_position_offset_sequence_){
-    //     self->last_position_offset_sequence_ = msg->position_offset_sequence;
-    //     for (int i = 0; i<DOF_NUMBER; i++){
-    //       self->position_offset_[i] = msg->position_offset[i];
-    //       lf_set(position_offset[i], self->position_offset_[i]);
-    //     }
-    //   }
-    // =}
 
-
-    //##### 
+    //#####
     //# Input reactions
     //#####
     reaction(not_receiving_error){=
@@ -251,62 +232,6 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         }
       }
 
-    =}
-
-    reaction(command_message) {=
-      self->cmd_msg_ = command_message->value;
-
-      //printf("State_Machine received command_message of:\n");
-      //print_command_message_int(&self->cmd_msg_);
-
-      // get the behavior mode and see if we need to handle a behavior change
-
-      if (self->current_behavior_mode_ != self->cmd_msg_.behavior_mode){
-        //if (self->cmd_msg_.behavior_mode == SET_IDLE){
-        if (self->cmd_msg_.behavior_mode == 0){ // SET_IDLE
-          self->enable_motor_command_ = false;
-          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
-          printf("Switching to Idle state...\n");
-        }
-        else if (self->cmd_msg_.behavior_mode == 1){ // SET_RUN
-          self->enable_motor_command_ = true;
-          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
-          printf("Switching to Run state...\n");
-        }
-        else if (self->cmd_msg_.behavior_mode == 2){ //SET_ERROR // externally triggered error state. means something went wrong on ROS side and we need to shut down for safety reasons.
-          self->enable_motor_command_ = false;
-          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
-          printf("Switching to Error state...\n");
-        }
-        else if (self->cmd_msg_.behavior_mode == 3){ // SET_SINGLE_PULSE // like Run, but forces every joint's pulse controller to plan/run ONE pulse regardless of its normal trigger conditions.
-          self->enable_motor_command_ = true;
-          self->current_behavior_mode_ = self->cmd_msg_.behavior_mode;
-          // Only armed here, on the TRANSITION into mode 3 -- staying in
-          // mode 3 across further command messages does not re-arm it, so
-          // each entry into the mode fires exactly one pulse per joint.
-          self->pending_single_pulse_ = true;
-          printf("Switching to Single Pulse state...\n");
-        }
-        else{
-          // bad value!
-          self->enable_motor_command_ = false;
-          self->current_behavior_mode_ = SET_IDLE;
-          printf("Unrecognized behavior mode! Got %d but expected (0: IDLE), (1: RUN), (2: ERROR), (3: SINGLE_PULSE). \n", self->cmd_msg_.behavior_mode);
-          return;
-        }
-      }
-
-      // Leaving mode 3 (back to RUN/IDLE/ERROR) before the pending request
-      // was emitted cancels it -- an aborted single-pulse entry shouldn't
-      // fire a pulse later.
-      if (self->current_behavior_mode_ != 3){
-        self->pending_single_pulse_ = false;
-      }
-
-      // velocities are most important!
-      for (int i = 0; i<DOF_NUMBER; i++){
-        self->staged_commanded_motor_velocities_[i] = self->cmd_msg_.velocities[i];
-      }
     =}
 
     // TODO: Add sanity checks to the encoder readings to ensure that there isn't a connection error or something.
@@ -332,10 +257,6 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       for (int i = 0; i<DOF_NUMBER; i++){
         self->sea_encoder_velocities_[i] = sea_encoder_velocities[i]->value;
       }
-    =}
-
-    reaction(running_single_pulse_command) {=
-      self->running_single_pulse_command_ = running_single_pulse_command->value;
     =}
 
     //#####
