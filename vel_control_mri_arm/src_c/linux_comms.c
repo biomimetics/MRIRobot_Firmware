@@ -74,79 +74,121 @@ int configure_serial_port(int fd) {
 }
 
 // --- Packet Reader ---
-// Rewritten from scratch, replacing an earlier version whose total-packet-size
-// calculation had an unresolved off-by-N bug (the comment above it literally
-// read "how does this work in the other code but not here???"). LENGTH's
-// meaning is now unambiguous by construction (see stm_comms.h's framing
-// comment), so total_packet_size is computed once, correctly, with no guessing.
+// Parses packets out of a persistent carry buffer instead of consuming bytes
+// from the fd one at a time. This exists to fix a resync amplification bug:
+// the previous reader consumed START+LENGTH from the fd before validating
+// them, so locking onto a false 0xAA inside a packet's payload (payload bytes
+// are not stuffed/escaped, so ~1-in-3 packets contain one) permanently
+// discarded bytes that included the *real* packet start, cascading a single
+// corrupted byte on the wire into multi-second bursts of "CRC mismatch" /
+// "Packet too large" while the scanner chased false starts. Here, a rejected
+// candidate (implausible LENGTH, unknown TYPE, wrong VERSION, or bad CRC)
+// drops exactly ONE byte -- the false START -- and rescans the bytes already
+// in hand, so at most one real packet is ever lost per corrupted byte.
+//
+// Sized to hold a few packets of backlog; must be >= UART_BUFFER_SIZE so an
+// aligned, length-valid packet always fits (guaranteed by the LENGTH check
+// against buf_size <= RX_CARRY_SIZE).
+#define RX_CARRY_SIZE 512
+
+static uint8_t rx_carry[RX_CARRY_SIZE];
+static size_t rx_carry_len = 0;
+
+// Drop the first n bytes of the carry buffer (n <= rx_carry_len).
+static void carry_drop(size_t n) {
+    memmove(rx_carry, rx_carry + n, rx_carry_len - n);
+    rx_carry_len -= n;
+}
+
+int serial_rx_buffered_bytes(void) {
+    return (int) rx_carry_len;
+}
+
+void serial_rx_reset(void) {
+    rx_carry_len = 0;
+}
+
 int read_packet_bulk(int fd, uint8_t *buf, size_t buf_size) {
-    if (!buf || buf_size < PACKET_OVERHEAD) {
+    if (!buf || buf_size < PACKET_OVERHEAD || buf_size > RX_CARRY_SIZE) {
         fprintf(stderr, "Invalid buffer\n");
         return -1;
     }
 
-    uint8_t byte;
-    int n;
-
-    // Step 1: find PACKET_START_BYTE.
     while (1) {
-        if (wait_for_data(fd, SELECT_TIMEOUT_MS) <= 0)
-            return -1;
+        // Step 1: align the carry buffer to a candidate START byte, discarding
+        // leading non-START bytes (those can never begin a packet).
+        size_t start = 0;
+        while (start < rx_carry_len && rx_carry[start] != PACKET_START_BYTE)
+            start++;
+        if (start > 0)
+            carry_drop(start);
 
-        n = read(fd, &byte, 1);
-        if (n == 1 && byte == PACKET_START_BYTE) {
-            buf[0] = byte;
-            break;
+        // Step 2: validate the candidate as its header bytes become available.
+        // Each check either accepts, rejects (drop ONE byte, rescan -- the real
+        // start may be anywhere in the bytes we already hold), or falls through
+        // to read more.
+        if (rx_carry_len >= PACKET_HEADER_SIZE) {
+            uint8_t length = rx_carry[1];
+            size_t total_packet_size = PACKET_HEADER_SIZE + (size_t) length + PACKET_CRC_SIZE;
+
+            if (total_packet_size > buf_size) {
+                fprintf(stderr, "Packet too large: %zu bytes, buffer is %zu -- resyncing\n",
+                        total_packet_size, buf_size);
+                carry_drop(1);
+                continue;
+            }
+
+            if (rx_carry_len >= PACKET_HEADER_SIZE + PACKET_TYPE_VERSION_SIZE) {
+                uint8_t type = rx_carry[2];
+                uint8_t version = rx_carry[3];
+                if ((type != PKT_TYPE_PING && type != PKT_TYPE_DATA) ||
+                    version != PROTOCOL_VERSION) {
+                    fprintf(stderr, "Bad packet header (type 0x%02X, version %u) -- resyncing\n",
+                            type, version);
+                    carry_drop(1);
+                    continue;
+                }
+
+                if (rx_carry_len >= total_packet_size) {
+                    // Step 3: verify CRC over LENGTH..end-of-DATA
+                    // (rx_carry[1 .. total_packet_size - PACKET_CRC_SIZE - 1]).
+                    size_t crc_range_len = total_packet_size - PACKET_CRC_SIZE - 1;
+                    uint16_t computed_crc = crc16_ccitt(&rx_carry[1], crc_range_len);
+                    uint16_t received_crc = (uint16_t) rx_carry[total_packet_size - 2] |
+                                            ((uint16_t) rx_carry[total_packet_size - 1] << 8);
+
+                    if (computed_crc != received_crc) {
+                        fprintf(stderr, "CRC mismatch: expected 0x%04X, got 0x%04X -- resyncing\n",
+                                computed_crc, received_crc);
+                        carry_drop(1);
+                        continue;
+                    }
+
+                    memcpy(buf, rx_carry, total_packet_size);
+                    carry_drop(total_packet_size);
+                    return (int) total_packet_size;
+                }
+            }
         }
-    }
 
-    // Step 2: read LENGTH (byte count of TYPE + VERSION + DATA).
-    if (wait_for_data(fd, SELECT_TIMEOUT_MS) <= 0)
-        return -1;
+        // Step 4: need more bytes. Batch-read whatever the kernel has (draining
+        // it faster than the old one-byte-per-syscall scan, which widened the
+        // window for TTY buffer overruns under scheduling jitter). A timeout
+        // returns -1 but keeps the partial bytes for the next call.
+        if (rx_carry_len == RX_CARRY_SIZE)
+            carry_drop(1); // defensive; unreachable given the LENGTH check above
 
-    n = read(fd, &byte, 1);
-    if (n != 1)
-        return -1;
-
-    uint8_t length = byte;
-    buf[1] = length;
-
-    size_t total_packet_size = PACKET_HEADER_SIZE + (size_t) length + PACKET_CRC_SIZE;
-
-    if (total_packet_size > buf_size) {
-        fprintf(stderr, "Packet too large: %zu bytes, buffer is %zu\n", total_packet_size, buf_size);
-        return -1;
-    }
-
-    // Step 3: read the rest (TYPE + VERSION + DATA + CRC_LO + CRC_HI).
-    size_t remaining = total_packet_size - PACKET_HEADER_SIZE;
-    size_t offset = PACKET_HEADER_SIZE;
-
-    while (remaining > 0) {
         if (wait_for_data(fd, SELECT_TIMEOUT_MS) <= 0)
             return -1;
 
-        n = read(fd, &buf[offset], remaining);
-        if (n <= 0)
-            continue;
-
-        offset += (size_t) n;
-        remaining -= (size_t) n;
+        ssize_t n = read(fd, rx_carry + rx_carry_len, RX_CARRY_SIZE - rx_carry_len);
+        if (n <= 0) {
+            if (n < 0)
+                perror("read_packet_bulk: read");
+            return -1;
+        }
+        rx_carry_len += (size_t) n;
     }
-
-    // Step 4: verify CRC over LENGTH..end-of-DATA (buf[1 .. total_packet_size - PACKET_CRC_SIZE - 1]).
-    size_t crc_range_len = total_packet_size - PACKET_CRC_SIZE - 1; // excludes start byte and the 2 crc bytes
-    uint16_t computed_crc = crc16_ccitt(&buf[1], crc_range_len);
-
-    uint16_t received_crc = (uint16_t) buf[total_packet_size - 2] |
-                             ((uint16_t) buf[total_packet_size - 1] << 8);
-
-    if (computed_crc != received_crc) {
-        fprintf(stderr, "CRC mismatch: expected 0x%04X, got 0x%04X\n", computed_crc, received_crc);
-        return -1;
-    }
-
-    return (int) total_packet_size;
 }
 
 int send_command_message(int port_id, CommandMessage* msg) {
@@ -164,7 +206,16 @@ int send_command_message(int port_id, CommandMessage* msg) {
         return 0;
     }
 
-    write(port_id, tx_buff, pkt_len);
+    ssize_t n_written = write(port_id, tx_buff, pkt_len);
+    if (n_written != (ssize_t) pkt_len) {
+        if (n_written < 0) {
+            perror("send_command_message: write");
+        } else {
+            fprintf(stderr, "send_command_message: short write (%zd of %d bytes)\n",
+                    n_written, pkt_len);
+        }
+        return 0;
+    }
     return 1;
 }
 
