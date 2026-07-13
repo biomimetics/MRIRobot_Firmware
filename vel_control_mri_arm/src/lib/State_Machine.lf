@@ -306,17 +306,6 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       // velocities are most important!
       for (int i = 0; i<DOF_NUMBER; i++){
         self->staged_commanded_motor_velocities_[i] = self->cmd_msg_.velocities[i];
-        self->staged_position_deltas_[i] = self->cmd_msg_.position_deltas[i];
-      }
-
-      // position_offset is now just staged here and re-sent every
-      // motor_command_tick (see reaction(motor_command_tick) above) instead
-      // of being lf_set from its own event-driven reaction.
-      if (self->cmd_msg_.position_offset_sequence != self->last_position_offset_sequence_){
-        self->last_position_offset_sequence_ = self->cmd_msg_.position_offset_sequence;
-        for (int i = 0; i<DOF_NUMBER; i++){
-          self->position_offset_[i] = self->cmd_msg_.position_offset[i];
-        }
       }
     =}
 
@@ -358,10 +347,9 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
 
       construct_state_message(&self->state_msg_, self->current_behavior_mode_,
                               self->motor_encoder_positions_, self->motor_encoder_velocities_,
-                              self->sea_encoder_positions_, self->sea_encoder_velocities_,
-                              self->staged_commanded_motor_velocities_,
-                              self->running_single_pulse_command_,
-                              time_stamp, self->send_message_index++);
+                              self->sea_encoder_positions_,
+                              time_stamp, self->send_message_index++,
+                              self->cmd_msg_.time_stamp, self->cmd_msg_.message_index);
 
       lf_set(state_message, self->state_msg_);
     =}

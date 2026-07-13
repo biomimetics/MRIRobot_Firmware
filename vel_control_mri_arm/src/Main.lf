@@ -16,9 +16,6 @@ import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import StateMachine from "lib/State_Machine.lf"
 import UART_Handler from "lib/Drivers/UART.lf"
-import EncoderStateEstimator from "lib/EncoderStateEstimator.lf"
-import MotorCommandBiasEstimator_Bank from "lib/MotorCommandBiasEstimator/MotorCommandBiasEstimator_Bank.lf"
-import CommandSafetyFilter from "lib/CommandSafetyFilter.lf"
 
 // MINIMAL main (2026-07), for isolating the on-hardware freeze that appears
 // at trajectory convergence with the full stack (see Main_broken.lf -- the
@@ -113,17 +110,6 @@ main reactor {
   usm = new USM()                            // Ultrasonic motor controllers
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms)
   state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)
-  // Same parameters as Main_broken.lf: observer disabled, plain passthrough
-  // filtering of QDEC position/velocity.
-  encoder_state_estimator = new EncoderStateEstimator(use_commanded_velocity = false, enable_observer = false)
-  // Learns each joint's commanded-vs-actual velocity offset; derives its
-  // own pass-through gate in this build (see the reactor-level comment
-  // above).
-  //motor_command_bias_estimator = new MotorCommandBiasEstimator_Bank(update_bias = true, derive_passthrough = true)
-  // Same parameters as Main_broken.lf: applies motor_command_bias_estimator's
-  // per-joint correction (warm-started from motor_config) onto the command,
-  // plus the zero-command hard gate.
-  command_safety_filter = new CommandSafetyFilter(safety_checks_enabled = false)
 
   // uart <-> state machine
   uart.cmd_msg -> state_machine.command_message
@@ -131,42 +117,20 @@ main reactor {
 
   state_machine.state_message -> uart.state_msg after 0;
 
-  // encoders -- USM position/velocity route through encoder_state_estimator
-  // to state_machine; SEA goes straight through, same as Main_broken.lf.
-  qdec.qdec_out -> encoder_state_estimator.position_input
-  qdec.qdec_vel_out -> encoder_state_estimator.velocity_input
-  encoder_state_estimator.position_output -> state_machine.motor_encoder_positions
-  encoder_state_estimator.velocity_output -> state_machine.motor_encoder_velocities
+  // encoders -- USM and SEA position/velocity route straight from QDEC to
+  // state_machine. (EncoderStateEstimator was removed: with its observer
+  // disabled and the position_offset command field dropped, it was a pure
+  // identity pass-through; it also pulled in now-deleted model source files.)
+  qdec.qdec_out -> state_machine.motor_encoder_positions
+  qdec.qdec_vel_out -> state_machine.motor_encoder_velocities
   qdec.sea_out -> state_machine.sea_encoder_positions
   qdec.sea_vel_out -> state_machine.sea_encoder_velocities
-
-  // Static per-joint position offset, applied inside encoder_state_estimator.
-  state_machine.position_offset -> encoder_state_estimator.position_offset_input
 
   state_machine.enable_qdec -> qdec.enable_qdec
   state_machine.reset_qdec -> qdec.reset_qdec
 
-  // usm command path: StateMachine's velocities go straight through the
-  // safety filter to the motors -- no pulse controller in this build.
-  state_machine.commanded_motor_velocities -> command_safety_filter.command_velocity_input
-  command_safety_filter.command_velocity_output -> usm.speed
-  encoder_state_estimator.velocity_output -> command_safety_filter.velocity_input
 
-  // Bias estimation: compares the PRE-correction command (state_machine's
-  // raw velocities, same reasoning as Main_broken.lf's feed from
-  // deltap_bank) against measured velocity, and feeds the learned
-  // correction to command_safety_filter. is_passthrough_input and
-  // motor_model_input are deliberately unconnected -- derive_passthrough
-  // covers the former, INITIAL_MOTOR_MODEL the latter.
-  //state_machine.commanded_motor_velocities -> motor_command_bias_estimator.commanded_velocity_input
-  //encoder_state_estimator.velocity_output -> motor_command_bias_estimator.velocity_input
-  //motor_command_bias_estimator.bias_output -> command_safety_filter.command_bias_input
-
-  // `after 0` retained from Main_broken.lf: encoder_state_estimator's
-  // velocity_output feeds command_safety_filter (above), whose
-  // command_velocity_output would otherwise feed straight back into this
-  // same reactor's commanded_velocity_input within one zero-delay instant.
-  command_safety_filter.command_velocity_output -> encoder_state_estimator.commanded_velocity_input after 0
+  state_machine.commanded_motor_velocities -> usm.speed
 
   state_machine.enable_motor_command -> usm.enable_motor_command
 

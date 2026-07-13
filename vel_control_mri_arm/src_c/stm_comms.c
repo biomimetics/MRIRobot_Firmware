@@ -58,14 +58,13 @@ void zero_command_message(CommandMessage* msg) {
 }
 
 void construct_command_message(CommandMessage* msg, int behavior_mode,
-                        const float* velocities, const float* position_deltas,
+                        const float* velocities,
                         int time_stamp, int message_index) {
     if (!msg) return;
 
     msg->behavior_mode = behavior_mode;
 
     memcpy(msg->velocities, velocities, sizeof(float) * DOF_NUMBER);
-    memcpy(msg->position_deltas, position_deltas, sizeof(float) * DOF_NUMBER);
 
     msg->time_stamp = time_stamp;
     msg->message_index = message_index;
@@ -119,14 +118,6 @@ void print_command_message(const CommandMessage *msg) {
     for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->velocities[i]);
     printf("\n");
 
-    printf("  Position Deltas: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->position_deltas[i]);
-    printf("\n");
-
-    printf("  Position Offset: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->position_offset[i]);
-    printf(" (sequence %d)\n", msg->position_offset_sequence);
-
     printf("  Timestamp: %d\n", msg->time_stamp);
     printf("  Index: %d\n", msg->message_index);
 }
@@ -137,14 +128,6 @@ void print_command_message_int(const CommandMessage *msg) {
     printf("  Velocities: ");
     for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->velocities[i] * FLOAT_PRINT_SCALE));
     printf("\n");
-
-    printf("  Position Deltas: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->position_deltas[i] * FLOAT_PRINT_SCALE));
-    printf("\n");
-
-    printf("  Position Offset: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->position_offset[i] * FLOAT_PRINT_SCALE));
-    printf(" (sequence %d)\n", msg->position_offset_sequence);
 
     printf("  Timestamp: %d\n", msg->time_stamp);
     printf("  Index: %d\n", msg->message_index);
@@ -160,10 +143,9 @@ void zero_state_message(StateMessage* msg) {
 
 void construct_state_message(StateMessage* msg, int behavior_mode,
                             const float* positions, const float* velocities,
-                            const float* sea_positions, const float* sea_velocities,
-                            const float* commanded_motor_velocity,
-                            bool running_single_pulse_command,
-                            int time_stamp, int message_index) {
+                            const float* sea_positions,
+                            int time_stamp, int message_index,
+                            int echoed_time_stamp, int echoed_message_index) {
     if (!msg) return;
 
     msg->behavior_mode = behavior_mode;
@@ -171,13 +153,12 @@ void construct_state_message(StateMessage* msg, int behavior_mode,
     memcpy(msg->positions, positions, sizeof(float) * DOF_NUMBER);
     memcpy(msg->velocities, velocities, sizeof(float) * DOF_NUMBER);
     memcpy(msg->sea_positions, sea_positions, sizeof(float) * DOF_NUMBER);
-    memcpy(msg->sea_velocities, sea_velocities, sizeof(float) * DOF_NUMBER);
-    memcpy(msg->commanded_motor_velocity, commanded_motor_velocity, sizeof(float) * DOF_NUMBER);
-
-    msg->running_single_pulse_command = running_single_pulse_command;
 
     msg->time_stamp = time_stamp;
     msg->message_index = message_index;
+
+    msg->echoed_time_stamp = echoed_time_stamp;
+    msg->echoed_message_index = echoed_message_index;
 }
 
 int encode_state_message_to_data_buffer(const StateMessage *msg, uint8_t *buffer) {
@@ -237,18 +218,10 @@ void print_state_message(const StateMessage *msg) {
     for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->sea_positions[i]);
     printf("\n");
 
-    printf("  SEA Velocities: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->sea_velocities[i]);
-    printf("\n");
-
-    printf("  Commanded Motor Velocity: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%.*f,", FLOAT_DECIMAL_SCALE, msg->commanded_motor_velocity[i]);
-    printf("\n");
-
-    printf("  Running Single Pulse Command: %d\n", msg->running_single_pulse_command);
-
     printf("  Timestamp: %d\n", msg->time_stamp);
     printf("  Index: %d\n", msg->message_index);
+    printf("  Echoed Timestamp: %d\n", msg->echoed_time_stamp);
+    printf("  Echoed Index: %d\n", msg->echoed_message_index);
 }
 
 void print_state_message_int(const StateMessage *msg) {
@@ -267,18 +240,10 @@ void print_state_message_int(const StateMessage *msg) {
     for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->sea_positions[i] * FLOAT_PRINT_SCALE));
     printf("\n");
 
-    printf("  SEA Velocities: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->sea_velocities[i] * FLOAT_PRINT_SCALE));
-    printf("\n");
-
-    printf("  Commanded Motor Velocity: ");
-    for (int i = 0; i < DOF_NUMBER; ++i) printf("%d ", (int) (msg->commanded_motor_velocity[i] * FLOAT_PRINT_SCALE));
-    printf("\n");
-
-    printf("  Running Single Pulse Command: %d\n", msg->running_single_pulse_command);
-
     printf("  Timestamp: %d\n", msg->time_stamp);
     printf("  Index: %d\n", msg->message_index);
+    printf("  Echoed Timestamp: %d\n", msg->echoed_time_stamp);
+    printf("  Echoed Index: %d\n", msg->echoed_message_index);
 }
 
 void write_state_message_csv_header(char *buffer, size_t size) {
@@ -295,15 +260,7 @@ void write_state_message_csv_header(char *buffer, size_t size) {
     for (int i = 0; i < DOF_NUMBER; ++i)
         written += snprintf(buffer + written, size - written, "sea_position_%d,", i);
 
-    for (int i = 0; i < DOF_NUMBER; ++i)
-        written += snprintf(buffer + written, size - written, "sea_velocity_%d,", i);
-
-    for (int i = 0; i < DOF_NUMBER; ++i)
-        written += snprintf(buffer + written, size - written, "commanded_motor_velocity_%d,", i);
-
-    written += snprintf(buffer + written, size - written, "running_single_pulse_command,");
-
-    written += snprintf(buffer + written, size - written, "time_stamp,message_index");
+    written += snprintf(buffer + written, size - written, "time_stamp,message_index,echoed_time_stamp,echoed_message_index");
 }
 
 void serialize_state_message_csv(const StateMessage *msg, char *buffer, size_t size) {
@@ -320,13 +277,7 @@ void serialize_state_message_csv(const StateMessage *msg, char *buffer, size_t s
     for (int i = 0; i < DOF_NUMBER; ++i)
         written += snprintf(buffer + written, size - written, "%.*f,", FLOAT_DECIMAL_SCALE, msg->sea_positions[i]);
 
-    for (int i = 0; i < DOF_NUMBER; ++i)
-        written += snprintf(buffer + written, size - written, "%.*f,", FLOAT_DECIMAL_SCALE, msg->sea_velocities[i]);
-
-    for (int i = 0; i < DOF_NUMBER; ++i)
-        written += snprintf(buffer + written, size - written, "%.*f,", FLOAT_DECIMAL_SCALE, msg->commanded_motor_velocity[i]);
-
-    written += snprintf(buffer + written, size - written, "%d,", msg->running_single_pulse_command);
-
-    written += snprintf(buffer + written, size - written, "%d,%d", msg->time_stamp, msg->message_index);
+    written += snprintf(buffer + written, size - written, "%d,%d,%d,%d",
+                        msg->time_stamp, msg->message_index,
+                        msg->echoed_time_stamp, msg->echoed_message_index);
 }

@@ -28,7 +28,7 @@
 // silently misinterpreting bytes -- the two copies of this file
 // (vel_control_mri_arm/src_c and MRIRobot_ROS's mri_arm_hardware) have no
 // shared build system to otherwise catch drift between them.
-#define PROTOCOL_VERSION 3
+#define PROTOCOL_VERSION 4
 
 // =====================
 // TX/RX packet definitions
@@ -58,33 +58,16 @@ typedef enum {
 // =====================
 // Command Message data structure definitions and helper functions
 // =====================
-// Host -> STM32. Trimmed to only the fields firmware actually reads
-// (State_Machine.lf's command_message reaction): behavior_mode, velocities,
-// and now position_deltas. The old positions[]/sea_positions[]/extra[21]
-// fields were confirmed dead (firmware never read them, host only ever
-// wrote zeros) and are dropped entirely rather than carried forward.
-// position_offset/position_offset_sequence: static per-joint offset for
-// EncoderStateEstimator.lf (see that file and State_Machine.lf's
-// position_offset output), for restoring the STM32's estimated position to
-// a pre-known value after an STM32/FPGA restart. Expected to change at most
-// once every several minutes, event-based rather than every cycle -- unlike
-// every other field here, NOT threaded through construct_command_message
-// below (would mean plumbing two rarely-used parameters through every
-// existing call site for no benefit); host-side code that wants to set a
-// new offset should assign msg.position_offset[i]/msg.position_offset_sequence
-// directly on an already-constructed/zeroed message. position_offset_sequence
-// is a plain increment-on-change counter (NOT a message index) -- host
-// bumps it only when it actually wants the firmware to apply a new offset;
-// State_Machine.lf compares it against the last value it saw to detect that
-// edge rather than reapplying every message_index tick.
+// Host -> STM32. Trimmed (protocol v4) to only the fields firmware still
+// reads (State_Machine.lf's command_message reaction): behavior_mode and
+// velocities, plus time_stamp/message_index for sequencing. The old
+// position_deltas/position_offset/position_offset_sequence fields were
+// dropped along with the pulse controllers and the position-offset restore
+// path they fed (see State_Machine.lf), and are not carried forward.
 #pragma pack(push, 1)
 typedef struct {
     int behavior_mode;
     float velocities[DOF_NUMBER];       // rad/s, pass-through velocity command
-    float position_deltas[DOF_NUMBER];  // rad, remaining position error -> Small_DeltaP_Controller
-                                         // (was the dead `positions[]` field)
-    float position_offset[DOF_NUMBER];  // rad, static per-joint offset -- see comment above
-    int position_offset_sequence;       // increment-on-change counter -- see comment above
     int time_stamp;
     int message_index;
 } CommandMessage;
@@ -94,7 +77,6 @@ void construct_command_message(
     CommandMessage* msg,
     int behavior_mode,
     const float* velocities,
-    const float* position_deltas,
     int time_stamp,
     int message_index
 );
@@ -111,26 +93,23 @@ void print_command_message_int(const CommandMessage *msg);
 // State Message data structure definitions and helper functions
 // =====================
 // STM32 -> host. positions/velocities/sea_positions are real measured
-// motor-space feedback (unchanged). sea_velocities is new (QDEC's
-// Encoder.lf already computes this internally as sea_vel_out, it just
-// wasn't wired to State_Machine.lf before). commanded_motor_velocity
-// replaces the old extra[21]'s tribal-knowledge layout (a velocity echo at
-// extra[0:7), a dead always-zero placeholder at extra[7:14), USM duty cycle
-// at extra[14:21)) with a single honestly-named field -- no
-// Small_DeltaP_Controller-internal telemetry goes over the wire.
+// motor-space feedback. Trimmed (protocol v4): the old sea_velocities,
+// commanded_motor_velocity, and running_single_pulse_command fields were
+// dropped along with the pulse controllers whose telemetry they carried.
+// echoed_time_stamp/echoed_message_index carry back the time_stamp and
+// message_index of the last CommandMessage the firmware received, letting
+// the host estimate round-trip communication delay and align the command
+// and state streams.
 #pragma pack(push, 1)
 typedef struct {
     int behavior_mode;
     float positions[DOF_NUMBER];               // rad, measured motor position
     float velocities[DOF_NUMBER];               // rad/s, measured motor velocity
     float sea_positions[DOF_NUMBER];            // rad, measured SEA deflection
-    float sea_velocities[DOF_NUMBER];           // rad/s, measured SEA velocity
-    float commanded_motor_velocity[DOF_NUMBER]; // rad/s, velocity actually commanded this cycle
-    bool running_single_pulse_command;          // true while any joint is still mid-flight on a
-                                                 // ROS-requested single pulse (see State_Machine.lf's
-                                                 // running_single_pulse_command input)
     int time_stamp;
     int message_index;
+    int echoed_time_stamp; // the last time stamp we received from CommandMessage. Used for communication delay estimation on the host side.
+    int echoed_message_index; // the last message index we received from CommandMessage. Also used for communication delay estimation and alignment.
 } StateMessage;
 #pragma pack(pop)
 
@@ -140,11 +119,10 @@ void construct_state_message(
     const float* positions,
     const float* velocities,
     const float* sea_positions,
-    const float* sea_velocities,
-    const float* commanded_motor_velocity,
-    bool running_single_pulse_command,
     int time_stamp,
-    int message_index
+    int message_index,
+    int echoed_time_stamp,
+    int echoed_message_index
 );
 void zero_state_message(StateMessage* msg);
 
