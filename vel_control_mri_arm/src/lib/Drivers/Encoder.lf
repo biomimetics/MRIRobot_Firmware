@@ -38,6 +38,18 @@ reactor QDEC(sample_period: time = 5 ms){
   timer enable(0, 20 ms)
   timer print_timer(0, 5000 ms)
 
+  // ENCODER_DMA_RX_ENABLE path only (see common.h) -- scheduled from
+  // HAL_UART_RxCallback3 (ISR context) the instant a DMA-armed frame
+  // finishes arriving, so reaction(encoder_rx_action) below can do the
+  // actual parse/filter/emit work back in normal LF reactor context.
+  physical action encoder_rx_action
+
+  // ENCODER_DMA_RX_ENABLE path only -- scheduled by the trigger reaction
+  // right after arming the DMA receive, so a frame that never arrives gets
+  // aborted within ENCODER_FRAME_RX_TIMEOUT_MS regardless of sample_period,
+  // matching the blocking path's own timeout bound.
+  logical action encoder_timeout_action
+
   state reset_qdec_: bool = false
   state enable_qdec_: bool = false
 
@@ -116,6 +128,19 @@ reactor QDEC(sample_period: time = 5 ms){
 
     // Single shared raw-frame buffer for the unified burst read.
     static uint8_t encoder_frame_buf[ENCODER_FRAME_BYTES];
+
+    // ENCODER_DMA_RX_ENABLE path only (see common.h). encoder_dma_rx_pending
+    // is set when a DMA receive is armed and cleared either by
+    // HAL_UART_RxCallback3 (normal completion, ISR context) or by the
+    // abort-and-drain paths below (timeout or a still-pending previous
+    // request) -- checked from both ISR and reactor context, hence volatile.
+    // encoder_frame_captured is a second buffer the ISR copies a completed
+    // frame into before scheduling encoder_rx_action, so encoder_frame_buf
+    // is free to be re-armed for the next cycle without racing the reactor
+    // reaction that's still reading the previous one.
+    static volatile int encoder_dma_rx_pending = 0;
+    static uint8_t encoder_frame_captured[ENCODER_FRAME_BYTES];
+    static void* encoder_rx_action_ptr = NULL;
 
     // Must match qdec_params.vh's QDEC_VELOCITY_FRAC_BITS (11 -> Q20.11).
     #define ENCODER_VELOCITY_FRAC_BITS 11u
@@ -408,6 +433,25 @@ reactor QDEC(sample_period: time = 5 ms){
       return false;
     }
 
+    // ENCODER_DMA_RX_ENABLE path only. Fires the unified burst (same 1-byte
+    // blocking transmit as read_full_encoder_state above -- ~3us at
+    // 2.5Mbaud, not worth making non-blocking) and arms a DMA receive
+    // instead of blocking-reading it. Returns immediately: the frame is
+    // parsed later, in reaction(encoder_rx_action), once HAL_UART_RxCallback3
+    // schedules it from ISR context.
+    static void encoder_fire_and_arm_dma(void) {
+      HAL_UART_Transmit(&huart3, qdec_fire_all, 1, HAL_MAX_DELAY);
+      if (HAL_UART_Receive_DMA(&huart3, encoder_frame_buf, ENCODER_FRAME_BYTES) == HAL_OK) {
+        encoder_dma_rx_pending = 1;
+      } else {
+        // Arming failed outright (e.g. DMA stream busy/misconfigured) --
+        // count this cycle as dropped immediately rather than waiting out
+        // encoder_timeout_action for a receive that was never armed.
+        encoder_dma_rx_pending = 0;
+        encoder_packets_bad++;
+      }
+    }
+
     static void MX_DMA_Init(void) {
       /* DMA controller clock enable */
       __HAL_RCC_DMA1_CLK_ENABLE();
@@ -457,12 +501,27 @@ reactor QDEC(sample_period: time = 5 ms){
       HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     }
 
-    // Not used for encoder reception -- huart3 uses blocking
-    // HAL_UART_Receive (see read_full_encoder_state above), not DMA/IT at
-    // all. Kept as empty stubs since Main.lf's HAL_UART_RxCpltCallback and
-    // UART.lf's HAL_UARTEx_RxEventCallback dispatchers still reference these
-    // unconditionally for USART3.
-    void HAL_UART_RxCallback3() {}
+    // Dispatched from Main.lf's HAL_UART_RxCpltCallback for the USART3
+    // instance -- fires whenever a HAL_UART_Receive_DMA started by
+    // encoder_fire_and_arm_dma completes (ENCODER_DMA_RX_ENABLE path only;
+    // in blocking mode nothing ever arms a DMA receive on huart3, so this
+    // never runs). Interrupt context: only copies the frame out and
+    // schedules encoder_rx_action -- the actual parse/filter/emit work runs
+    // later, in that reaction, back in normal LF reactor context. Mirrors
+    // UART_Handler.lf's HAL_UART_RxCallback_DMA.
+    void HAL_UART_RxCallback3() {
+      if (!ENCODER_DMA_RX_ENABLE) return;
+
+      memcpy(encoder_frame_captured, encoder_frame_buf, ENCODER_FRAME_BYTES);
+      encoder_dma_rx_pending = 0;
+      if (encoder_rx_action_ptr != NULL) {
+        lf_schedule(encoder_rx_action_ptr, 0);
+      }
+    }
+    // Not used for encoder reception -- huart3's idle-line event path is
+    // unused by either the blocking or DMA-fixed-length RX modes above.
+    // Kept as an empty stub since UART.lf's HAL_UARTEx_RxEventCallback
+    // dispatcher still references it unconditionally for USART3.
     void HAL_UART_RxEventCallback3(UART_HandleTypeDef *huart, uint16_t Size) {}
 
     static int last_switch = 0;
@@ -473,8 +532,12 @@ reactor QDEC(sample_period: time = 5 ms){
     double timer_elapsed_time_sec_enc_ = 0;
   =}
 
-  reaction(startup) {=
+  reaction(startup) -> encoder_rx_action {=
     printf("[STARTUP] QDEC: entering startup\r\n");
+    // Stashed for HAL_UART_RxCallback3 (ISR context, ENCODER_DMA_RX_ENABLE
+    // path only) to schedule via lf_schedule -- same pattern as
+    // UART_Handler.lf's cmd_rx_action_ptr.
+    encoder_rx_action_ptr = encoder_rx_action;
     MX_DMA_Init();
     MX_UART3_Init();
     MX_GPIO_Init();
@@ -548,18 +611,40 @@ reactor QDEC(sample_period: time = 5 ms){
 
 
   // Update Encoder values
-  // This function should take approximately 1ms to operate
-  reaction(trigger) -> encoder_state_out {=
+  // This function should take approximately 1ms to operate (blocking path;
+  // see ENCODER_DMA_RX_ENABLE branch below for the non-blocking path, which
+  // only fires+arms here and finishes in reaction(encoder_rx_action)).
+  reaction(trigger) -> encoder_state_out, encoder_timeout_action {=
     //printf("In QDEC's trigger reaction.\n");
     EncoderStateMessage out_msg;
     timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
 
    self->interval_sec = (float) self->timer_elapsed_time_sec_;
 
+    if (ENCODER_DMA_RX_ENABLE) {
+      // Non-blocking path: fire the burst and arm a DMA receive instead of
+      // blocking here -- reaction(encoder_rx_action) does the actual
+      // parse/filter/emit once the frame lands (typically within the same
+      // tag, ~0.6ms after the fire below).
+      if (encoder_dma_rx_pending) {
+        // The previous cycle's frame never arrived before this one fired
+        // again. reaction(encoder_timeout_action) below is meant to catch
+        // this first, but guard here too in case sample_period is shorter
+        // than ENCODER_FRAME_RX_TIMEOUT_MS.
+        HAL_UART_AbortReceive(&huart3);
+        encoder_drain_stray_bytes();
+        encoder_dma_rx_pending = 0;
+        encoder_packets_bad++;
+      }
+      encoder_fire_and_arm_dma();
+      lf_schedule(encoder_timeout_action, MSEC(ENCODER_FRAME_RX_TIMEOUT_MS));
+      return;
+    }
+
     // Fire the unified burst and blocking-read the single fixed frame
     // covering all 14 channels, synchronously, every trigger cycle -- no
-    // DMA, no ISR ping-pong (see Encoder_DMA.lf for that version). If the
-    // read/validate fails, counts simply stay at their last known value.
+    // DMA, no ISR ping-pong. If the read/validate fails, counts simply stay
+    // at their last known value.
     bool encoder_rx_ok = read_full_encoder_state(encoder_counts, encoder_meta);
     if (encoder_rx_ok) {
       for (int i = 0; i < 7; i++) {
@@ -635,6 +720,98 @@ reactor QDEC(sample_period: time = 5 ms){
     }
     printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
     //printf("At end of QDEC's trigger reaction.\n");
+  =}
+
+  // ENCODER_DMA_RX_ENABLE path only. Fires ENCODER_FRAME_RX_TIMEOUT_MS after
+  // the trigger reaction arms a DMA receive -- if the frame still hasn't
+  // arrived by then, abort and drop it so a stuck response can't linger
+  // past that bound regardless of sample_period (the blocking path enforces
+  // the same bound via HAL_UART_Receive's own timeout argument).
+  reaction(encoder_timeout_action) {=
+    if (ENCODER_DMA_RX_ENABLE && encoder_dma_rx_pending) {
+      HAL_UART_AbortReceive(&huart3);
+      encoder_drain_stray_bytes();
+      encoder_dma_rx_pending = 0;
+      encoder_packets_bad++;
+      if (PRINT_ENCODER) {
+        printf("Encoder.lf: DMA RX timeout after %u ms, aborting and dropping frame\r\n",
+               (unsigned) ENCODER_FRAME_RX_TIMEOUT_MS);
+      }
+    }
+  =}
+
+  // ENCODER_DMA_RX_ENABLE path only. Scheduled by HAL_UART_RxCallback3 (ISR
+  // context) once a DMA-armed frame finishes arriving -- does the same
+  // validate/filter/emit work the blocking path does inline in reaction
+  // (trigger) above, just on its own tag instead of synchronously within
+  // the timer tick.
+  reaction(encoder_rx_action) -> encoder_state_out {=
+    if (!ENCODER_DMA_RX_ENABLE) return;
+
+    EncoderStateMessage out_msg;
+    bool encoder_rx_ok = validate_and_parse_frame(encoder_frame_captured, encoder_counts, encoder_meta);
+
+    if (encoder_rx_ok) {
+      for (int i = 0; i < 7; i++) {
+        int sea_wire_ch = SEA_CHANNEL_INDEX_SWAP ? (6 - i) : i;
+        filter_channel_update("SEA", i, sea_counts[sea_wire_ch], sea_meta[sea_wire_ch],
+                               &sea_counts_accepted[i], &sea_meta_accepted[i], &sea_reject_streak[i],
+                               self->qdec_convert_sea_to_rad_[i], self->interval_sec);
+        filter_channel_update("USM", i, usm_counts[i], usm_meta[i],
+                               &usm_counts_accepted[i], &usm_meta_accepted[i], &usm_reject_streak[i],
+                               self->qdec_convert_motor_to_rad_[i], self->interval_sec);
+      }
+      encoder_packets_ok++;
+    } else {
+      encoder_packets_bad++;
+    }
+
+    group_print_throttle = (group_print_throttle >= printcnt_lim) ? 0 : group_print_throttle + 1;
+
+    for (int i=0; i<7; i++) {
+      out_msg.sea_position[i] = ((float) sea_counts_accepted[i]) * self->qdec_convert_sea_to_rad_[i];
+      float sea_vel_counts_per_sec = ((float) sea_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
+      self->sea_vel_est_[i] = sea_vel_counts_per_sec * self->qdec_convert_sea_to_rad_[i];
+      out_msg.sea_velocity[i] = self->sea_vel_est_[i];
+    }
+
+    for (int i=0; i<7; i++) {
+      self->qdec_pos_[i] = ((float) usm_counts_accepted[i]) * self->qdec_convert_motor_to_rad_[i];
+      float usm_vel_counts_per_sec = ((float) usm_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
+      self->qdec_vel_est_[i] = usm_vel_counts_per_sec * self->qdec_convert_motor_to_rad_[i];
+      out_msg.motor_position[i] = self->qdec_pos_[i];
+      out_msg.motor_velocity[i] = self->qdec_vel_est_[i];
+    }
+
+    lf_set(encoder_state_out, out_msg);
+
+    if (PRINT_ENCODER && printcnt>=printcnt_lim){
+      printf("sea: ");
+      for (int i = 0; i<7; i++){
+        printf("%d  ", (int) (out_msg.sea_position[i]*1000));
+      }
+      printf("\r\nsea_counts: ");
+      for (int i = 0; i<7; i++){
+        printf("%d  ", (int) (sea_counts[i]));
+      }
+
+      printf("\r\nqdec [mRad]: ");
+      for (int i = 0; i<7; i++){
+        printf("%d  ", (int) (out_msg.motor_position[i]*1000));
+      }
+      printf("\r\nqdec_vel [mRad/s]: ");
+      for (int i = 0; i<7; i++){
+        printf("%d  ", (int) (out_msg.motor_velocity[i]*1000));
+      }
+      printf("\r\ninterval [ms] %d, [us]: %d", (int) (self->interval_sec * 1000), (int) (self->interval_sec * 1000000));
+
+      printf("\r\nUART3 gState=0x%X RxState=0x%X HAL_error=0x%lX encoder_rx_ok=%d",
+             huart3.gState, huart3.RxState, (unsigned long) HAL_UART_GetError(&huart3),
+             (int) encoder_rx_ok);
+
+      printf("\r\n\r\n");
+    }
+    printcnt = (printcnt >= printcnt_lim) ? 0 : printcnt+1;
   =}
 
 }

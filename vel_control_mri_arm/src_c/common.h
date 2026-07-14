@@ -19,6 +19,14 @@
 // each flag separately. Set to 1 to fall back to each flag's own value.
 #define GLOBAL_PRINT_GATE 1
 
+// Encoder.lf: 0 = fire the FPGA burst and block on HAL_UART_Receive every
+// trigger cycle (current/default behavior). 1 = fire and arm a DMA receive
+// instead, processing the frame in reaction(encoder_rx_action) once the ISR
+// schedules it, so the trigger reaction never blocks. Both code paths stay
+// in the source; flip this back to 0 and rebuild to revert if on-hardware
+// testing goes badly -- no other changes needed.
+#define ENCODER_DMA_RX_ENABLE 1
+
 #define PRINT_STATEMACHINE (GLOBAL_PRINT_GATE && 0)
 #define PRINT_USM (GLOBAL_PRINT_GATE && 0)
 #define PRINT_ENCODER (GLOBAL_PRINT_GATE && 0)
