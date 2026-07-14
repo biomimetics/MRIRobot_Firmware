@@ -35,11 +35,10 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     // outputs to serial
     output state_message: StateMessage
 
-    // inputs from encoders
-    input[7] motor_encoder_positions: float
-    input[7] motor_encoder_velocities: float
-    input[7] sea_encoder_positions: float
-    input[7] sea_encoder_velocities: float
+    // inputs from encoders -- bundled into one EncoderStateMessage (see
+    // common.h) instead of 4 separate float[7] ports, so a single reaction
+    // below consumes all 4 arrays together every cycle.
+    input encoder_state: EncoderStateMessage
 
     // outputs to encoders
     output enable_qdec: bool
@@ -235,27 +234,12 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     =}
 
     // TODO: Add sanity checks to the encoder readings to ensure that there isn't a connection error or something.
-    reaction(motor_encoder_positions) {=
+    reaction(encoder_state) {=
       for (int i = 0; i<DOF_NUMBER; i++){
-        self->motor_encoder_positions_[i] = motor_encoder_positions[i]->value;
-      }
-    =}
-
-    reaction(motor_encoder_velocities) {=
-      for (int i = 0; i<DOF_NUMBER; i++){
-        self->motor_encoder_velocities_[i] = motor_encoder_velocities[i]->value;
-      }
-    =}
-
-    reaction(sea_encoder_positions) {=
-      for (int i = 0; i<DOF_NUMBER; i++){
-        self->sea_encoder_positions_[i] = sea_encoder_positions[i]->value;
-      }
-    =}
-
-    reaction(sea_encoder_velocities) {=
-      for (int i = 0; i<DOF_NUMBER; i++){
-        self->sea_encoder_velocities_[i] = sea_encoder_velocities[i]->value;
+        self->motor_encoder_positions_[i] = encoder_state->value.motor_position[i];
+        self->motor_encoder_velocities_[i] = encoder_state->value.motor_velocity[i];
+        self->sea_encoder_positions_[i] = encoder_state->value.sea_position[i];
+        self->sea_encoder_velocities_[i] = encoder_state->value.sea_velocity[i];
       }
     =}
 

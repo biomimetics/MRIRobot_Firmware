@@ -16,26 +16,7 @@ import QDEC from "lib/Drivers/Encoder.lf"
 import USM from "lib/Drivers/USM.lf"
 import StateMachine from "lib/State_Machine.lf"
 import UART_Handler from "lib/Drivers/UART.lf"
-import EncoderStateEstimator from "lib/EncoderStateEstimator.lf"
 
-// MINIMAL main (2026-07), for isolating the on-hardware freeze that appears
-// at trajectory convergence with the full stack (see Main_broken.lf -- the
-// previous Main.lf, kept verbatim under that name). This build removes
-// Small_DeltaP_Pulse_Controller_Bank and PulseMotorModelEstimatorMixture_Bank
-// entirely: velocity commands go StateMachine -> CommandSafetyFilter -> USM
-// with no pulse planning and no model estimation. Encoder state still flows
-// QDEC -> EncoderStateEstimator -> StateMachine -> UART/ROS.
-//
-// MotorCommandBiasEstimator_Bank IS back in (added right after the first
-// minimal build): with no pulse controller to supply is_passthrough, it
-// runs with derive_passthrough = true and gates samples on its own
-// commanded/measured velocity floor instead -- see that parameter's comment
-// on MotorCommandBiasEstimator.lf. Its motor_model_input is left
-// unconnected, so gating uses INITIAL_MOTOR_MODEL's V_min_cmd.
-//
-// If this build survives the same trajectory that froze Main_broken.lf, the
-// fault lives in the removed reactors (or the load they generate); if it
-// still freezes, the fault is in this remaining core.
 
 preamble {=
   #include <stdio.h>
@@ -111,7 +92,6 @@ main reactor {
   usm = new USM()                            // Ultrasonic motor controllers
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms)
   state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)
-  state_estimator = new EncoderStateEstimator(sample_period_s = 0.01, enable_observer = false)
 
   // uart <-> state machine
   uart.cmd_msg -> state_machine.command_message
@@ -119,16 +99,12 @@ main reactor {
 
   state_machine.state_message -> uart.state_msg after 0;
 
-  // encoders -- USM position/velocity route through EncoderStateEstimator's
-  // observer before reaching state_machine; SEA still routes straight from
-  // QDEC (see EncoderStateEstimator.lf's own header comment on being
-  // currently wired only to USM signals).
-  qdec.qdec_out -> state_estimator.position_input
-  qdec.qdec_vel_out -> state_estimator.velocity_input
-  state_estimator.position_output -> state_machine.motor_encoder_positions
-  state_estimator.velocity_output -> state_machine.motor_encoder_velocities
-  qdec.sea_out -> state_machine.sea_encoder_positions
-  qdec.sea_vel_out -> state_machine.sea_encoder_velocities
+  // encoders -- USM and SEA position/velocity route straight from QDEC to
+  // state_machine as a single bundled EncoderStateMessage (see common.h).
+  // (EncoderStateEstimator was removed: with its observer disabled and the
+  // position_offset command field dropped, it was a pure identity
+  // pass-through; it also pulled in now-deleted model source files.)
+  qdec.encoder_state_out -> state_machine.encoder_state
 
   state_machine.enable_qdec -> qdec.enable_qdec
   state_machine.reset_qdec -> qdec.reset_qdec

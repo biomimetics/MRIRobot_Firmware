@@ -1,3 +1,6 @@
+#ifndef COMMON_H
+#define COMMON_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,10 +13,28 @@
 #include <stdbool.h>
 
 // for debugging
-#define PRINT_STATEMACHINE 0
-#define PRINT_USM 0
-#define PRINT_ENCODER 0
-#define PRINT_UART 0
+// Master switch for every PRINT_* flag below: 0 forces all of them off
+// regardless of their individual values below, so performance testing (e.g.
+// characterizing loop timing) doesn't require hunting down and disabling
+// each flag separately. Set to 1 to fall back to each flag's own value.
+#define GLOBAL_PRINT_GATE 1
+
+#define PRINT_STATEMACHINE (GLOBAL_PRINT_GATE && 0)
+#define PRINT_USM (GLOBAL_PRINT_GATE && 0)
+#define PRINT_ENCODER (GLOBAL_PRINT_GATE && 0)
+#define PRINT_UART (GLOBAL_PRINT_GATE && 0)
+
+// Combined USM+SEA position/velocity readings for one QDEC sample. Sent as a
+// single struct-typed port between Encoder.lf and State_Machine.lf (instead
+// of 4 separate float[7] ports) so the four arrays can never be observed out
+// of step with each other downstream, and so State_Machine only needs one
+// reaction to consume all of them.
+typedef struct {
+  float motor_position[7];
+  float motor_velocity[7];
+  float sea_position[7];
+  float sea_velocity[7];
+} EncoderStateMessage;
 // 0: fixed-length HAL_UART_Receive_DMA, now sized to COMMAND_PACKET_SIZE
 // (see UART.lf) rather than UART_BUFFER_SIZE, so it completes on exactly one
 // CommandMessage-sized packet instead of waiting for StateMessage-sized
@@ -79,4 +100,6 @@
 
 // observer safety limits (NOT YET IMPLIMENTED - MOVED TO ROS-SIDE)
 #define VEL_DIFFERENCE_THRESHOLD_RAD_PER_SEC 0.785 // 0.785 rad/s ~= 45 deg/s
+
+#endif // COMMON_H
 

@@ -17,9 +17,8 @@ preamble {=
 
   // Set to 1 if on-robot testing shows the SEA channels arrive in reverse
   // index order relative to USM (ch0<->ch6, ch1<->ch5, ch2<->ch4, ch3
-  // unchanged) -- USM channels have been observed to be in the correct
-  // order, so this only remaps SEA. Set to 0 once the underlying wiring/FPGA
-  // channel-order mismatch is fixed at the source.
+  // unchanged) -- As of this writing (July 14th 2026) it should be true/1
+  // because of the fpga's packet ordering.
   #define SEA_CHANNEL_INDEX_SWAP 1
 =}
 
@@ -27,13 +26,13 @@ reactor QDEC(sample_period: time = 5 ms){
   mutable input reset_qdec: bool
   mutable input enable_qdec: bool
 
-  output[7] qdec_out: float
-  output[7] sea_out: float
-
-  output[7] qdec_vel_out: float
-  // FPGA-derived SEA velocity, radians/sec. Not wired to any other
-  // reactor yet -- exposed for a future pass to consume.
-  output[7] sea_vel_out: float
+  // USM+SEA position/velocity for all 7 joints, bundled into one
+  // EncoderStateMessage (see common.h) instead of 4 separate float[7]
+  // ports -- State_Machine.lf consumes all 4 arrays together every cycle
+  // anyway, so one port removes any chance of them being observed out of
+  // step with each other and collapses State_Machine's 4 copy-reactions
+  // into 1.
+  output encoder_state_out: EncoderStateMessage
 
   timer trigger(0, sample_period)
   timer enable(0, 20 ms)
@@ -135,8 +134,9 @@ reactor QDEC(sample_period: time = 5 ms){
 
     float pi = 3.14159;
 
-    // velocity_q20_11 is consumed below (scaled to rad/s for qdec_vel_out /
-    // sea_vel_out); the diagnostic counters are parsed and stored here but
+    // velocity_q20_11 is consumed below (scaled to rad/s for
+    // encoder_state_out's motor_velocity/sea_velocity fields); the
+    // diagnostic counters are parsed and stored here but
     // not consumed by any output yet. Declared ahead of
     // filter_channel_update below (which needs the type) rather than in
     // its original spot further down.
@@ -167,7 +167,7 @@ reactor QDEC(sample_period: time = 5 ms){
     // parsed, good or bad. filter_channel_update() below only copies a
     // freshly-parsed reading into these when it looks sane, so a single-cycle
     // whole-burst bank swap (or any other single-sample glitch) never reaches
-    // qdec_out/sea_out/qdec_vel_out/sea_vel_out at all -- downstream just
+    // encoder_state_out at all -- downstream just
     // keeps seeing the last good value for that one cycle instead.
     static long sea_counts_accepted[7] = {0, 0, 0, 0, 0, 0, 0};
     static long usm_counts_accepted[7] = {0, 0, 0, 0, 0, 0, 0};
@@ -549,8 +549,9 @@ reactor QDEC(sample_period: time = 5 ms){
 
   // Update Encoder values
   // This function should take approximately 1ms to operate
-  reaction(trigger) -> qdec_out, qdec_vel_out, sea_out, sea_vel_out {=
+  reaction(trigger) -> encoder_state_out {=
     //printf("In QDEC's trigger reaction.\n");
+    EncoderStateMessage out_msg;
     timer_updated_elapsed_time(&self->timer_start_, &self->timer_elapsed_time_sec_); // comptues the interval in seconds
 
    self->interval_sec = (float) self->timer_elapsed_time_sec_;
@@ -579,15 +580,12 @@ reactor QDEC(sample_period: time = 5 ms){
 
     // Get values for SEA encoders -- position from counts, velocity from the
     // FPGA's own Q20.11 counts/sec estimate, both scaled by the same
-    // counts->radians conversion factor. sea_vel_out isn't consumed by any
-    // other reactor yet; it's exposed here for a future pass to wire up.
+    // counts->radians conversion factor.
     for (int i=0; i<7; i++) {
-      float sea_value = ((float) sea_counts_accepted[i]) * self->qdec_convert_sea_to_rad_[i]; // - motor_configs[i]->sea_offset;
+      out_msg.sea_position[i] = ((float) sea_counts_accepted[i]) * self->qdec_convert_sea_to_rad_[i]; // - motor_configs[i]->sea_offset;
       float sea_vel_counts_per_sec = ((float) sea_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
       self->sea_vel_est_[i] = sea_vel_counts_per_sec * self->qdec_convert_sea_to_rad_[i]; // radians per second
-
-      lf_set(sea_out[i],  sea_value);
-      lf_set(sea_vel_out[i], self->sea_vel_est_[i]);
+      out_msg.sea_velocity[i] = self->sea_vel_est_[i];
     }
 
     // Get values for USM encoders -- position from counts, velocity from the
@@ -599,29 +597,31 @@ reactor QDEC(sample_period: time = 5 ms){
       float usm_vel_counts_per_sec = ((float) usm_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
       self->qdec_vel_est_[i] = usm_vel_counts_per_sec * self->qdec_convert_motor_to_rad_[i]; // radians per second
 
-      lf_set(qdec_out[i],  self->qdec_pos_[i]); // should be units of radians
-      lf_set(qdec_vel_out[i],  self->qdec_vel_est_[i]); // should be units of radians per second
+      out_msg.motor_position[i] = self->qdec_pos_[i]; // should be units of radians
+      out_msg.motor_velocity[i] = self->qdec_vel_est_[i]; // should be units of radians per second
     }
-    
+
+    lf_set(encoder_state_out, out_msg);
+
     if (PRINT_ENCODER && printcnt>=printcnt_lim){
       //printf("encoder interval_sec: Got %d us.\r\n", ((int)(self->interval_sec * 1000000.0))); //self->sample_period);
 
       printf("sea: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (sea_out[i]->value*1000));
+        printf("%d  ", (int) (out_msg.sea_position[i]*1000));
       }
       printf("\r\nsea_counts: ");
       for (int i = 0; i<7; i++){
         printf("%d  ", (int) (sea_counts[i]));
       }
-      
+
       printf("\r\nqdec [mRad]: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (qdec_out[i]->value*1000));
+        printf("%d  ", (int) (out_msg.motor_position[i]*1000));
       }
       printf("\r\nqdec_vel [mRad/s]: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (qdec_vel_out[i]->value*1000));
+        printf("%d  ", (int) (out_msg.motor_velocity[i]*1000));
       }
       printf("\r\ninterval [ms] %d, [us]: %d", (int) (self->interval_sec * 1000), (int) (self->interval_sec * 1000000));
 
