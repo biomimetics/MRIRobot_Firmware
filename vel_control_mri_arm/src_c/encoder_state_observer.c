@@ -21,9 +21,9 @@ void EncoderStateObserver_Init(EncoderStateObserver *o, float dt) {
   o->Lp = 0.20f;
   o->Lv = 12.0f;
   o->Lvv = 0.10f;
-  o->Ld = 4.0f;
-  o->disturbance_decay = 0.5f;
-  o->max_disturbance = 5.0f;
+  o->Ld = 0.1f; // non-zero but we should keep it small so we don't overestimate disturbances, was 4.0f
+  o->disturbance_decay = 1.5f; // was 0.5f
+  o->max_disturbance = 1.0f;
 
   o->innovation_gate = 0.15f;      // rad -- just above max_speed * dt, see header
   o->max_velocity_error = 5.0f;    // rad/s
