@@ -1,6 +1,8 @@
 #include "stm_comms.h"
 #include "linux_comms.h"
 #include <termios.h>
+#include <sys/ioctl.h>
+#include <linux/serial.h>
 
 static int wait_for_data(int fd, int timeout_ms) {
     fd_set read_fds;
@@ -68,6 +70,27 @@ int configure_serial_port(int fd) {
     if (tcsetattr(fd, TCSANOW, &tty) != 0) {
         perror("Error from tcsetattr");
         return -1;
+    }
+
+    // Ask the USB-serial driver for low-latency delivery. Without this, the
+    // FTDI adapter batches RX data (~45ms clumps of 4-5 state packets measured
+    // on 2026-07-13 despite the sysfs latency_timer reading 16ms), so the
+    // 100Hz control loop saw a fresh packet on only ~23% of cycles and
+    // drain-to-newest discarded the rest -- the direct cause of the "stale/
+    // quantized ArmStatus telemetry" issue in mri_arm_estimator/docs/TODO.md.
+    // ASYNC_LOW_LATENCY makes ftdi_sio set its latency timer to 1ms (verified:
+    // arrivals become a clean 10ms cadence, zero clumps). The flag does not
+    // persist across replug, so it must be set on every open. Best-effort:
+    // non-FTDI adapters may not support TIOCSSERIAL, and a warning beats
+    // refusing to run.
+    struct serial_struct serial;
+    if (ioctl(fd, TIOCGSERIAL, &serial) == 0) {
+        serial.flags |= ASYNC_LOW_LATENCY;
+        if (ioctl(fd, TIOCSSERIAL, &serial) != 0) {
+            perror("configure_serial_port: TIOCSSERIAL (low latency not applied)");
+        }
+    } else {
+        perror("configure_serial_port: TIOCGSERIAL (low latency not applied)");
     }
 
     return 0;

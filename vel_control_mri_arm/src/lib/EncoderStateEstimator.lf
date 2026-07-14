@@ -5,57 +5,35 @@ target C {
     board: "F446RE"
   },
   files: [
-    "../../src_c/pulse_motor_model.h", "../../src_c/pulse_motor_model.c",
-    "../../src_c/gaussian_motion.h", "../../src_c/gaussian_motion.c",
-    "../../src_c/lognormal_motion.h", "../../src_c/lognormal_motion.c",
-    "../../src_c/stats.h", "../../src_c/stats.c",
     "../../src_c/encoder_state_observer.h", "../../src_c/encoder_state_observer.c"
   ],
   cmake-include: [
-    "../../src_c/pulse_motor_model_cmake.cmake",
-    "../../src_c/gaussian_motion_cmake.cmake",
-    "../../src_c/stats_cmake.cmake",
     "../../src_c/encoder_state_observer_cmake.cmake"
   ]
 }
 
-// Top-level preamble so MotorState/PulseMotorModel/EncoderStateObserver are
-// visible where the port/state declarations below reference them -- same
-// reasoning as Small_DeltaP_Pulse_Controller_Bank.lf's own top-level
-// preamble.
+// Top-level preamble so EncoderStateObserver is visible where the
+// port/state declarations below reference it -- same reasoning as
+// Small_DeltaP_Pulse_Controller_Bank.lf's own top-level preamble.
 preamble {=
-  #include "pulse_motor_model.h"
   #include "encoder_state_observer.h"
 =}
 
 // Per-joint state estimation between Encoder.lf's QDEC and
 // State_Machine.lf: runs one EncoderStateObserver (encoder_state_observer.h
 // -- fixed-gain position/velocity/disturbance observer with EMI innovation
-// gating and an asymmetric T_start/T_stop command delay line; see that
-// header for the actual estimation design) per joint, and hands the
-// filtered position/velocity downstream in place of the raw QDEC values.
+// gating; see that header for the actual estimation design) per joint, and
+// hands the filtered position/velocity downstream in place of the raw QDEC
+// values.
 //
-// commanded_velocity_input should be the command actually sent to the USM
-// (Small_DeltaP_Pulse_Controller's command_velocity_output -- correct in
-// both its pass-through and pulsing modes), NOT State_Machine's desired
-// velocity, which sits near zero while a joint is pulsing. motor_state_input
-// tells the observer when a pulse is in flight (pulse-height rescaling,
-// rest-gating veto); motor_model_input lets
-// PulseMotorModelEstimatorMixture_Bank.lf's refined PulseMotorModel improve
-// the observers' T_start/T_stop delay taps and expected pulse velocity
-// online -- until anything arrives there, the shared INITIAL_MOTOR_MODEL
-// installed at startup applies.
+// No command/motor-model input: command prediction and pulse timing live
+// in the higher-level (ROS2) code now, not the firmware, so this reactor
+// only fuses the encoder's own position and velocity signals.
 //
 // Currently only wired to USM signals, not SEA (see Main.lf). The observer
-// itself is reusable for the SEAs: instantiate a second copy with
-// use_commanded_velocity = false and leave motor_state_input/
-// commanded_velocity_input unwired -- the command path (delay line,
-// expected velocity, rest gating) is inert in that mode and each joint
-// degrades to a constant-velocity + disturbance smoother.
+// itself is reusable for the SEAs: instantiate a second copy and wire it
+// the same way.
 reactor EncoderStateEstimator(
-  // false = SEA-style use: no command prediction, no rest gating -- see
-  // the reactor-level comment above and encoder_state_observer.h.
-  use_commanded_velocity: bool = false,
   // s -- the fixed update period the observers integrate against. Must
   // match the position_input source's actual cadence (the QDEC's
   // sample_period, 10 ms in Main.lf).
@@ -68,24 +46,6 @@ reactor EncoderStateEstimator(
 ) {
   input[7] position_input: float
   input[7] velocity_input: float
-  input[7] commanded_velocity_input: float
-
-  // Which MotorState each joint's Small_DeltaP_Pulse_Controller is in --
-  // see Update's motor_state parameter in encoder_state_observer.h for
-  // exactly what the observer uses it for (little: pulse-height rescaling
-  // and a rest-gating veto; pass-through prediction runs off the command
-  // delay line regardless, since the controller spends ~90-95% of its time
-  // in pass-through).
-  input[7] motor_state_input: MotorState
-
-  // Refined PulseMotorModel from PulseMotorModelEstimatorMixture_Bank.lf,
-  // broadcast once per closed epoch (with per-joint T_start blending --
-  // see that reactor). Applied to the observers immediately on arrival:
-  // unlike
-  // Small_DeltaP_Pulse_Controller.lf's mid-pulse concern, only prediction
-  // terms change here, never the estimated states, so there's no unsafe
-  // moment to apply it in.
-  input[7] motor_model_input: PulseMotorModel
 
   // Static per-joint offset from State_Machine.lf, added to the estimated
   // position below AFTER the observer (so an offset jump arriving from
@@ -102,10 +62,9 @@ reactor EncoderStateEstimator(
   // One observer per joint. Individually-named states rather than an
   // EncoderStateObserver[7] array: large nested-struct state arrays came
   // out corrupted on hardware (see per_joint_residual_stats_0_'s comment
-  // in PulseMotorModelEstimatorMixture_Bank.lf -- this struct, with its
-  // 64-float command ring, is even bigger than the one that failed there).
-  // Reactions below build a local pointer array from these to index by
-  // joint, same pattern as over there.
+  // in PulseMotorModelEstimatorMixture_Bank.lf). Reactions below build a
+  // local pointer array from these to index by joint, same pattern as
+  // over there.
   state observer_0_: EncoderStateObserver
   state observer_1_: EncoderStateObserver
   state observer_2_: EncoderStateObserver
@@ -114,17 +73,14 @@ reactor EncoderStateEstimator(
   state observer_5_: EncoderStateObserver
   state observer_6_: EncoderStateObserver
 
-  // Latest observed command/state/velocity per joint, cached by the thin
-  // reactions below -- so the position_input reaction (where the whole
-  // observer update runs) always has current values even though these
-  // inputs each arrive on their own trigger. Declared/reacted-to BEFORE
-  // the position_input reaction so that, when several arrive on the same
-  // tag (the common case -- QDEC emits position+velocity together, and
-  // the 5 ms control_tick lands on every 10 ms QDEC tag), the caches are
-  // fresh by the time the observers consume them.
-  state commanded_velocity_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+  // Latest observed velocity per joint, cached by the thin reaction below
+  // -- so the position_input reaction (where the whole observer update
+  // runs) always has a current value even though velocity_input arrives
+  // on its own trigger. Declared/reacted-to BEFORE the position_input
+  // reaction so that, when both arrive on the same tag (the common case --
+  // QDEC emits position+velocity together), the cache is fresh by the
+  // time the observers consume it.
   state velocity_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-  state motor_state_: MotorState[7]
   state position_offset_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
   reaction(startup) {=
@@ -134,36 +90,15 @@ reactor EncoderStateEstimator(
       &self->observer_6_,
     };
     for (int i = 0; i < 7; i++) {
-      EncoderStateObserver_Init(obs[i], self->sample_period_s, self->use_commanded_velocity);
-      // Same starting belief as every other consumer of the motor model --
-      // sizes the T_start/T_stop delay taps until motor_model_input
-      // supplies something refined.
-      EncoderStateObserver_SetModel(obs[i], &INITIAL_MOTOR_MODEL);
-      self->motor_state_[i] = MOTOR_STOPPED;
+      EncoderStateObserver_Init(obs[i], self->sample_period_s);
     }
   =}
 
-  // Thin cache-only reactions -- see the cache states' comment above.
-  reaction(commanded_velocity_input) {=
-    for (int i = 0; i < commanded_velocity_input_width; i++) {
-      if (commanded_velocity_input[i]->is_present) {
-        self->commanded_velocity_[i] = commanded_velocity_input[i]->value;
-      }
-    }
-  =}
-
+  // Thin cache-only reaction -- see velocity_'s comment above.
   reaction(velocity_input) {=
     for (int i = 0; i < velocity_input_width; i++) {
       if (velocity_input[i]->is_present) {
         self->velocity_[i] = velocity_input[i]->value;
-      }
-    }
-  =}
-
-  reaction(motor_state_input) {=
-    for (int i = 0; i < motor_state_input_width; i++) {
-      if (motor_state_input[i]->is_present) {
-        self->motor_state_[i] = motor_state_input[i]->value;
       }
     }
   =}
@@ -176,29 +111,13 @@ reactor EncoderStateEstimator(
     }
   =}
 
-  // Applied immediately, not latched -- see motor_model_input's comment
-  // above for why that's safe here when it isn't in
-  // Small_DeltaP_Pulse_Controller.lf.
-  reaction(motor_model_input) {=
-    EncoderStateObserver *obs[7] = {
-      &self->observer_0_, &self->observer_1_, &self->observer_2_,
-      &self->observer_3_, &self->observer_4_, &self->observer_5_,
-      &self->observer_6_,
-    };
-    for (int i = 0; i < motor_model_input_width; i++) {
-      if (motor_model_input[i]->is_present) {
-        EncoderStateObserver_SetModel(obs[i], &motor_model_input[i]->value);
-      }
-    }
-  =}
-
   // The actual estimation step, once per QDEC sample: run each joint's
-  // observer against this tag's position (plus the cached velocity/
-  // command/motor-state) and publish the filtered estimates. Both outputs
-  // are set here, off position_input's trigger, so downstream always sees
-  // position and velocity as a matched pair from the same observer update
-  // (the QDEC emits position and velocity together, so velocity_output
-  // keeps its old cadence).
+  // observer against this tag's position (plus the cached velocity) and
+  // publish the filtered estimates. Both outputs are set here, off
+  // position_input's trigger, so downstream always sees position and
+  // velocity as a matched pair from the same observer update (the QDEC
+  // emits position and velocity together, so velocity_output keeps its
+  // old cadence).
   reaction(position_input) -> position_output, velocity_output {=
     EncoderStateObserver *obs[7] = {
       &self->observer_0_, &self->observer_1_, &self->observer_2_,
@@ -211,8 +130,6 @@ reactor EncoderStateEstimator(
       if (self->enable_observer) {
         EncoderStateObserver_Update(
             obs[i],
-            self->commanded_velocity_[i],
-            self->motor_state_[i],
             position_input[i]->value,
             self->velocity_[i]);
         lf_set(position_output[i], obs[i]->position + self->position_offset_[i]);
