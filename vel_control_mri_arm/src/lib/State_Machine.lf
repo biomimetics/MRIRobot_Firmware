@@ -196,7 +196,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
 
       // Safety filter (clamp + smooth) runs exactly once per tag, whether we
       // were triggered by a command, the timer, or both.
-      commanded_velocity_safety_checks();
+      //commanded_velocity_safety_checks(); // NO SAFETY NOW
 
       // set all outputs at the end of reaction
       if (PRINT_STATEMACHINE) printf("Motor command tick reaction: vels: \n");

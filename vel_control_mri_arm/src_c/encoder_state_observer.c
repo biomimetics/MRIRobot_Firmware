@@ -18,11 +18,11 @@ void EncoderStateObserver_Init(EncoderStateObserver *o, float dt) {
   // Default gains -- see each field's comment in the header for units and
   // reasoning. Lp/Lv inherited from possible_additions/observer.c's
   // conservative defaults; the rest sized for dt = 10 ms.
-  o->Lp = 0.20f;
-  o->Lv = 12.0f;
-  o->Lvv = 0.10f;
-  o->Ld = 0.1f; // non-zero but we should keep it small so we don't overestimate disturbances, was 4.0f
-  o->disturbance_decay = 1.5f; // was 0.5f
+  o->Lp = 0.75f; // was 0.2
+  o->Lv = 1.0f; // was 12
+  o->Lvv = 0.90f; // was 0.05
+  o->Ld = 0.01f; // non-zero but we should keep it small so we don't overestimate disturbances, was 4.0f
+  o->disturbance_decay = 0.2f; // was 0.5f
   o->max_disturbance = 1.0f;
 
   o->innovation_gate = 0.15f;      // rad -- just above max_speed * dt, see header

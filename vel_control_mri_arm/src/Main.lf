@@ -111,7 +111,7 @@ main reactor {
   usm = new USM()                            // Ultrasonic motor controllers
   uart = new UART_Handler(transmit_period = 10 ms, receive_period = 10 ms)
   state_machine = new StateMachine(motor_command_period = 10 ms, update_state_message_period = 10 ms)
-  state_estimator = new EncoderStateEstimator(sample_period_s = 0.01, enable_observer = true)
+  state_estimator = new EncoderStateEstimator(sample_period_s = 0.01, enable_observer = false)
 
   // uart <-> state machine
   uart.cmd_msg -> state_machine.command_message
