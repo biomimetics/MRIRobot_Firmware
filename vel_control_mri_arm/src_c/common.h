@@ -120,6 +120,7 @@ typedef struct {
 #define USM_ASSUMED_CPR 1440.0
 #define USM_ASSUMED_INTERP_FACTOR 4.0
 #define USM_ASSUMED_COUNTS_PER_REV (USM_ASSUMED_CPR * USM_ASSUMED_INTERP_FACTOR) // 5760
+#define INITIAL_PWM_RPM_MAX 250.0 // manufacturer spec: 100% duty against the assumed encoder
 
 #define PWM_COUNTS_PER_SEC_MAX ((INITIAL_PWM_RPM_MAX / 60.0) * USM_ASSUMED_COUNTS_PER_REV) // 24000
 
@@ -139,6 +140,7 @@ typedef struct {
 // the counts/sec change is meant to bypass -- do not reintroduce it into
 // USM.lf's command path without a good reason.
 
+/*
 #define INITIAL_CPR 1440.0 //5760.0 //1440.0
 #define INITIAL_INTERP_FACTOR 4.0 // either 1, 2, or 4
 
@@ -160,7 +162,7 @@ typedef struct {
 #define PWM_RPM_MAX_BASE (INITIAL_PWM_RPM_MAX * CPR_RATIO_BASE)
 #define PWM_RAD_PER_SEC_MAX_BASE (PWM_RPM_MAX_BASE * RPM_TO_RAD_PER_SEC)
 #define PWM_DEG_PER_SEC_MAX_BASE (PWM_RPM_MAX_BASE * RPM_TO_DEG_PER_SEC) // this should all get moved somewhere else I think. motor_config.h?
-
+*/
 
 #define ARR_PERIOD 2000 //2000 would be great but still sawtooth-esque //65535 // 16-bit timer period for ARR (auto reload register)
 

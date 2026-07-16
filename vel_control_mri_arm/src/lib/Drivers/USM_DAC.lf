@@ -6,6 +6,13 @@ target C {
   }
 }
 
+
+/*
+Huge issue with this code: the assumptions about the free pins were wrong. We'll have to reroute something to test this.
+Also, we'll need to update it to work with the recent command pipeline changes.
+*/
+
+
 // ===========================================================================
 // USM_DAC -- DAC7578-driven replacement for USM.lf
 // ===========================================================================
