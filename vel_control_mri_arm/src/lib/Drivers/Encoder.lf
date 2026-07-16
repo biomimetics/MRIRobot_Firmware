@@ -53,19 +53,28 @@ reactor QDEC(sample_period: time = 5 ms){
   state reset_qdec_: bool = false
   state enable_qdec_: bool = false
 
-  // internal copies of joint and sea encoder values to use
-  state qdec_pos_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-  // USM velocity, radians/sec -- from the FPGA's own velocity estimate (see
-  // trigger reaction below), not differenced from position anymore.
+  // Internal copies of joint and sea encoder values. All in RAW REAL-ENCODER
+  // COUNTS now -- this reactor applies no counts->radians conversion to
+  // anything it outputs (see counts_domain_io_plan.md); the host does that.
+  state qdec_pos_: int32_t[7] = {0, 0, 0, 0, 0, 0, 0} // USM position, counts
+  // USM velocity, counts/sec -- the FPGA's own Q20.11 estimate is natively in
+  // counts/sec, so it now needs only the fixed-point descale, no unit change.
   state qdec_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
-  state qdec_convert_motor_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from motor space to acutator space
+  // DIAGNOSTIC ONLY -- these no longer touch the output path. They survive
+  // solely to feed filter_channel_update's anomaly check, whose threshold
+  // (ENCODER_ANOMALY_THRESHOLD_DEG_PER_SEC) is inherently per-encoder-CPR
+  // dependent and so has to reason in physical units. Keeping them means the
+  // glitch filter behaves identically to before the counts-domain switch --
+  // deliberately, so a filter behavior change can't confound the very
+  // experiment this unit change exists to run.
+  state qdec_convert_motor_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // counts -> motor shaft radians
 
-  state qdec_convert_sea_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // conversion from sea space to acutator space
+  state qdec_convert_sea_to_rad_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // counts -> sea deflection radians
 
-  state sea_pos_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-  state sea_pos_last_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0} // unused!
-  // SEA velocity, radians/sec -- from the FPGA's own velocity estimate.
+  state sea_pos_: int32_t[7] = {0, 0, 0, 0, 0, 0, 0} // SEA position, counts
+  state sea_pos_last_: int32_t[7] = {0, 0, 0, 0, 0, 0, 0} // unused!
+  // SEA velocity, counts/sec -- from the FPGA's own velocity estimate.
   state sea_vel_est_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 
   // timer_states
@@ -231,8 +240,13 @@ reactor QDEC(sample_period: time = 5 ms){
     // from an intentional fast motion), this channel's own diagnostic
     // fields straight from its metadata word (rate_reject/
     // illegal_transition/index_status/velocity -- the first anomaly caught
-    // this way correlated directly with rate_limit_rejects saturated at 255
+    // this way correlated directly with rate_limit_rejects saturated
     // on the glitching channel), and the current reject streak.
+    //
+    // NB: that saturation value is 15, not the 255 this comment used to claim.
+    // These counters were 8-bit under the old protocol, but the current one
+    // packs both into a single wire byte as nibbles (read_fpga_example.c
+    // section 4), so they pin at 15 and "15" means "15 or more".
     //
     // Decides accept vs. reject: compares the new reading against the last
     // ACCEPTED value (not just "last received", so a run of rejected
@@ -277,6 +291,54 @@ reactor QDEC(sample_period: time = 5 ms){
       *reject_streak = 0;
       *accepted_count = new_count;
       *accepted_meta = new_meta;
+    }
+
+    // Reject streaks are ints internally but ride the wire as uint8.
+    static uint8_t clamp_streak_u8(int streak) {
+      if (streak < 0) return 0;
+      if (streak > 255) return 255;
+      return (uint8_t) streak;
+    }
+
+    // Fills the diagnostic block that rides along with each EncoderStateMessage.
+    //
+    // Reads the most recently PARSED metadata (encoder_meta), deliberately NOT
+    // the filtered *_meta_accepted copies. filter_channel_update drops a
+    // rejected sample's metadata on the floor, and a rejected sample is exactly
+    // when its diagnostics matter most -- the first bank-swap anomaly we caught
+    // showed up as rate_limit_rejects pinned at max on the glitching channel.
+    // Sourcing these from the accepted copies would therefore hide the very
+    // events the host wants to see.
+    //
+    // The flip side: position/velocity in the same message ARE the filtered
+    // values, so the two halves can disagree by design. reject_streak is what
+    // reconciles them -- 0 means the counts are fresh, N > 0 means they are a
+    // held-over value from N cycles ago while these diagnostics describe the
+    // newer (rejected) reading.
+    //
+    // If the frame failed magic/CRC this cycle, encoder_meta still holds the
+    // PREVIOUS good parse -- these fields go stale rather than zeroing. That is
+    // what the packets_ok/packets_bad deltas are for on the host side.
+    static void fill_encoder_diagnostics(EncoderDiagnostics *out) {
+      for (int i = 0; i < 7; i++) {
+        // Same wire->logical remap the count path uses (see the filter loops).
+        // The diagnostics MUST land on the same joint index as the counts they
+        // describe, or the host would attribute a channel's faults to another.
+        int sea_wire_ch = SEA_CHANNEL_INDEX_SWAP ? (6 - i) : i;
+
+        out->sea_status[i]                     = sea_meta[sea_wire_ch].index_status;
+        out->sea_illegal_transition_rejects[i] = sea_meta[sea_wire_ch].illegal_transition_rejects;
+        out->sea_rate_limit_rejects[i]         = sea_meta[sea_wire_ch].rate_limit_rejects;
+        out->sea_reject_streak[i]              = clamp_streak_u8(sea_reject_streak[i]);
+
+        out->motor_status[i]                     = usm_meta[i].index_status;
+        out->motor_illegal_transition_rejects[i] = usm_meta[i].illegal_transition_rejects;
+        out->motor_rate_limit_rejects[i]         = usm_meta[i].rate_limit_rejects;
+        out->motor_reject_streak[i]              = clamp_streak_u8(usm_reject_streak[i]);
+      }
+
+      out->encoder_packets_ok  = encoder_packets_ok;
+      out->encoder_packets_bad = encoder_packets_bad;
     }
 
     // Reassembles a 32-bit field from 4 wire bytes, little-endian (byte[0]
@@ -548,9 +610,14 @@ reactor QDEC(sample_period: time = 5 ms){
     // SEA/USM bursts are fetched synchronously each trigger cycle (blocking
     // fire+read below); no receive needs arming here.
 
-    // computing conversions from motor/encoder space to joint space -- motor
+    // Computing conversions from motor/encoder space to joint space -- motor
     // shaft radians only (counts -> radians via qdec_cpr); gear reduction is
     // handled entirely on the ROS2 side, not here.
+    //
+    // DIAGNOSTIC ONLY as of the counts-domain switch: nothing this reactor
+    // outputs is scaled by these anymore (positions/velocities go out as raw
+    // counts). They exist purely so filter_channel_update can evaluate its
+    // deg/s anomaly threshold in physical units. See the state declarations.
     for (int i = 0; i<7; i++){
       self->qdec_convert_motor_to_rad_[i] = (TWO_PI) / (motor_configs[i]->qdec_cpr);
     }
@@ -663,48 +730,53 @@ reactor QDEC(sample_period: time = 5 ms){
 
     group_print_throttle = (group_print_throttle >= printcnt_lim) ? 0 : group_print_throttle + 1;
 
-    // Get values for SEA encoders -- position from counts, velocity from the
-    // FPGA's own Q20.11 counts/sec estimate, both scaled by the same
-    // counts->radians conversion factor.
+    // Get values for SEA encoders -- position is the raw count, velocity is the
+    // FPGA's own Q20.11 estimate with only its fixed-point descale applied
+    // (that estimate is natively counts/sec, so no unit conversion remains).
     for (int i=0; i<7; i++) {
-      out_msg.sea_position[i] = ((float) sea_counts_accepted[i]) * self->qdec_convert_sea_to_rad_[i]; // - motor_configs[i]->sea_offset;
-      float sea_vel_counts_per_sec = ((float) sea_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
-      self->sea_vel_est_[i] = sea_vel_counts_per_sec * self->qdec_convert_sea_to_rad_[i]; // radians per second
+      self->sea_pos_[i] = (int32_t) sea_counts_accepted[i]; // counts
+      self->sea_vel_est_[i] = ((float) sea_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE; // counts per second
+
+      out_msg.sea_position[i] = self->sea_pos_[i];
       out_msg.sea_velocity[i] = self->sea_vel_est_[i];
     }
 
-    // Get values for USM encoders -- position from counts, velocity from the
-    // FPGA's own Q20.11 counts/sec estimate, rather than differencing
-    // position (the FPGA's estimate is more robust -- see
-    // encoder_robustness_plan.md).
+    // Get values for USM encoders -- same raw-count treatment. Velocity still
+    // comes from the FPGA's estimate rather than differencing position (that
+    // estimate is more robust -- see encoder_robustness_plan.md).
     for (int i=0; i<7; i++) {
-      self->qdec_pos_[i] = ((float) usm_counts_accepted[i]) * self->qdec_convert_motor_to_rad_[i]; // update the new position
-      float usm_vel_counts_per_sec = ((float) usm_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
-      self->qdec_vel_est_[i] = usm_vel_counts_per_sec * self->qdec_convert_motor_to_rad_[i]; // radians per second
+      self->qdec_pos_[i] = (int32_t) usm_counts_accepted[i]; // counts
+      self->qdec_vel_est_[i] = ((float) usm_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE; // counts per second
 
-      out_msg.motor_position[i] = self->qdec_pos_[i]; // should be units of radians
-      out_msg.motor_velocity[i] = self->qdec_vel_est_[i]; // should be units of radians per second
+      out_msg.motor_position[i] = self->qdec_pos_[i]; // counts
+      out_msg.motor_velocity[i] = self->qdec_vel_est_[i]; // counts per second
     }
+
+    fill_encoder_diagnostics(&out_msg.diagnostics);
 
     lf_set(encoder_state_out, out_msg);
 
     if (PRINT_ENCODER && printcnt>=printcnt_lim){
       //printf("encoder interval_sec: Got %d us.\r\n", ((int)(self->interval_sec * 1000000.0))); //self->sample_period);
 
-      printf("sea: ");
+      // All raw-count now (see counts_domain_io_plan.md). sea/qdec print the
+      // ACCEPTED counts that actually go out on the port; sea_counts_raw
+      // prints what was parsed this cycle regardless of the glitch filter, so
+      // a rejected sample still shows up as a divergence between the two.
+      printf("sea [counts]: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (out_msg.sea_position[i]*1000));
+        printf("%ld  ", (long) out_msg.sea_position[i]);
       }
-      printf("\r\nsea_counts: ");
+      printf("\r\nsea_counts_raw: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (sea_counts[i]));
+        printf("%ld  ", (long) (sea_counts[i]));
       }
 
-      printf("\r\nqdec [mRad]: ");
+      printf("\r\nqdec [counts]: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (out_msg.motor_position[i]*1000));
+        printf("%ld  ", (long) out_msg.motor_position[i]);
       }
-      printf("\r\nqdec_vel [mRad/s]: ");
+      printf("\r\nqdec_vel [milli-counts/s]: ");
       for (int i = 0; i<7; i++){
         printf("%d  ", (int) (out_msg.motor_velocity[i]*1000));
       }
@@ -768,38 +840,47 @@ reactor QDEC(sample_period: time = 5 ms){
 
     group_print_throttle = (group_print_throttle >= printcnt_lim) ? 0 : group_print_throttle + 1;
 
+    // Raw counts / counts-per-sec, identical treatment to reaction(trigger)'s
+    // blocking path above -- keep the two in step.
     for (int i=0; i<7; i++) {
-      out_msg.sea_position[i] = ((float) sea_counts_accepted[i]) * self->qdec_convert_sea_to_rad_[i];
-      float sea_vel_counts_per_sec = ((float) sea_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
-      self->sea_vel_est_[i] = sea_vel_counts_per_sec * self->qdec_convert_sea_to_rad_[i];
+      self->sea_pos_[i] = (int32_t) sea_counts_accepted[i]; // counts
+      self->sea_vel_est_[i] = ((float) sea_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE; // counts per second
+
+      out_msg.sea_position[i] = self->sea_pos_[i];
       out_msg.sea_velocity[i] = self->sea_vel_est_[i];
     }
 
     for (int i=0; i<7; i++) {
-      self->qdec_pos_[i] = ((float) usm_counts_accepted[i]) * self->qdec_convert_motor_to_rad_[i];
-      float usm_vel_counts_per_sec = ((float) usm_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE;
-      self->qdec_vel_est_[i] = usm_vel_counts_per_sec * self->qdec_convert_motor_to_rad_[i];
+      self->qdec_pos_[i] = (int32_t) usm_counts_accepted[i]; // counts
+      self->qdec_vel_est_[i] = ((float) usm_meta_accepted[i].velocity_q20_11) / ENCODER_VELOCITY_SCALE; // counts per second
+
       out_msg.motor_position[i] = self->qdec_pos_[i];
       out_msg.motor_velocity[i] = self->qdec_vel_est_[i];
     }
 
+    fill_encoder_diagnostics(&out_msg.diagnostics);
+
     lf_set(encoder_state_out, out_msg);
 
     if (PRINT_ENCODER && printcnt>=printcnt_lim){
-      printf("sea: ");
+      // All raw-count now (see counts_domain_io_plan.md). sea/qdec print the
+      // ACCEPTED counts that actually go out on the port; sea_counts_raw
+      // prints what was parsed this cycle regardless of the glitch filter, so
+      // a rejected sample still shows up as a divergence between the two.
+      printf("sea [counts]: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (out_msg.sea_position[i]*1000));
+        printf("%ld  ", (long) out_msg.sea_position[i]);
       }
-      printf("\r\nsea_counts: ");
+      printf("\r\nsea_counts_raw: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (sea_counts[i]));
+        printf("%ld  ", (long) (sea_counts[i]));
       }
 
-      printf("\r\nqdec [mRad]: ");
+      printf("\r\nqdec [counts]: ");
       for (int i = 0; i<7; i++){
-        printf("%d  ", (int) (out_msg.motor_position[i]*1000));
+        printf("%ld  ", (long) out_msg.motor_position[i]);
       }
-      printf("\r\nqdec_vel [mRad/s]: ");
+      printf("\r\nqdec_vel [milli-counts/s]: ");
       for (int i = 0; i<7; i++){
         printf("%d  ", (int) (out_msg.motor_velocity[i]*1000));
       }

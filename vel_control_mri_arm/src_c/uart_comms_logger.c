@@ -9,7 +9,9 @@ int main() {
 
     FILE *fpt;
     fpt = fopen("csv_data/uart_log.csv", "w+");
-    char header_buffer[512];  // Adjust size as needed
+    // Sized from stm_comms.h rather than a hand-picked number: the header
+    // outgrew a 512-byte buffer once the diagnostics columns were added.
+    char header_buffer[STATE_MESSAGE_CSV_HEADER_BUFFER_SIZE];
     write_state_message_csv_header(header_buffer, sizeof(header_buffer));
     fprintf(fpt,"%s\n", header_buffer);
     fclose(fpt);
@@ -21,7 +23,7 @@ int main() {
         print_state_message_int(&state_msg);
 
         fpt = fopen("csv_data/uart_log.csv", "a+");
-        char buffer[512];  // Make sure this is large enough
+        char buffer[STATE_MESSAGE_CSV_ROW_BUFFER_SIZE];
         serialize_state_message_csv(&state_msg, buffer, sizeof(buffer));
         fprintf(fpt,"%s\n", buffer);
         fclose(fpt);

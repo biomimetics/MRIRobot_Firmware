@@ -12,6 +12,13 @@
 #include <time.h>
 #include <stdbool.h>
 
+// For EncoderDiagnostics, embedded in EncoderStateMessage below so the FPGA's
+// per-channel health rides the same port as the counts it describes and there
+// is exactly ONE definition of that layout between Encoder.lf and the host.
+// One-directional: stm_comms.h does not include this file, so the host's copy
+// of it stays standalone.
+#include "stm_comms.h"
+
 // for debugging
 // Master switch for every PRINT_* flag below: 0 forces all of them off
 // regardless of their individual values below, so performance testing (e.g.
@@ -37,11 +44,29 @@
 // of 4 separate float[7] ports) so the four arrays can never be observed out
 // of step with each other downstream, and so State_Machine only needs one
 // reaction to consume all of them.
+//
+// UNITS: raw REAL-encoder counts, straight off the FPGA with no conversion
+// applied (see counts_domain_io_plan.md). "Real encoder" means the physical
+// encoder on the joint -- motor_configs[i]->qdec_cpr counts/rev for USM,
+// sea_cpr counts/inch for SEA -- NOT the 5760 counts/rev the Tekceleo drive
+// hardcodes for its own duty-cycle math (see USM_ASSUMED_COUNTS_PER_REV
+// below). These two count spaces are different; the host owns the mapping
+// between them.
+//
+// Positions are int32_t because counts are genuinely integral. Velocities
+// stay float because the FPGA's native estimate is fractional (Q20.11
+// counts/sec, see Encoder.lf's ENCODER_VELOCITY_FRAC_BITS) -- truncating it
+// to int would discard resolution for no gain, it is 4 bytes either way.
 typedef struct {
-  float motor_position[7];
-  float motor_velocity[7];
-  float sea_position[7];
-  float sea_velocity[7];
+  int32_t motor_position[7];  // counts (real encoder)
+  float motor_velocity[7];    // counts/sec (real encoder)
+  int32_t sea_position[7];    // counts (real encoder)
+  float sea_velocity[7];      // counts/sec (real encoder)
+  // Per-channel FPGA health for the readings above, forwarded verbatim to the
+  // host in StateMessage. Same bundling rationale as the arrays: diagnostics
+  // that describe a sample must travel with that sample, not on a side channel
+  // where they could be observed a cycle out of step with it.
+  EncoderDiagnostics diagnostics;
 } EncoderStateMessage;
 // 0: fixed-length HAL_UART_Receive_DMA, now sized to COMMAND_PACKET_SIZE
 // (see UART.lf) rather than UART_BUFFER_SIZE, so it completes on exactly one
@@ -70,7 +95,49 @@ typedef struct {
 #define RPM_TO_RAD_PER_SEC (1.0 / RAD_PER_SEC_TO_RPM)
 #define RPM_TO_DEG_PER_SEC 6.0
 
-// USM constants for external encoder handling
+// =====================
+// USM command conversion (counts/sec -> duty cycle)
+// =====================
+// The Tekceleo drive has ONE hardcoded, undocumented assumption about the
+// encoder attached to it: 1440 CPR with 4x onboard interpolation, i.e. 5760
+// counts/rev. Its published spec -- 100% duty cycle = 250 RPM -- is stated in
+// terms of THAT assumed encoder, not whichever encoder is physically on the
+// joint. So:
+//
+//     250 RPM / 60          = 4.1667 rev/s
+//     4.1667 * 5760         = 24000 counts/sec at 100% duty
+//
+// Commands arrive from the host already in this "manufacturer count space"
+// (CommandMessage.velocity_counts_per_sec), so USM.lf's conversion is a single
+// divide by PWM_COUNTS_PER_SEC_MAX with NO dependence on qdec_cpr. That is the
+// whole point: the old rad/s path multiplied in CPR_RATIO (below) to reconcile
+// the real encoder against the drive's assumption, and that reconciliation --
+// including L2_CAL_FACTOR's unexplained empirical fudge -- is the suspect
+// behavior this change exists to rule out. See counts_domain_io_plan.md.
+//
+// All 7 motors share these constants precisely because the manufacturer count
+// space does not vary with the real encoder.
+#define USM_ASSUMED_CPR 1440.0
+#define USM_ASSUMED_INTERP_FACTOR 4.0
+#define USM_ASSUMED_COUNTS_PER_REV (USM_ASSUMED_CPR * USM_ASSUMED_INTERP_FACTOR) // 5760
+
+#define PWM_COUNTS_PER_SEC_MAX ((INITIAL_PWM_RPM_MAX / 60.0) * USM_ASSUMED_COUNTS_PER_REV) // 24000
+
+// Exact restatements of the old rad/s limits in the manufacturer count space,
+// so safety behavior is unchanged by the unit switch:
+//   12.566 rad/s (2 rev/s)  -> 2 * 5760      = 11520 counts/sec
+//   0.5236 rad/s (30 deg/s) -> (1/12) * 5760 = 480 counts/sec
+#define MOTOR_MAX_SPEED_COUNTS_PER_SEC 11520
+#define MOTOR_VELOCITY_MAX_CHANGE_COUNTS_PER_SEC 480
+
+// =====================
+// LEGACY: rad/s -> duty cycle conversion chain
+// =====================
+// Superseded by PWM_COUNTS_PER_SEC_MAX above and no longer on the live command
+// path. Retained only for USM_DAC.lf (imported by no Main) and the now-unused
+// Motor_Config::pwm_rad_per_sec_max / max_speed fields. This is the machinery
+// the counts/sec change is meant to bypass -- do not reintroduce it into
+// USM.lf's command path without a good reason.
 
 #define INITIAL_CPR 1440.0 //5760.0 //1440.0
 #define INITIAL_INTERP_FACTOR 4.0 // either 1, 2, or 4
@@ -104,6 +171,9 @@ typedef struct {
 
 #define MOTOR_EXP_FILTER_ALPHA 0.8
 #define MOTOR_VELOCITY_DEADBAND_LIMIT 0.00 //0.0 //0.1309 // rad/s or 7.5 deg/s ## DEPRECATED
+// LEGACY rad/s value -- State_Machine.lf's clamp now uses
+// MOTOR_VELOCITY_MAX_CHANGE_COUNTS_PER_SEC (480, the same limit expressed in
+// manufacturer counts/sec) since the command path is counts-domain now.
 #define MOTOR_VELOCITY_MAX_CHANGE 0.5236 // rad/s or 30 deg/s
 
 // observer safety limits (NOT YET IMPLIMENTED - MOVED TO ROS-SIDE)

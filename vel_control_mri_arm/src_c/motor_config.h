@@ -8,13 +8,20 @@
 typedef struct { /* __MOTOR_CONFIG_H */
     // Base Info
     int dir;                // Motor direction - maps motor direction to output sproket direction. Affected by gear trains.
-    float max_speed;          // max motor speed in rad/s
+    float max_speed;          // LEGACY (rad/s) -- USM.lf now bounds against the shared MOTOR_MAX_SPEED_COUNTS_PER_SEC instead. Still read by USM_DAC.lf.
 
     // Encoder Into
+    // qdec_cpr/sea_cpr describe the REAL encoder on the joint. Encoder.lf no
+    // longer converts its output with them (it reports raw counts; the host
+    // converts) -- they now feed only that reactor's glitch-filter threshold.
     float qdec_cpr;         // motor encoder count per rotation
     float sea_cpr;          // sea encoder counts per inch of linear travel (linear encoder, not counts/revolution)
     float sea_radius;       // lever-arm radius (inches) from the SEA's linear travel to the joint's angular deflection
     float sea_offset;       // sea reset offset
+    // LEGACY -- this field is the per-encoder rad/s->duty reconciliation the
+    // counts-domain switch exists to bypass (see counts_domain_io_plan.md).
+    // USM.lf now divides by the single shared PWM_COUNTS_PER_SEC_MAX and never
+    // reads this. Still read by USM_DAC.lf, which no Main imports.
     float pwm_rad_per_sec_max; // max rad/s value to use for calculating duty cycles (dependent on external encoder cpr and expected encoder ratio)
     float command_bias;     // rad/s -- known per-motor MAGNITUDE-domain command CORRECTION, direction-agnostic: positive means this motor runs slower than commanded and the command should go UP by this much (new_command ~= |commanded| + command_bias), NOT the raw measured offset |actual|-|commanded| (that's the opposite sign -- see MotorCommandBiasEstimator.lf). Used to warm-start MotorCommandBiasEstimator.lf's online estimate instead of starting from 0 every boot; that reactor's live estimate is expected to refine away from whatever's set here. CommandSafetyFilter.lf applies the commanded direction's sign to the (warm-started/learned) total and gates the whole correction off when commanded velocity is exactly 0 -- see those reactors. 0.0 until bench-characterized per motor.
    } Motor_Config;
