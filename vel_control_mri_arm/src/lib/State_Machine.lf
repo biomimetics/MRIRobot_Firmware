@@ -14,6 +14,7 @@ preamble {=
   //#include "stm32_startup.h"
   #include "main.h"
   #include <stdio.h>
+  #include <math.h> // lroundf, for apply_velocity_filter's counts/sec rounding
 
   #include "motor_config.h"
   #include "sm_config.h"
@@ -44,22 +45,28 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     output enable_qdec: bool
     output reset_qdec: bool
 
-    // outputs to usm
-    output[7] commanded_motor_velocities: float
+    // outputs to usm -- MANUFACTURER counts/sec (5760 counts/rev), passed
+    // through from CommandMessage untouched. Note this is a different count
+    // space from the real-encoder counts arriving on encoder_state below; this
+    // reactor never mixes the two (see counts_domain_io_plan.md).
+    output[7] commanded_motor_velocities: int32_t
     output[7] enable_motor_command: bool // triggered when we're in the right state
     output[7] force_disable_motor_pins: bool // used to disable specific motors if they've hit convergence or for safety reasons.
 
-    // internal copies of inputs
-    state motor_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    // internal copies of inputs -- raw REAL-encoder counts / counts per second
+    state motor_encoder_positions_: int32_t[7] = {0, 0, 0, 0, 0, 0, 0}
     state motor_encoder_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-    state sea_encoder_positions_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state sea_encoder_positions_: int32_t[7] = {0, 0, 0, 0, 0, 0, 0}
     state sea_encoder_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    // FPGA encoder health, forwarded verbatim to the host alongside the counts
+    // it describes. This reactor never interprets it -- it only relays.
+    state encoder_diagnostics_: EncoderDiagnostics = {}
 
-    // internal copies of staged outputs
+    // internal copies of staged outputs -- manufacturer counts/sec
     state state_msg_: StateMessage
     state cmd_msg_: CommandMessage
-    state staged_commanded_motor_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
-    state last_staged_commanded_motor_velocities_: float[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    state staged_commanded_motor_velocities_: int32_t[7] = {0, 0, 0, 0, 0, 0, 0}
+    state last_staged_commanded_motor_velocities_: int32_t[7] = {0, 0, 0, 0, 0, 0, 0}
     state force_disable_motor_pins_: bool[7] = {false, false, false, false, false, false, false}
     state enable_motor_command_: bool = false
 
@@ -80,19 +87,26 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
     =}
     
     // clamp the values to be in a small region around the last velocity to prevent high accelerations at startup
+    // Limit is MOTOR_VELOCITY_MAX_CHANGE_COUNTS_PER_SEC (480) rather than the
+    // legacy rad/s MOTOR_VELOCITY_MAX_CHANGE (0.5236) -- same 30 deg/s-equivalent
+    // bound restated in manufacturer counts/sec, so behavior is unchanged.
     method clamp_velocity_to_safe_region(index: int){=
-        if (self->staged_commanded_motor_velocities_[index] <  (self->last_staged_commanded_motor_velocities_[index] - MOTOR_VELOCITY_MAX_CHANGE)){
-          self->staged_commanded_motor_velocities_[index] = self->last_staged_commanded_motor_velocities_[index] - MOTOR_VELOCITY_MAX_CHANGE;
+        if (self->staged_commanded_motor_velocities_[index] <  (self->last_staged_commanded_motor_velocities_[index] - MOTOR_VELOCITY_MAX_CHANGE_COUNTS_PER_SEC)){
+          self->staged_commanded_motor_velocities_[index] = self->last_staged_commanded_motor_velocities_[index] - MOTOR_VELOCITY_MAX_CHANGE_COUNTS_PER_SEC;
         }
-        else if ((self->last_staged_commanded_motor_velocities_[index] + MOTOR_VELOCITY_MAX_CHANGE) < self->staged_commanded_motor_velocities_[index]){
-          self->staged_commanded_motor_velocities_[index] = self->last_staged_commanded_motor_velocities_[index] + MOTOR_VELOCITY_MAX_CHANGE;
+        else if ((self->last_staged_commanded_motor_velocities_[index] + MOTOR_VELOCITY_MAX_CHANGE_COUNTS_PER_SEC) < self->staged_commanded_motor_velocities_[index]){
+          self->staged_commanded_motor_velocities_[index] = self->last_staged_commanded_motor_velocities_[index] + MOTOR_VELOCITY_MAX_CHANGE_COUNTS_PER_SEC;
         }
     =}
 
     method apply_velocity_filter(index: int){=
       // apply a light filter to keep things smooth even with the clamping and deadbands
-      self->staged_commanded_motor_velocities_[index] = (MOTOR_EXP_FILTER_ALPHA) * self->staged_commanded_motor_velocities_[index] + (1.0 - MOTOR_EXP_FILTER_ALPHA) * self->last_staged_commanded_motor_velocities_[index];
-        
+      // Filtered in float then rounded back to counts/sec: truncating instead
+      // would bias every step toward zero and could stall the filter short of
+      // its target on small deltas.
+      float filtered = (MOTOR_EXP_FILTER_ALPHA) * ((float) self->staged_commanded_motor_velocities_[index]) + (1.0 - MOTOR_EXP_FILTER_ALPHA) * ((float) self->last_staged_commanded_motor_velocities_[index]);
+      self->staged_commanded_motor_velocities_[index] = (int32_t) lroundf(filtered);
+
       // save the clamped, smooth commands for the next loop
       self->last_staged_commanded_motor_velocities_[index] = self->staged_commanded_motor_velocities_[index];
     =}
@@ -181,7 +195,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         if (mode_recognized){
           // velocities are most important!
           for (int i = 0; i<DOF_NUMBER; i++){
-            self->staged_commanded_motor_velocities_[i] = self->cmd_msg_.velocities[i];
+            self->staged_commanded_motor_velocities_[i] = self->cmd_msg_.velocity_counts_per_sec[i];
           }
 
           // check to see if we've missed a message somewhere -- we expect this
@@ -198,9 +212,9 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       //commanded_velocity_safety_checks(); // NO SAFETY NOW
 
       // set all outputs at the end of reaction
-      if (PRINT_STATEMACHINE) printf("Motor command tick reaction: vels: \n");
+      if (PRINT_STATEMACHINE) printf("Motor command tick reaction: vels [counts/sec]: \n");
       for (int i = 0; i<DOF_NUMBER; i++){
-        if (PRINT_STATEMACHINE) printf("%d, ", ((int) (self->staged_commanded_motor_velocities_[i] * 1000)));
+        if (PRINT_STATEMACHINE) printf("%ld, ", ((long) self->staged_commanded_motor_velocities_[i]));
         lf_set(commanded_motor_velocities[i], self->staged_commanded_motor_velocities_[i]);
         lf_set(force_disable_motor_pins[i], self->force_disable_motor_pins_[i]);
       }
@@ -227,13 +241,15 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         self->current_behavior_mode_ = SET_IDLE;
         
         for (int i = 0; i<DOF_NUMBER; i++){
-          self->staged_commanded_motor_velocities_[i] = 0.0; // staging a zero velocity lets the filter bring the value to zero quickly but not harshly enough to hurt the motors. consider changing this if it's unsafe.
+          self->staged_commanded_motor_velocities_[i] = 0; // staging a zero velocity lets the filter bring the value to zero quickly but not harshly enough to hurt the motors. consider changing this if it's unsafe.
         }
       }
 
     =}
 
     // TODO: Add sanity checks to the encoder readings to ensure that there isn't a connection error or something.
+    // Pure copy: raw real-encoder counts in, raw real-encoder counts out to the
+    // host. No conversion happens anywhere in this reactor by design.
     reaction(encoder_state) {=
       for (int i = 0; i<DOF_NUMBER; i++){
         self->motor_encoder_positions_[i] = encoder_state->value.motor_position[i];
@@ -241,6 +257,9 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
         self->sea_encoder_positions_[i] = encoder_state->value.sea_position[i];
         self->sea_encoder_velocities_[i] = encoder_state->value.sea_velocity[i];
       }
+      // Whole-struct copy: the diagnostics describe the very counts copied
+      // above and must stay in step with them.
+      self->encoder_diagnostics_ = encoder_state->value.diagnostics;
     =}
 
     //#####
@@ -253,6 +272,7 @@ reactor StateMachine(motor_command_period: time = 10 ms, status_refresh_period: 
       construct_state_message(&self->state_msg_, self->current_behavior_mode_,
                               self->motor_encoder_positions_, self->motor_encoder_velocities_,
                               self->sea_encoder_positions_,
+                              &self->encoder_diagnostics_,
                               time_stamp, self->send_message_index++,
                               self->cmd_msg_.time_stamp, self->cmd_msg_.message_index);
 
