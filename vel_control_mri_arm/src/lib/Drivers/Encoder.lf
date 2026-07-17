@@ -213,22 +213,35 @@ reactor QDEC(sample_period: time = 5 ms){
     static int sea_reject_streak[7] = {0, 0, 0, 0, 0, 0, 0};
     static int usm_reject_streak[7] = {0, 0, 0, 0, 0, 0, 0};
 
-    // Threshold for "does this look like a glitch": an implied speed (from
-    // the last ACCEPTED sample to this one) above this is treated as
-    // suspicious. 2 deg/s is well below anything these motors do on purpose
-    // over one ~10ms sample period, so while the arm is otherwise at rest
-    // this should only fire on genuine glitches -- raise it if it starts
-    // firing during intentional motion.
-    #define ENCODER_ANOMALY_THRESHOLD_DEG_PER_SEC 2.0f
+    // Fastest these joints can physically turn: 250 RPM = 1500 deg/s at the
+    // motor shaft (SEA deflection can be fast as well). Real motion is
+    // therefore bounded by this value, so the glitch threshold below is set
+    // ABOVE it -- by construction no genuine reading can exceed it, which is
+    // what keeps the filter from ever rejecting (and thus distorting) the real
+    // fast motion the FPGA actually measured.
+    #define ENCODER_MAX_JOINT_DEG_PER_SEC 1500.0f
+
+    // Threshold for "does this look like a glitch": the implied speed since the
+    // last ACCEPTED sample (see filter_channel_update -- it divides by the true
+    // elapsed time since that sample, NOT a single fixed interval, so a
+    // held-over baseline can't inflate the estimate past the joint's real
+    // speed) above this is treated as suspicious. Set to above the physical max:
+    // that leaves margin for measurement jitter at top speed while staying far
+    // below the arbitrary multi-thousand-deg/s jumps a bank-swap glitch
+    // produces, so real motion is never rejected but the glitch still is.
+    #define ENCODER_ANOMALY_THRESHOLD_DEG_PER_SEC (1.2f * ENCODER_MAX_JOINT_DEG_PER_SEC)
 
     // A channel that looks suspicious this many consecutive cycles in a row
-    // is treated as having genuinely changed (e.g. someone issued an FPGA
-    // reset, or actually moved the joint at a speed above the threshold
-    // above) rather than glitching -- the observed whole-burst bank-swap
-    // bug has only ever been seen to last exactly one cycle before
-    // reverting, so 10 in a row is well past that and shouldn't false-fire
-    // on the glitch itself, while still recovering within ~100ms of a real
-    // change instead of getting stuck rejecting it forever.
+    // is treated as a genuine discontinuity -- e.g. an FPGA counter reset,
+    // which jumps position instantaneously, an implied speed no continuous
+    // real motion can reach now that the threshold above sits above the
+    // joint's physical top speed -- rather than a glitch, and is accepted.
+    // (Continuous motion, however fast, never trips the threshold in the first
+    // place, so this limit only ever bounds how long a true discontinuity is
+    // held.) The observed whole-burst bank-swap bug has only ever lasted
+    // exactly one cycle before reverting, so 10 in a row is well past that,
+    // while still recovering within ~100ms of a real discontinuity instead of
+    // getting stuck rejecting it forever.
     #define ENCODER_REJECT_STREAK_LIMIT 10
 
     // Unthrottled (unlike everything gated by group_print_throttle/
@@ -263,16 +276,27 @@ reactor QDEC(sample_period: time = 5 ms){
                                        float convert_rad_per_count, float interval_sec) {
       bool suspicious = false;
       if (interval_sec > 0.0f) {
+        // Divide by the TRUE time elapsed since the last accepted sample, not a
+        // single sample interval. When a reading is rejected the accepted
+        // baseline is held, so on the next cycle it is (reject_streak + 1)
+        // intervals old; dividing a multi-interval delta by one interval would
+        // inflate the implied speed by that same factor and could make genuine
+        // fast motion look suspicious right after a one-cycle glitch. Using the
+        // real elapsed time makes this the true average speed since the
+        // accepted sample, which for real motion never exceeds the joint's
+        // physical top speed -- so a threshold set above that can never reject
+        // it, no matter how many cycles were held.
+        float elapsed_sec   = (float)(*reject_streak + 1) * interval_sec;
         float delta_counts  = (float)(new_count - *accepted_count);
-        float implied_deg_s = (delta_counts * convert_rad_per_count / interval_sec) * RAD_PER_SEC_TO_DEG_PER_SEC;
+        float implied_deg_s = (delta_counts * convert_rad_per_count / elapsed_sec) * RAD_PER_SEC_TO_DEG_PER_SEC;
         suspicious = fabsf(implied_deg_s) > ENCODER_ANOMALY_THRESHOLD_DEG_PER_SEC;
 
         if (suspicious && PRINT_ENCODER) {
           bool will_accept = (*reject_streak + 1) > ENCODER_REJECT_STREAK_LIMIT;
-          printf("Encoder.lf: !!! POSITION ANOMALY !!! %s ch%d: prev=%ld new=%ld delta=%ld implied=%d deg/s (interval %d us) "
+          printf("Encoder.lf: !!! POSITION ANOMALY !!! %s ch%d: prev=%ld new=%ld delta=%ld implied=%d deg/s (elapsed %d us) "
                  "| rate_reject=%u illegal=%u index_status=%u velocity_q20_11=%ld | reject_streak=%d %s\r\n",
                  group_name, channel, *accepted_count, new_count, new_count - *accepted_count,
-                 (int) implied_deg_s, (int) (interval_sec * 1000000.0f),
+                 (int) implied_deg_s, (int) (elapsed_sec * 1000000.0f),
                  (unsigned) new_meta.rate_limit_rejects, (unsigned) new_meta.illegal_transition_rejects,
                  (unsigned) new_meta.index_status, (long) new_meta.velocity_q20_11,
                  *reject_streak + 1, will_accept ? "-- ACCEPTING as real change" : "-- REJECTING, holding previous value");
